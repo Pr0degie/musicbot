@@ -41,8 +41,9 @@ class BasicCommands(commands.Cog):
     async def echo(self, ctx, *, message):
         await ctx.send(message)
 
+    #join
     @commands.command()
-    async def join(self, ctx):
+    async def j(self, ctx):
         """Lässt den Bot dem Voice-Channel des Users beitreten."""
         if ctx.author.voice:
             channel = ctx.author.voice.channel
@@ -54,10 +55,18 @@ class BasicCommands(commands.Cog):
                 await ctx.send(f"🔄 Bewegt zu: {channel.name}")
         else:
             await ctx.send("⚠️ Du bist in keinem Voice-Channel.")
-
+            
+            
+    @commands.command()
+    async def leave(self,ctx):
+        if ctx.author.voice:
+            channel=ctx.author.voice.channel
+            if ctx.voice_client != None:
+                   await channel.disconnect()
+                   await ctx.send(f"Verpiss DICH")
 
 class MusicCommands(commands.Cog):
-    MAX_PLAYLIST_LENGTH = 30  # Wie viele Songs maximal übernommen werden
+    MAX_PLAYLIST_LENGTH = 119  # Wie viele Songs maximal übernommen werden
     HARD_PLAYLIST_LIMIT = 150  # Wie viele Songs maximal verarbeitet werden dürfen
 
     def __init__(self, bot):
@@ -104,7 +113,8 @@ class MusicCommands(commands.Cog):
             await self.play_next(ctx)
 
     @commands.command()
-    async def play(self, ctx, url):
+    #play
+    async def p(self, ctx, url):
         if ctx.voice_client is None:
             await ctx.send("❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!join`.")
             return
@@ -149,29 +159,34 @@ class MusicCommands(commands.Cog):
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
-
+            
+    #skip
     @commands.command()
-    async def skip(self, ctx):
+    async def s(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...")
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
+    #pause
     @commands.command()
-    async def pause(self, ctx):
+    async def p(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("⏸️ Song pausiert.")
-
+            
+    #resume
     @commands.command()
     async def resume(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             await ctx.send("▶️ Song fortgesetzt.")
 
+
+    #queue
     @commands.command()
-    async def queue(self, ctx):
+    async def q(self, ctx):
         if not self.queue:
             await ctx.send("🪹 Die Warteschlange ist leer.")
         else:
