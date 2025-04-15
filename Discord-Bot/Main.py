@@ -171,7 +171,7 @@ class MusicCommands(commands.Cog):
 
     #pause
     @commands.command()
-    async def p(self, ctx):
+    async def x(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("⏸️ Song pausiert.")
