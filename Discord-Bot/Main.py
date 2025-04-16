@@ -258,9 +258,10 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Kein letzter Song vorhanden.")
             
     @commands.command()
-    async def eq(self, ctx, *preset: str):
+    async def eq(self, ctx, preset: str=None):
         if not preset:
             await ctx.send(f"bassboost flat vocalboost superbass")
+            return
         presets = ", ".join(self.eq_presets.keys())
         if preset.lower() in self.eq_presets:
             self.equalizer = preset.lower()
