@@ -58,12 +58,12 @@ class BasicCommands(commands.Cog):
             
             
     @commands.command()
-    async def leave(self,ctx):
-        if ctx.author.voice:
-            channel=ctx.author.voice.channel
-            if ctx.voice_client != None:
-                await channel.disconnect()
+    async def leave(self,ctx):   
+            if ctx.voice_client is not None:
+                await ctx.voice_client.disconnect()
                 await ctx.send(f"Verpiss DICH")
+            else:
+                await ctx.send(f"was wilst du")    
 
 class MusicCommands(commands.Cog):
     MAX_PLAYLIST_LENGTH = 150  # Wie viele Songs maximal übernommen werden
