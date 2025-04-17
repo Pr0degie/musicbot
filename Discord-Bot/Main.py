@@ -114,7 +114,7 @@ class MusicCommands(commands.Cog):
             source = discord.FFmpegPCMAudio(
                 audio_url,
                 before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                options=f'-vn -af {self.eq_presets.get(self.equalizer, "")}'
+                options=f'-vn  {self.eq_presets.get(self.equalizer, "")}'
             )
 
 
