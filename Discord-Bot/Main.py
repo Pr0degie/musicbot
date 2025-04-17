@@ -76,7 +76,7 @@ class MusicCommands(commands.Cog):
         self.last_played = None
         self.equalizer = "bassboost"  # Standard-Profil
         self.eq_presets = {
-            "bassboost": '-af bass=g=15,dynaudnorm=f=200',
+            "bassboost": '-af bass=g=15,dynaudnorm=f=200,aresample=48000',
             "flat": '',
             "vocalboost": '-af equalizer=f=1000:width_type=o:width=2:g=5',
             "superbass": '-af bass=g=20',
@@ -114,7 +114,7 @@ class MusicCommands(commands.Cog):
             source = discord.FFmpegPCMAudio(
                 audio_url,
                 before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                options=f'-vn {self.eq_presets.get(self.equalizer, "")}'
+                options=f'-vn -af {self.eq_presets.get(self.equalizer, "")}'
             )
 
 
@@ -268,13 +268,6 @@ class MusicCommands(commands.Cog):
             await ctx.send(f"🎚️ Equalizer auf `{preset}` gesetzt.")
         else:
             await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
-
-
-
-        
-            
-
-
 
 
 bot.run(TOKEN)
