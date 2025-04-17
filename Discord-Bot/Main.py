@@ -76,7 +76,7 @@ class MusicCommands(commands.Cog):
         self.last_played = None
         self.equalizer = "bassboost"  # Standard-Profil
         self.eq_presets = {
-            "bassboost": '-af bass=g=15,dynaudnorm=f=200,aresample=48000',
+            "bassboost": '-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000',
             "flat": '',
             "vocalboost": '-af equalizer=f=1000:width_type=o:width=2:g=5',
             "superbass": '-af bass=g=20',
