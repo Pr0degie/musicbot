@@ -1,124 +1,24 @@
 import asyncio
-import logging
-import os
 import random
 from collections import deque
 
 import discord
 import yt_dlp
+from config import logger
 from discord.ext import commands
-from discord.ui import Button, View
-from dotenv import load_dotenv
-
-# Setup für Logging zur besseren Fehleranalyse
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Lade Umgebungsvariablen (z. B. Token) aus .env-Datei
-load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-# Aktiviere benötigte Intents (Nachrichteninhalte für Befehle)
-intents = discord.Intents.default()
-intents.message_content = True
+from views.music_controls import MusicControlView
 
 
-# Hauptklasse des Musikbots
-class MusicBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
-
-    async def setup_hook(self):
-        await self.add_cog(BasicCommands(self))  # Allgemeine Befehle
-        await self.add_cog(MusicCommands(self))  # Musikfunktionen
-
-    async def on_ready(self):
-        print(f"Bot ist online als {self.user}")
-
-
-bot = MusicBot()
-
-
-# Allgemeine Kommandos
-class BasicCommands(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-
-    @commands.command()
-    async def ping(self, ctx):
-        await ctx.send("Pong!")
-
-    @commands.command()
-    async def echo(self, ctx, *, message):
-        await ctx.send(message)
-
-    @commands.command()
-    async def j(self, ctx):
-        # Bot dem Voice-Channel des Nutzers beitreten lassen
-        if ctx.author.voice:
-            channel = ctx.author.voice.channel
-            if ctx.voice_client is None:
-                await channel.connect()
-                await ctx.send(f"🔊 Verbunden mit: {channel.name}")
-            else:
-                await ctx.voice_client.move_to(channel)
-                await ctx.send(f"🔄 Bewegt zu: {channel.name}")
-        else:
-            await ctx.send("⚠️ Du bist in keinem Voice-Channel.")
-
-    @commands.command()
-    async def leave(self, ctx):
-        if ctx.voice_client is not None:
-            await ctx.voice_client.disconnect()
-            await ctx.send("Verpiss DICH")
-        else:
-            await ctx.send("was wilst du")
-
-
-# Steuerbuttons für Musikfunktionen
-class MusicControlView(View):
-    def __init__(self, music_cog, ctx):
-        super().__init__(timeout=None)
-        self.music_cog = music_cog
-        self.ctx = ctx
-
-    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.primary)
-    async def pause(self, interaction: discord.Interaction, button: Button):
-        if self.ctx.voice_client and self.ctx.voice_client.is_playing():
-            self.ctx.voice_client.pause()
-            await interaction.response.send_message("⏸️ Pausiert", ephemeral=True)
-
-    @discord.ui.button(label="▶️ Fortsetzen", style=discord.ButtonStyle.success)
-    async def resume(self, interaction: discord.Interaction, button: Button):
-        if self.ctx.voice_client and self.ctx.voice_client.is_paused():
-            self.ctx.voice_client.resume()
-            await interaction.response.send_message("▶️ Fortgesetzt", ephemeral=True)
-
-    @discord.ui.button(label="⏭️ Überspringen", style=discord.ButtonStyle.secondary)
-    async def skip(self, interaction: discord.Interaction, button: Button):
-        if self.ctx.voice_client and self.ctx.voice_client.is_playing():
-            self.ctx.voice_client.stop()
-            await interaction.response.send_message("⏭️ Übersprungen", ephemeral=True)
-
-    @discord.ui.button(label="🔁 Autoplay", style=discord.ButtonStyle.danger)
-    async def autoplay(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(
-            "🔁 Autoplay wird aktiviert...", ephemeral=True
-        )
-        await self.music_cog.autoplay(self.ctx)
-
-
-# Musikfunktionen & Queue-Verwaltung
 class MusicCommands(commands.Cog):
     MAX_PLAYLIST_LENGTH = 150
     HARD_PLAYLIST_LIMIT = 150
 
     def __init__(self, bot):
         self.bot = bot
-        self.queue = deque()  # Schnellere FIFO-Queue
+        self.queue = deque()
         self.is_playing = False
         self.last_played = None
-        self.equalizer = "bassboost"  # Standard EQ
+        self.equalizer = "bassboost"
         self.eq_presets = {
             "bassboost": "-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",
             "flat": "",
@@ -135,10 +35,8 @@ class MusicCommands(commands.Cog):
         )
 
     async def autoplay(self, ctx):
-        # Zufällige Musiksuche für Autoplay
         search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
         random_query = random.choice(search_terms)
-
         try:
             info = self.ydl.extract_info(random_query, download=False)
             if "entries" in info:
@@ -150,12 +48,11 @@ class MusicCommands(commands.Cog):
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
-        except Exception as e:
+        except Exception:
             await ctx.send("❌ Fehler bei Autoplay.")
             logger.exception("[Autoplay Fehler]")
 
     async def play_next(self, ctx):
-        # Nächsten Song aus der Queue abspielen
         if not self.queue:
             self.is_playing = False
             return
@@ -168,7 +65,6 @@ class MusicCommands(commands.Cog):
             audio_url = info.get("url")
             title = info.get("title", "Unbekannter Titel")
 
-            # Audioquelle mit FFmpeg starten
             source = discord.FFmpegPCMAudio(
                 audio_url,
                 before_options="-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -181,7 +77,7 @@ class MusicCommands(commands.Cog):
                 fut = asyncio.run_coroutine_threadsafe(
                     self.play_next(ctx), self.bot.loop
                 )
-                fut.add_done_callback(lambda f: f.exception())  # Fehler sichtbar machen
+                fut.add_done_callback(lambda f: f.exception())
 
             ctx.voice_client.play(source, after=after_playing)
             await ctx.send(
@@ -189,17 +85,16 @@ class MusicCommands(commands.Cog):
             )
             self.is_playing = True
 
-        except Exception as e:
+        except Exception:
             logger.exception("[Fehler bei play_next]")
             await ctx.send(f"⚠️ Fehler beim Laden von {title}. Überspringe...")
             await self.play_next(ctx)
 
-    @commands.command()
-    async def p(self, ctx, url):
-        # Musikbefehl: spiele YouTube-Link oder Playlist
+    @commands.command(name="p")
+    async def play(self, ctx, url):
         if ctx.voice_client is None:
             await ctx.send(
-                "❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!join`."
+                "❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!j`."
             )
             return
 
@@ -213,7 +108,6 @@ class MusicCommands(commands.Cog):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-
                 if "entries" in info:
                     playlist_length = len(info["entries"])
                     if playlist_length > self.HARD_PLAYLIST_LIMIT:
@@ -240,7 +134,7 @@ class MusicCommands(commands.Cog):
                     title = info.get("title", "Unbekannt")
                     self.queue.append((url, title))
                     await ctx.send(f"➕ Zur Warteschlange hinzugefügt: {title}")
-        except Exception as e:
+        except Exception:
             await ctx.send(
                 "❌ Fehler beim Verarbeiten der URL. Bitte überprüfe den Link."
             )
@@ -250,16 +144,16 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
             await self.play_next(ctx)
 
-    @commands.command()
-    async def s(self, ctx):
+    @commands.command(name="s")
+    async def skip(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...")
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
-    @commands.command()
-    async def x(self, ctx):
+    @commands.command(name="x")
+    async def pause(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("⏸️ Song pausiert.")
@@ -270,8 +164,8 @@ class MusicCommands(commands.Cog):
             ctx.voice_client.resume()
             await ctx.send("▶️ Song fortgesetzt.")
 
-    @commands.command()
-    async def q(self, ctx):
+    @commands.command(name="q")
+    async def queue_list(self, ctx):
         if not self.queue:
             await ctx.send("🪹 Die Warteschlange ist leer.")
         else:
@@ -322,14 +216,13 @@ class MusicCommands(commands.Cog):
     @commands.command()
     async def eq(self, ctx, preset: str = None):
         if not preset:
-            await ctx.send(f"bassboost flat vocalboost superbass")
+            await ctx.send(
+                f"Verfügbare Presets: bassboost, flat, vocalboost, superbass"
+            )
             return
-        presets = ", ".join(self.eq_presets.keys())
         if preset.lower() in self.eq_presets:
             self.equalizer = preset.lower()
             await ctx.send(f"🎚️ Equalizer auf `{preset}` gesetzt.")
         else:
+            presets = ", ".join(self.eq_presets.keys())
             await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
-
-
-bot.run(TOKEN)
