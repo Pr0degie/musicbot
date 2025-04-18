@@ -40,7 +40,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ### 1. Klonen & Setup
 
 ```bash
-git clone https://github.com/dein-user/discord-musikbot.git
+git clone https://github.com/PabloTestobar/Musicbot.git
 cd discord-musikbot
 python3 -m venv venv
 source venv/bin/activate
