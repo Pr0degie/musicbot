@@ -1,10 +1,12 @@
-import discord 
-from discord.ext import commands
-from dotenv import load_dotenv
-import os
 import asyncio
-import yt_dlp
+import os
 import random
+
+import discord
+import yt_dlp
+from discord.ext import commands
+from discord.ui import Button, View
+from dotenv import load_dotenv
 
 # Hinweis: PyNaCl wird automatisch von discord.py verwendet – kein Import nötig.
 # FFmpeg muss installiert und im Systempfad sein (C:\ffmpeg\bin)
@@ -14,6 +16,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
+
 
 class MusicBot(commands.Bot):
     def __init__(self):
@@ -25,6 +28,7 @@ class MusicBot(commands.Bot):
 
     async def on_ready(self):
         print(f"Bot ist online als {self.user}")
+
 
 bot = MusicBot()
 
@@ -41,7 +45,7 @@ class BasicCommands(commands.Cog):
     async def echo(self, ctx, *, message):
         await ctx.send(message)
 
-    #join
+    # join
     @commands.command()
     async def j(self, ctx):
         """Lässt den Bot dem Voice-Channel des Users beitreten."""
@@ -55,15 +59,47 @@ class BasicCommands(commands.Cog):
                 await ctx.send(f"🔄 Bewegt zu: {channel.name}")
         else:
             await ctx.send("⚠️ Du bist in keinem Voice-Channel.")
-            
-            
+
     @commands.command()
-    async def leave(self,ctx):   
-            if ctx.voice_client is not None:
-                await ctx.voice_client.disconnect()
-                await ctx.send(f"Verpiss DICH")
-            else:
-                await ctx.send(f"was wilst du")    
+    async def leave(self, ctx):
+        if ctx.voice_client is not None:
+            await ctx.voice_client.disconnect()
+            await ctx.send(f"Verpiss DICH")
+        else:
+            await ctx.send(f"was wilst du")
+
+
+class MusicControlView(View):
+    def __init__(self, music_cog, ctx):
+        super().__init__(timeout=None)
+        self.music_cog = music_cog
+        self.ctx = ctx
+
+    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.primary)
+    async def pause(self, interaction: discord.Interaction, button: Button):
+        if self.ctx.voice_client and self.ctx.voice_client.is_playing():
+            self.ctx.voice_client.pause()
+            await interaction.response.send_message("⏸️ Pausiert", ephemeral=True)
+
+    @discord.ui.button(label="▶️ Fortsetzen", style=discord.ButtonStyle.success)
+    async def resume(self, interaction: discord.Interaction, button: Button):
+        if self.ctx.voice_client and self.ctx.voice_client.is_paused():
+            self.ctx.voice_client.resume()
+            await interaction.response.send_message("▶️ Fortgesetzt", ephemeral=True)
+
+    @discord.ui.button(label="⏭️ Überspringen", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: Button):
+        if self.ctx.voice_client and self.ctx.voice_client.is_playing():
+            self.ctx.voice_client.stop()
+            await interaction.response.send_message("⏭️ Übersprungen", ephemeral=True)
+
+    @discord.ui.button(label="🔁 Autoplay", style=discord.ButtonStyle.danger)
+    async def autoplay(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(
+            "🔁 Autoplay wird aktiviert...", ephemeral=True
+        )
+        await self.music_cog.autoplay(self.ctx)
+
 
 class MusicCommands(commands.Cog):
     MAX_PLAYLIST_LENGTH = 150  # Wie viele Songs maximal übernommen werden
@@ -76,11 +112,16 @@ class MusicCommands(commands.Cog):
         self.last_played = None
         self.equalizer = "bassboost"  # Standard-Profil
         self.eq_presets = {
-            "bassboost": '-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000',
-            "flat": '',
-            "vocalboost": '-af equalizer=f=1000:width_type=o:width=2:g=5',
-            "superbass": '-af bass=g=20',
-}
+            "bassboost": "-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",
+            "flat": "",
+            "vocalboost": "-af equalizer=f=1000:width_type=o:width=2:g=5",
+            "superbass": "-af bass=g=20",
+        }
+
+    async def autoplay(self, ctx):
+        search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
+        random_query = random.choice(search_terms)
+        await ctx.invoke(self.bot.get_command("p"), url=f"ytsearch:{random_query}")
 
     async def play_next(self, ctx):
         if not self.queue:
@@ -91,32 +132,24 @@ class MusicCommands(commands.Cog):
         self.last_played = (url, title)
 
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-            'default_search': 'auto',
-            'noplaylist': True,
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "default_search": "auto",
+            "noplaylist": True,
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                audio_url = info.get('url')
-                title = info.get('title', 'Unbekannter Titel')
+                audio_url = info.get("url")
+                title = info.get("title", "Unbekannter Titel")
 
-                if not audio_url:
-                    await ctx.send(f"❌ Konnte den Audiostream nicht finden für: {title}")
-                    return
-
-                #print(f"[DEBUG] Abzuspielender Stream: {audio_url}")
-
-            # Starte FFmpeg-Stream
             source = discord.FFmpegPCMAudio(
                 audio_url,
-                before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                options=f'-vn  {self.eq_presets.get(self.equalizer, "")}'
+                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                options=f'-vn  {self.eq_presets.get(self.equalizer, "")}',
             )
-
 
             def after_playing(error):
                 if error:
@@ -124,7 +157,9 @@ class MusicCommands(commands.Cog):
                 asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop)
 
             ctx.voice_client.play(source, after=after_playing)
-            await ctx.send(f"🎶 Jetzt läuft: **{title}**")
+            await ctx.send(
+                f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
+            )
             self.is_playing = True
 
         except Exception as e:
@@ -132,39 +167,41 @@ class MusicCommands(commands.Cog):
             await ctx.send(f"⚠️ Fehler beim Laden von {title}. Überspringe...")
             await self.play_next(ctx)
 
-            
-            
-            
-    #play
     @commands.command()
     async def p(self, ctx, url):
         if ctx.voice_client is None:
-            await ctx.send("❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!join`.")
+            await ctx.send(
+                "❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!join`."
+            )
             return
 
         ydl_opts = {
-            'extract_flat': 'in_playlist',
-            'skip_download': True,
-            'quiet': True,
-            'noplaylist': False
+            "extract_flat": "in_playlist",
+            "skip_download": True,
+            "quiet": True,
+            "noplaylist": False,
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
-                if 'entries' in info:
-                    playlist_length = len(info['entries'])
+                if "entries" in info:
+                    playlist_length = len(info["entries"])
                     if playlist_length > self.HARD_PLAYLIST_LIMIT:
-                        await ctx.send(f"🚫 Playlist ist zu groß! Maximal {self.HARD_PLAYLIST_LIMIT} Einträge erlaubt.")
+                        await ctx.send(
+                            f"🚫 Playlist ist zu groß! Maximal {self.HARD_PLAYLIST_LIMIT} Einträge erlaubt."
+                        )
                         return
                     if playlist_length > self.MAX_PLAYLIST_LENGTH:
-                        await ctx.send(f"⚠️ Playlist enthält {playlist_length} Songs. Es werden nur die ersten {self.MAX_PLAYLIST_LENGTH} hinzugefügt.")
+                        await ctx.send(
+                            f"⚠️ Playlist enthält {playlist_length} Songs. Es werden nur die ersten {self.MAX_PLAYLIST_LENGTH} hinzugefügt."
+                        )
                     added = 0
-                    for entry in info['entries'][:self.MAX_PLAYLIST_LENGTH]:
+                    for entry in info["entries"][: self.MAX_PLAYLIST_LENGTH]:
                         try:
-                            entry_url = entry.get('url') or entry.get('webpage_url')
-                            entry_title = entry.get('title', 'Unbekannt')
+                            entry_url = entry.get("url") or entry.get("webpage_url")
+                            entry_title = entry.get("title", "Unbekannt")
                             if entry_url:
                                 self.queue.append((entry_url, entry_title))
                                 added += 1
@@ -172,18 +209,20 @@ class MusicCommands(commands.Cog):
                             continue
                     await ctx.send(f"🎵 {added} Titel zur Warteschlange hinzugefügt.")
                 else:
-                    title = info.get('title', 'Unbekannt')
+                    title = info.get("title", "Unbekannt")
                     self.queue.append((url, title))
                     await ctx.send(f"➕ Zur Warteschlange hinzugefügt: {title}")
         except Exception as e:
-            await ctx.send("❌ Fehler beim Verarbeiten der URL. Bitte überprüfe den Link.")
+            await ctx.send(
+                "❌ Fehler beim Verarbeiten der URL. Bitte überprüfe den Link."
+            )
             return
 
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
-            
-    #skip
+
+    # skip
     @commands.command()
     async def s(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
@@ -192,22 +231,21 @@ class MusicCommands(commands.Cog):
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
-    #pause
+    # pause
     @commands.command()
     async def x(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("⏸️ Song pausiert.")
-            
-    #resume
+
+    # resume
     @commands.command()
     async def resume(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             await ctx.send("▶️ Song fortgesetzt.")
 
-
-    #queue
+    # queue
     @commands.command()
     async def q(self, ctx):
         if not self.queue:
@@ -215,11 +253,11 @@ class MusicCommands(commands.Cog):
         else:
             message = "📜 Aktuelle Warteschlange:\n"
             for i, (url, title) in enumerate(self.queue, 1):
-                if len(message)>=1980:
+                if len(message) >= 1980:
                     break
-                    
+
                 message += f"{i}. {title}\n"
-                
+
             await ctx.send(message)
 
     @commands.command()
@@ -228,7 +266,9 @@ class MusicCommands(commands.Cog):
         self.is_playing = False
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-        await ctx.send("🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt.")
+        await ctx.send(
+            "🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt."
+        )
 
     @commands.command()
     async def remove(self, ctx, index: int):
@@ -256,9 +296,9 @@ class MusicCommands(commands.Cog):
                 await self.play_next(ctx)
         else:
             await ctx.send("❌ Kein letzter Song vorhanden.")
-            
+
     @commands.command()
-    async def eq(self, ctx, preset: str=None):
+    async def eq(self, ctx, preset: str = None):
         if not preset:
             await ctx.send(f"bassboost flat vocalboost superbass")
             return
