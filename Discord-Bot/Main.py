@@ -153,7 +153,6 @@ class MusicCommands(commands.Cog):
             print(f"[Autoplay Fehler] {e}")
 
     async def play_next(self, ctx):
-        # Nächsten Song aus der Queue abspielen
         if not self.queue:
             self.is_playing = False
             return
