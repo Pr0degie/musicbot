@@ -8,9 +8,6 @@ from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
 
-# Hinweis: PyNaCl wird automatisch von discord.py verwendet – kein Import nötig.
-# FFmpeg muss installiert und im Systempfad sein (C:\ffmpeg\bin)
-
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -45,10 +42,8 @@ class BasicCommands(commands.Cog):
     async def echo(self, ctx, *, message):
         await ctx.send(message)
 
-    # join
     @commands.command()
     async def j(self, ctx):
-        """Lässt den Bot dem Voice-Channel des Users beitreten."""
         if ctx.author.voice:
             channel = ctx.author.voice.channel
             if ctx.voice_client is None:
@@ -102,15 +97,15 @@ class MusicControlView(View):
 
 
 class MusicCommands(commands.Cog):
-    MAX_PLAYLIST_LENGTH = 150  # Wie viele Songs maximal übernommen werden
-    HARD_PLAYLIST_LIMIT = 150  # Wie viele Songs maximal verarbeitet werden dürfen
+    MAX_PLAYLIST_LENGTH = 150
+    HARD_PLAYLIST_LIMIT = 150
 
     def __init__(self, bot):
         self.bot = bot
         self.queue = []
         self.is_playing = False
         self.last_played = None
-        self.equalizer = "bassboost"  # Standard-Profil
+        self.equalizer = "bassboost"
         self.eq_presets = {
             "bassboost": "-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",
             "flat": "",
@@ -121,7 +116,32 @@ class MusicCommands(commands.Cog):
     async def autoplay(self, ctx):
         search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
         random_query = random.choice(search_terms)
-        await ctx.invoke(self.bot.get_command("p"), url=f"ytsearch:{random_query}")
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "default_search": "ytsearch",
+            "noplaylist": True,
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(random_query, download=False)
+                if "entries" in info:
+                    info = info["entries"][0]
+                url = info.get("webpage_url")
+                title = info.get("title", "Unbekannt")
+
+            self.queue.insert(0, (url, title))
+            await ctx.send(f"🔁 Autoplay hinzugefügt: **{title}**")
+
+            if not self.is_playing:
+                self.is_playing = True
+                await self.play_next(ctx)
+
+        except Exception as e:
+            await ctx.send("❌ Fehler bei Autoplay.")
+            print(f"[Autoplay Fehler] {e}")
 
     async def play_next(self, ctx):
         if not self.queue:
@@ -147,7 +167,7 @@ class MusicCommands(commands.Cog):
 
             source = discord.FFmpegPCMAudio(
                 audio_url,
-                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                before_options="-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
                 options=f'-vn  {self.eq_presets.get(self.equalizer, "")}',
             )
 
@@ -222,7 +242,6 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
             await self.play_next(ctx)
 
-    # skip
     @commands.command()
     async def s(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
@@ -231,21 +250,18 @@ class MusicCommands(commands.Cog):
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
-    # pause
     @commands.command()
     async def x(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send("⏸️ Song pausiert.")
 
-    # resume
     @commands.command()
     async def resume(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             await ctx.send("▶️ Song fortgesetzt.")
 
-    # queue
     @commands.command()
     async def q(self, ctx):
         if not self.queue:
@@ -255,9 +271,7 @@ class MusicCommands(commands.Cog):
             for i, (url, title) in enumerate(self.queue, 1):
                 if len(message) >= 1980:
                     break
-
                 message += f"{i}. {title}\n"
-
             await ctx.send(message)
 
     @commands.command()
