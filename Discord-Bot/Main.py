@@ -8,20 +8,23 @@ from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
 
+# Lade Umgebungsvariablen (z. B. Token) aus .env-Datei
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
+# Aktiviere benötigte Intents (Nachrichteninhalte für Befehle)
 intents = discord.Intents.default()
 intents.message_content = True
 
 
+# Hauptklasse des Musikbots
 class MusicBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        await self.add_cog(BasicCommands(self))
-        await self.add_cog(MusicCommands(self))
+        await self.add_cog(BasicCommands(self))  # Allgemeine Befehle
+        await self.add_cog(MusicCommands(self))  # Musikfunktionen
 
     async def on_ready(self):
         print(f"Bot ist online als {self.user}")
@@ -30,6 +33,7 @@ class MusicBot(commands.Bot):
 bot = MusicBot()
 
 
+# Allgemeine Kommandos
 class BasicCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -44,6 +48,7 @@ class BasicCommands(commands.Cog):
 
     @commands.command()
     async def j(self, ctx):
+        # Bot dem Voice-Channel des Nutzers beitreten lassen
         if ctx.author.voice:
             channel = ctx.author.voice.channel
             if ctx.voice_client is None:
@@ -59,11 +64,12 @@ class BasicCommands(commands.Cog):
     async def leave(self, ctx):
         if ctx.voice_client is not None:
             await ctx.voice_client.disconnect()
-            await ctx.send(f"Verpiss DICH")
+            await ctx.send("Verpiss DICH")
         else:
-            await ctx.send(f"was wilst du")
+            await ctx.send("was wilst du")
 
 
+# Steuerbuttons für Musikfunktionen
 class MusicControlView(View):
     def __init__(self, music_cog, ctx):
         super().__init__(timeout=None)
@@ -96,16 +102,17 @@ class MusicControlView(View):
         await self.music_cog.autoplay(self.ctx)
 
 
+# Musikfunktionen & Queue-Verwaltung
 class MusicCommands(commands.Cog):
-    MAX_PLAYLIST_LENGTH = 150
-    HARD_PLAYLIST_LIMIT = 150
+    MAX_PLAYLIST_LENGTH = 150  # Weiche Grenze
+    HARD_PLAYLIST_LIMIT = 150  # Harte Grenze
 
     def __init__(self, bot):
         self.bot = bot
         self.queue = []
         self.is_playing = False
         self.last_played = None
-        self.equalizer = "bassboost"
+        self.equalizer = "bassboost"  # Standard EQ
         self.eq_presets = {
             "bassboost": "-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",
             "flat": "",
@@ -114,6 +121,7 @@ class MusicCommands(commands.Cog):
         }
 
     async def autoplay(self, ctx):
+        # Zufällige Musiksuche für Autoplay
         search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
         random_query = random.choice(search_terms)
 
@@ -132,6 +140,7 @@ class MusicCommands(commands.Cog):
                 url = info.get("webpage_url")
                 title = info.get("title", "Unbekannt")
 
+            # Autoplay-Song direkt als nächstes einfügen
             self.queue.insert(0, (url, title))
             await ctx.send(f"🔁 Autoplay hinzugefügt: **{title}**")
 
@@ -144,6 +153,7 @@ class MusicCommands(commands.Cog):
             print(f"[Autoplay Fehler] {e}")
 
     async def play_next(self, ctx):
+        # Nächsten Song aus der Queue abspielen
         if not self.queue:
             self.is_playing = False
             return
@@ -165,6 +175,7 @@ class MusicCommands(commands.Cog):
                 audio_url = info.get("url")
                 title = info.get("title", "Unbekannter Titel")
 
+            # Audioquelle mit FFmpeg starten
             source = discord.FFmpegPCMAudio(
                 audio_url,
                 before_options="-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -189,6 +200,7 @@ class MusicCommands(commands.Cog):
 
     @commands.command()
     async def p(self, ctx, url):
+        # Musikbefehl: spiele YouTube-Link oder Playlist
         if ctx.voice_client is None:
             await ctx.send(
                 "❌ Der Bot ist in keinem Voice-Channel. Bitte verwende zuerst `!join`."
