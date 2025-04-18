@@ -1,12 +1,18 @@
 import asyncio
+import logging
 import os
 import random
+from collections import deque
 
 import discord
 import yt_dlp
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
+
+# Setup für Logging zur besseren Fehleranalyse
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Lade Umgebungsvariablen (z. B. Token) aus .env-Datei
 load_dotenv()
@@ -104,12 +110,12 @@ class MusicControlView(View):
 
 # Musikfunktionen & Queue-Verwaltung
 class MusicCommands(commands.Cog):
-    MAX_PLAYLIST_LENGTH = 150  # Weiche Grenze
-    HARD_PLAYLIST_LIMIT = 150  # Harte Grenze
+    MAX_PLAYLIST_LENGTH = 150
+    HARD_PLAYLIST_LIMIT = 150
 
     def __init__(self, bot):
         self.bot = bot
-        self.queue = []
+        self.queue = deque()  # Schnellere FIFO-Queue
         self.is_playing = False
         self.last_played = None
         self.equalizer = "bassboost"  # Standard EQ
@@ -119,72 +125,63 @@ class MusicCommands(commands.Cog):
             "vocalboost": "-af equalizer=f=1000:width_type=o:width=2:g=5",
             "superbass": "-af bass=g=20",
         }
+        self.ydl = yt_dlp.YoutubeDL(
+            {
+                "quiet": True,
+                "format": "bestaudio/best",
+                "default_search": "ytsearch",
+                "noplaylist": True,
+            }
+        )
 
     async def autoplay(self, ctx):
         # Zufällige Musiksuche für Autoplay
         search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
         random_query = random.choice(search_terms)
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "default_search": "ytsearch",
-            "noplaylist": True,
-        }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(random_query, download=False)
-                if "entries" in info:
-                    info = info["entries"][0]
-                url = info.get("webpage_url")
-                title = info.get("title", "Unbekannt")
-
-            # Autoplay-Song direkt als nächstes einfügen
-            self.queue.insert(0, (url, title))
+            info = self.ydl.extract_info(random_query, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            url = info.get("webpage_url")
+            title = info.get("title", "Unbekannt")
+            self.queue.appendleft((url, title))
             await ctx.send(f"🔁 Autoplay hinzugefügt: **{title}**")
-
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
-
         except Exception as e:
             await ctx.send("❌ Fehler bei Autoplay.")
-            print(f"[Autoplay Fehler] {e}")
+            logger.exception("[Autoplay Fehler]")
 
     async def play_next(self, ctx):
+        # Nächsten Song aus der Queue abspielen
         if not self.queue:
             self.is_playing = False
             return
 
-        url, title = self.queue.pop(0)
+        url, title = self.queue.popleft()
         self.last_played = (url, title)
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "no_warnings": True,
-            "default_search": "auto",
-            "noplaylist": True,
-        }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                audio_url = info.get("url")
-                title = info.get("title", "Unbekannter Titel")
+            info = self.ydl.extract_info(url, download=False)
+            audio_url = info.get("url")
+            title = info.get("title", "Unbekannter Titel")
 
             # Audioquelle mit FFmpeg starten
             source = discord.FFmpegPCMAudio(
                 audio_url,
                 before_options="-nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options=f'-vn  {self.eq_presets.get(self.equalizer, "")}',
+                options=f'-vn {self.eq_presets.get(self.equalizer, "")}',
             )
 
             def after_playing(error):
                 if error:
-                    print(f"[Fehler beim Abspielen] {error}")
-                asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop)
+                    logger.warning(f"[Fehler beim Abspielen] {error}")
+                fut = asyncio.run_coroutine_threadsafe(
+                    self.play_next(ctx), self.bot.loop
+                )
+                fut.add_done_callback(lambda f: f.exception())  # Fehler sichtbar machen
 
             ctx.voice_client.play(source, after=after_playing)
             await ctx.send(
@@ -193,7 +190,7 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
 
         except Exception as e:
-            print(f"[Fehler bei play_next] {e}")
+            logger.exception("[Fehler bei play_next]")
             await ctx.send(f"⚠️ Fehler beim Laden von {title}. Überspringe...")
             await self.play_next(ctx)
 
