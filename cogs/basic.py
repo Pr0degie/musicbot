@@ -24,7 +24,7 @@ class BasicCommands(commands.Cog):
                 try:
                     await channel.connect()
                     await ctx.send(f"🔊 Verbunden mit: {channel.name}")
-                except discord.ClientConnectorTurnover:
+                    # except #discord.ClientConnectorTurnover:
                     # Verbindungsübertragung, Client wurde neu verbunden
                     await ctx.send(f"🔊 Verbindungsübertragung erkannt.")
                 except discord.errors.ConnectionClosed as e:
@@ -43,7 +43,7 @@ class BasicCommands(commands.Cog):
                 try:
                     await ctx.voice_client.move_to(channel)
                     await ctx.send(f"🔄 Bewegt zu: {channel.name}")
-                except discord.ClientConnectorTurnover:
+                    # except #discord.ClientConnectorTurnover:
                     await ctx.send(f"🔄 Verbindungsübertragung erkannt.")
                 except Exception as e:
                     await ctx.send(
