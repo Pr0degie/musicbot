@@ -36,6 +36,7 @@ class MusicCommands(commands.Cog):
 
         self.is_playing = False
         self.last_played = None  # Wird von !replay genutzt
+        self.prefetch_task = None  # Läuft im Hintergrund während ein Song spielt
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -130,6 +131,30 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Fehler bei Autoplay.")
             logger.exception("[Autoplay Fehler]")
 
+    async def _prefetch_next(self):
+        """Lädt den nächsten Song in der Queue still im Hintergrund herunter.
+
+        Wird direkt nach dem Start eines Tracks gestartet, damit der nächste
+        Song idealerweise schon bereit liegt wenn er dran ist.
+        """
+        if not self.queue:
+            return
+        url, title = self.queue[0]  # Peek – nicht aus der Queue entfernen
+        try:
+            info = await asyncio.to_thread(self.ydl.extract_info, url, download=False)
+            if "entries" in info:
+                info = info["entries"][0]
+            filename = Path(self.ydl.prepare_filename(info))
+            if not filename.exists():
+                logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
+                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
+                logger.info(f"[Prefetch] Fertig: {filename.name}")
+            else:
+                logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
+        except Exception:
+            # Prefetch-Fehler sind nicht fatal – play_next lädt im Zweifelsfall selbst.
+            logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}")
+
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if not self.queue:
@@ -158,10 +183,21 @@ class MusicCommands(commands.Cog):
             filename = Path(self.ydl.prepare_filename(info))
 
             if not filename.exists():
-                # Datei noch nicht im Cache → herunterladen
-                logger.info(f"[Download] Lade {title} herunter...")
-                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
-                logger.info(f"[Download] Gespeichert als: {filename.name}")
+                # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
+                # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
+                if self.prefetch_task and not self.prefetch_task.done():
+                    logger.info(f"[Download] Warte auf laufenden Prefetch für: {title}")
+                    try:
+                        await self.prefetch_task
+                    except Exception:
+                        pass  # Prefetch gescheitert → selbst laden
+
+                if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
+                    logger.info(f"[Download] Lade {title} herunter...")
+                    await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
+                    logger.info(f"[Download] Gespeichert als: {filename.name}")
+                else:
+                    logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
             else:
                 # Cache-Hit! Kein erneuter Download nötig. Spart Zeit und Bandbreite.
                 logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
@@ -217,6 +253,10 @@ class MusicCommands(commands.Cog):
                 f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
             )
             self.is_playing = True
+
+            # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
+            if self.queue:
+                self.prefetch_task = asyncio.create_task(self._prefetch_next())
 
         except Exception:
             logger.exception("[Fehler bei play_next]")
