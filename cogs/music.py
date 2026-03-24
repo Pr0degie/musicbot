@@ -398,3 +398,8 @@ class MusicCommands(commands.Cog):
         else:
             presets = ", ".join(self.eq_presets.keys())
             await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
+
+    @commands.command(name="baba")
+    async def baba(self, ctx):
+        """Spielt Babas Playlist ab. Kein Argument nötig – einfach !baba und los."""
+        await ctx.invoke(self.p, eingabe="https://www.youtube.com/playlist?list=PLhqD5zya16QavuozTOLCZ3Jn6gQu66Tvj")

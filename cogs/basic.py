@@ -8,6 +8,37 @@ class BasicCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    @commands.command(name="help", aliases=["h"])
+    async def help_command(self, ctx):
+        """Listet alle verfügbaren Befehle auf."""
+        await ctx.send(
+            "```\n"
+            "🎵 Musik\n"
+            "  !p <url/suche>   – Lied, Playlist oder Suchbegriff abspielen\n"
+            "  !baba            – Babas Playlist abspielen\n"
+            "  !s               – Aktuellen Song überspringen\n"
+            "  !x               – Pause\n"
+            "  !resume          – Wiedergabe fortsetzen\n"
+            "  !replay          – Letzten Song nochmal abspielen\n"
+            "\n"
+            "📜 Queue\n"
+            "  !q               – Warteschlange anzeigen\n"
+            "  !shuffle         – Warteschlange mischen\n"
+            "  !clear           – Queue leeren & Wiedergabe stoppen\n"
+            "  !remove <n>      – Song an Position n entfernen\n"
+            "\n"
+            "🎚️ Audio\n"
+            "  !eq <preset>     – EQ-Preset setzen (ohne Argument: Liste)\n"
+            "  !format <typ>    – Audioformat wechseln: mp3 oder webm\n"
+            "\n"
+            "🔊 Voice\n"
+            "  !j               – Voice-Channel beitreten\n"
+            "  !l               – Voice-Channel verlassen\n"
+            "\n"
+            "  !help / !        – Diese Übersicht\n"
+            "```"
+        )
+
     @commands.command()
     async def ping(self, ctx):
         """Klassischer Verbindungstest. Antwortet mit 'Pong!'."""
