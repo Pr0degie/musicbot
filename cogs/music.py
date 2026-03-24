@@ -11,7 +11,7 @@ import discord
 import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
-from views.music_controls import MusicControlView, SearchResultView
+from views.music_controls import MusicControlView, SearchAutoplayView
 
 # Downloads landen hier. Der Ordner wird beim Start automatisch angelegt,
 # falls er noch nicht existiert – kein manuelles Erstellen nötig.
@@ -325,7 +325,8 @@ class MusicCommands(commands.Cog):
             logger.warning("[p] Kein VoiceClient vorhanden.")
             return
 
-        # Wenn kein http am Anfang → Suchbegriff → Top-3 anzeigen statt blind den ersten nehmen
+        # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
+        # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
         if not eingabe.startswith("http"):
             search_opts = {
                 "quiet": True,
@@ -348,13 +349,27 @@ class MusicCommands(commands.Cog):
                 await ctx.send("❌ Keine Ergebnisse gefunden.")
                 return
 
-            lines = ["🔎 **Suchergebnisse** – welcher Song soll's sein?\n"]
-            for i, e in enumerate(entries, 1):
-                lines.append(f"`{i}.` {e.get('title', 'Unbekannt')}")
+            # Ersten Treffer direkt in die Queue legen
+            first = entries[0]
+            url = first.get("webpage_url") or first.get("url")
+            title = first.get("title", "Unbekannter Titel")
+            self.queue.append((url, title))
 
-            view = SearchResultView(entries, self, ctx)
-            msg = await ctx.send("\n".join(lines), view=view)
-            view.message = msg  # Für on_timeout – damit die Nachricht aufgeräumt werden kann
+            # Alternativen (Treffer 2 und 3) als Buttons anzeigen
+            alternatives = entries[1:]
+            if alternatives:
+                view = SearchAutoplayView(first, alternatives, self, ctx)
+                msg = await ctx.send(
+                    f"🎶 Spiele: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*",
+                    view=view,
+                )
+                view.message = msg
+            else:
+                await ctx.send(f"🎶 Hinzugefügt: **{title}**")
+
+            if not self.is_playing:
+                self.is_playing = True
+                await self.play_next(ctx)
             return
 
         # --- Ab hier: direkte URL oder Playlist ---

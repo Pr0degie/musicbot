@@ -54,60 +54,69 @@ class MusicControlView(View):
             asyncio.create_task(self.music_cog.autoplay(self.ctx))
 
 
-class SearchResultView(View):
-    """Zeigt bis zu 3 Suchergebnisse als Buttons an und lässt den User auswählen.
+class SearchAutoplayView(View):
+    """Zeigt Alternativen zum automatisch gestarteten ersten Suchergebnis.
 
-    Läuft nach 30 Sekunden ab falls niemand antwortet.
+    Der erste Treffer läuft sofort – diese Buttons erscheinen daneben falls
+    er nicht das Richtige war. Nach 30 Sekunden verschwinden sie einfach.
     """
 
-    def __init__(self, entries, music_cog, ctx):
+    def __init__(self, added_entry, alternatives, music_cog, ctx):
         super().__init__(timeout=30)
+        self.added_entry = added_entry
         self.music_cog = music_cog
         self.ctx = ctx
-        self.message = None  # Wird nach dem Senden gesetzt, damit on_timeout die Nachricht editieren kann
+        self.message = None
 
-        for i, entry in enumerate(entries, 1):
-            button = Button(label=str(i), style=discord.ButtonStyle.primary)
+        for i, entry in enumerate(alternatives, 2):
+            button = Button(label=str(i), style=discord.ButtonStyle.secondary)
             button.callback = self._make_callback(entry)
             self.add_item(button)
-
-        cancel = Button(label="✖ Abbrechen", style=discord.ButtonStyle.secondary)
-        cancel.callback = self._cancel
-        self.add_item(cancel)
 
     def _make_callback(self, entry):
         async def callback(interaction: discord.Interaction):
             url = entry.get("webpage_url") or entry.get("url")
             title = entry.get("title", "Unbekannter Titel")
+            added_title = self.added_entry.get("title", "")
 
-            # Duplikat-Prüfung direkt beim Auswählen aus den Suchergebnissen
-            dup_pos = next((i + 1 for i, (_, t) in enumerate(self.music_cog.queue) if t == title), None)
-            if dup_pos:
+            if self.music_cog.current_track and self.music_cog.current_track[1] == added_title:
+                # Song läuft gerade → Alternative vorne einreihen und aktuellen überspringen
+                self.music_cog.queue.appendleft((url, title))
+                if self.ctx.voice_client and (
+                    self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
+                ):
+                    self.ctx.voice_client.stop()
                 await interaction.response.edit_message(
-                    content=f"⚠️ **{title}** ist bereits in der Queue (Position {dup_pos}). Trotzdem hinzugefügt.",
-                    view=None,
+                    content=f"🔀 Wechsle zu: **{title}**", view=None
                 )
             else:
+                # Song wartet noch in der Queue → direkt ersetzen
+                queue_list = list(self.music_cog.queue)
+                replaced = False
+                for i, (_, q_title) in enumerate(queue_list):
+                    if q_title == added_title:
+                        queue_list[i] = (url, title)
+                        replaced = True
+                        break
+                from collections import deque
+                self.music_cog.queue = deque(queue_list)
+                if not replaced:
+                    # Zur Sicherheit vorne einreihen falls der Song nicht mehr in der Queue ist
+                    self.music_cog.queue.appendleft((url, title))
                 await interaction.response.edit_message(
-                    content=f"🎶 Hinzugefügt: **{title}**", view=None
+                    content=f"🔀 Ersetzt durch: **{title}**", view=None
                 )
-
-            self.music_cog.queue.append((url, title))
-            if not self.music_cog.is_playing:
-                self.music_cog.is_playing = True
-                await self.music_cog.play_next(self.ctx)
+                if not self.music_cog.is_playing:
+                    self.music_cog.is_playing = True
+                    await self.music_cog.play_next(self.ctx)
             self.stop()
 
         return callback
 
-    async def _cancel(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(content="❌ Suche abgebrochen.", view=None)
-        self.stop()
-
     async def on_timeout(self):
-        # Nachricht aufräumen wenn der User zu langsam war
+        # Buttons einfach entfernen – der Song läuft weiter, kein Text-Update nötig
         if self.message:
             try:
-                await self.message.edit(content="⏱️ Suche abgelaufen.", view=None)
+                await self.message.edit(view=None)
             except Exception:
                 pass
