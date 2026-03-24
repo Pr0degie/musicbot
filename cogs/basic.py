@@ -15,7 +15,7 @@ class BasicCommands(commands.Cog):
             "```\n"
             "🎵 Musik\n"
             "  !p <url/suche>   – Lied, Playlist oder Suchbegriff abspielen\n"
-            "  !baba            – Babas Playlist abspielen\n"
+            "  !baba            – Baba Playlist abspielen\n"
             "  !s               – Aktuellen Song überspringen\n"
             "  !x               – Pause\n"
             "  !resume          – Wiedergabe fortsetzen\n"

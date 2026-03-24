@@ -175,3 +175,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 .gitignore
+.claude/settings.local.json
+last_queue.json
