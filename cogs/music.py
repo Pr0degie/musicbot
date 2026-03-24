@@ -58,7 +58,7 @@ class MusicCommands(commands.Cog):
             # Sub-Bass (~80Hz) boosten für Punch, Upper-Bass (~250Hz) leicht senken
             # gegen Matsch. loudnorm (EBU R128) sorgt für konsistente Lautstärke
             # ohne Pumpen – klingt auf basslastigen Liedern deutlich cleaner als bassboost.
-            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,loudnorm,aresample=48000",
+            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,dynaudnorm=f=150,aresample=48000",
         }
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
@@ -209,7 +209,6 @@ class MusicCommands(commands.Cog):
             return
 
         url, title = self.queue.popleft()
-        self.last_played = (url, title)
         logger.info(f"[Nächster Track] {title} ({url})")
 
         try:
@@ -246,9 +245,18 @@ class MusicCommands(commands.Cog):
                 logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
 
             eq_filter = self.eq_presets.get(self.equalizer, "")
-            # -vn unterdrückt den Video-Stream in FFmpeg (wir wollen nur Audio).
-            ffmpeg_options = f"-vn {eq_filter}".strip()
-            source = discord.FFmpegPCMAudio(str(filename), options=ffmpeg_options)
+
+            if eq_filter:
+                # Filter aktiv → dekodieren, EQ anwenden, mit 192kbps zu Opus enkodieren.
+                # -vn unterdrückt den Video-Stream.
+                source = discord.FFmpegOpusAudio(
+                    str(filename),
+                    bitrate=192,
+                    options=f"-vn {eq_filter}",
+                )
+            else:
+                # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
+                source = discord.FFmpegOpusAudio(str(filename), codec="copy")
 
             def after_playing(error):
                 """Callback, der nach jedem Track von FFmpeg aufgerufen wird.
@@ -302,6 +310,7 @@ class MusicCommands(commands.Cog):
                 f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
             )
             self.is_playing = True
+            self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title)
             self.text_channel = ctx.channel
 
