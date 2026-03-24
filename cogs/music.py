@@ -266,7 +266,9 @@ class MusicCommands(commands.Cog):
                 if added_count >= self.HARD_PLAYLIST_LIMIT:
                     await ctx.send(f"⚠️ Limit von {self.HARD_PLAYLIST_LIMIT} Titeln erreicht.")
                     break
-                url = entry.get("url") or entry.get("webpage_url")
+                # webpage_url ist immer die echte YouTube-URL.
+                # url kann bei Suchergebnissen eine direkte Stream-URL sein → zuletzt prüfen.
+                url = entry.get("webpage_url") or entry.get("url")
                 title = entry.get("title", "Unbekannter Titel")
                 if url:
                     self.queue.append((url, title))
