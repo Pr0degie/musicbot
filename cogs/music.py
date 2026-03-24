@@ -49,8 +49,9 @@ class MusicCommands(commands.Cog):
             "vocalboost": "-af equalizer=f=1000:width_type=o:width=2:g=5",
             "superbass": "-af bass=g=20",  # Für wenn die Nachbarn noch wach sind
             # Sub-Bass (~80Hz) boosten für Punch, Upper-Bass (~250Hz) leicht senken
-            # gegen Matsch – klingt auf basslastigen Liedern cleaner als bassboost.
-            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,aresample=48000",
+            # gegen Matsch. loudnorm (EBU R128) sorgt für konsistente Lautstärke
+            # ohne Pumpen – klingt auf basslastigen Liedern deutlich cleaner als bassboost.
+            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,loudnorm,aresample=48000",
         }
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
@@ -68,7 +69,9 @@ class MusicCommands(commands.Cog):
         """
         base_opts = {
             "quiet": True,
-            "format": "bestaudio[ext=webm]/bestaudio/best",
+            # Bevorzugt Opus/webm mit mindestens 128kbps – weniger Transkodierung,
+            # höhere Ausgangsqualität. Fällt auf niedrigere Bitraten zurück falls nötig.
+            "format": "bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio/best",
             "default_search": "ytsearch",  # Suchbegriffe werden automatisch als YT-Suche behandelt
             "noplaylist": False,
             # Dateiname basiert auf der video_id – so gibt es nie einen Mismatch
