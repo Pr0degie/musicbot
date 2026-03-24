@@ -74,9 +74,9 @@ class MusicCommands(commands.Cog):
             "format": "bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio/best",
             "default_search": "ytsearch",  # Suchbegriffe werden automatisch als YT-Suche behandelt
             "noplaylist": False,
-            # Dateiname basiert auf der video_id – so gibt es nie einen Mismatch
-            # zwischen dem erwarteten und tatsächlich heruntergeladenen Dateinamen.
-            "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+            # prepare_filename() gibt später den exakt gleichen Pfad zurück den
+            # yt_dlp beim Speichern verwendet – inklusive Sonderzeichen-Bereinigung.
+            "outtmpl": str(DOWNLOAD_DIR / "%(title)s.%(ext)s"),
         }
         if self.audio_format == "mp3":
             # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
@@ -152,12 +152,10 @@ class MusicCommands(commands.Cog):
                 info = info["entries"][0]
 
             title = info.get("title", "Unbekannter Titel")
-            video_id = info.get("id")
-            ext = info.get("ext", self.audio_format)
 
-            # Dateiname basiert immer auf der video_id – so stimmt er garantiert
-            # mit dem überein, was yt_dlp tatsächlich speichert.
-            filename = DOWNLOAD_DIR / f"{video_id}.{ext}"
+            # prepare_filename liefert exakt den Pfad den yt_dlp beim Download
+            # verwendet – Sonderzeichen im Titel werden dabei automatisch bereinigt.
+            filename = Path(self.ydl.prepare_filename(info))
 
             if not filename.exists():
                 # Datei noch nicht im Cache → herunterladen
