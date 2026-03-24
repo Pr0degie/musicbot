@@ -58,7 +58,7 @@ class MusicCommands(commands.Cog):
             # Sub-Bass (~80Hz) boosten für Punch, Upper-Bass (~250Hz) leicht senken
             # gegen Matsch. loudnorm (EBU R128) sorgt für konsistente Lautstärke
             # ohne Pumpen – klingt auf basslastigen Liedern deutlich cleaner als bassboost.
-            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,dynaudnorm=f=150,aresample=48000",
+            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=5,equalizer=f=250:width_type=o:width=2:g=-2,alimiter=level_in=1:level_out=0.9:limit=0.9:attack=5:release=50,aresample=48000",
         }
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
