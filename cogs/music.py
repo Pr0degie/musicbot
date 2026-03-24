@@ -48,6 +48,9 @@ class MusicCommands(commands.Cog):
             "flat": "",
             "vocalboost": "-af equalizer=f=1000:width_type=o:width=2:g=5",
             "superbass": "-af bass=g=20",  # Für wenn die Nachbarn noch wach sind
+            # Sub-Bass (~80Hz) boosten für Punch, Upper-Bass (~250Hz) leicht senken
+            # gegen Matsch – klingt auf basslastigen Liedern cleaner als bassboost.
+            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=8,equalizer=f=250:width_type=o:width=2:g=-3,aresample=48000",
         }
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
