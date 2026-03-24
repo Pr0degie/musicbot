@@ -368,8 +368,13 @@ class MusicCommands(commands.Cog):
             alternatives = entries[1:]
             if alternatives:
                 view = SearchAutoplayView(first, alternatives, self, ctx)
+                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                alt_lines = "\n".join(
+                    f"**Option {letters[i]}:** {e.get('title', 'Unbekannter Titel')}"
+                    for i, e in enumerate(alternatives)
+                )
                 msg = await ctx.send(
-                    f"🎶 Spiele: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*",
+                    f"🎶 Spiele: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*\n{alt_lines}",
                     view=view,
                 )
                 view.message = msg

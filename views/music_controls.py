@@ -67,9 +67,11 @@ class SearchAutoplayView(View):
         self.music_cog = music_cog
         self.ctx = ctx
         self.message = None
+        self.base_content = f"🎶 Spiele: **{added_entry.get('title', 'Unbekannter Titel')}**"
 
-        for i, entry in enumerate(alternatives, 2):
-            button = Button(label=str(i), style=discord.ButtonStyle.secondary)
+        letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        for i, entry in enumerate(alternatives):
+            button = Button(label=f"Option {letters[i]}", style=discord.ButtonStyle.secondary)
             button.callback = self._make_callback(entry)
             self.add_item(button)
 
@@ -114,9 +116,8 @@ class SearchAutoplayView(View):
         return callback
 
     async def on_timeout(self):
-        # Buttons einfach entfernen – der Song läuft weiter, kein Text-Update nötig
         if self.message:
             try:
-                await self.message.edit(view=None)
+                await self.message.edit(content=self.base_content, view=None)
             except Exception:
                 pass
