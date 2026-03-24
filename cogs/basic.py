@@ -19,6 +19,8 @@ class BasicCommands(commands.Cog):
             "  !s               – Aktuellen Song überspringen\n"
             "  !x               – Pause\n"
             "  !resume          – Wiedergabe fortsetzen\n"
+            "  !now             – Aktuell laufenden Song anzeigen\n"
+            "  !loop            – Loop-Modus: aus → Song → Queue → aus\n"
             "  !replay          – Letzten Song nochmal abspielen\n"
             "\n"
             "📜 Queue\n"

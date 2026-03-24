@@ -11,7 +11,7 @@ import discord
 import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
-from views.music_controls import MusicControlView
+from views.music_controls import MusicControlView, SearchResultView
 
 # Downloads landen hier. Der Ordner wird beim Start automatisch angelegt,
 # falls er noch nicht existiert – kein manuelles Erstellen nötig.
@@ -35,12 +35,18 @@ class MusicCommands(commands.Cog):
         self.queue = deque()
 
         self.is_playing = False
-        self.last_played = None  # Wird von !replay genutzt
-        self.prefetch_task = None  # Läuft im Hintergrund während ein Song spielt
+        self.current_track = None   # Aktuell spielender Song (url, title) – für !now
+        self.last_played = None     # Wird von !replay genutzt
+        self.prefetch_task = None   # Läuft im Hintergrund während ein Song spielt
+        self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
+        self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
         self.audio_format = "webm"
+
+        # Loop-Modi: None = aus, "song" = aktuellen Song wiederholen, "queue" = ganze Queue loopen
+        self.loop_mode = None
 
         # FFmpeg-Filterchains pro Preset. Die Werte werden direkt als
         # CLI-Optionen an FFmpeg übergeben. "flat" hat keinen Filter.
@@ -155,11 +161,48 @@ class MusicCommands(commands.Cog):
             # Prefetch-Fehler sind nicht fatal – play_next lädt im Zweifelsfall selbst.
             logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}")
 
+    async def _auto_leave(self, voice_client):
+        """Verlässt den Channel nach 2 Minuten wenn kein User mehr drin ist."""
+        await asyncio.sleep(120)
+        if voice_client.is_connected():
+            self.queue.clear()
+            self.is_playing = False
+            self.current_track = None
+            if voice_client.is_playing() or voice_client.is_paused():
+                voice_client.stop()
+            await voice_client.disconnect()
+            if self.text_channel:
+                await self.text_channel.send("👋 Alle weg – ich geh dann auch. Bis zum nächsten Mal!")
+            logger.info("[Auto-Leave] Channel verlassen – keine User mehr.")
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        """Startet den Auto-Leave-Timer wenn alle User den Channel verlassen haben."""
+        if member.bot:
+            return
+        voice_client = member.guild.voice_client
+        if not voice_client:
+            return
+
+        humans = [m for m in voice_client.channel.members if not m.bot]
+        if len(humans) == 0:
+            # Alle weg – Timer starten (alten zuerst abbrechen falls noch einer läuft)
+            if self.auto_leave_task:
+                self.auto_leave_task.cancel()
+            self.auto_leave_task = asyncio.create_task(self._auto_leave(voice_client))
+            logger.info("[Auto-Leave] Channel leer – starte 2-Minuten-Timer.")
+        else:
+            # Jemand ist (wieder) da – Timer abbrechen
+            if self.auto_leave_task and not self.auto_leave_task.done():
+                self.auto_leave_task.cancel()
+                self.auto_leave_task = None
+
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if not self.queue:
             logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
             self.is_playing = False
+            self.current_track = None
             # Autoplay rettet die Stille – aber nur wenn gewünscht.
             if self.autoplay_enabled:
                 await self.autoplay(ctx)
@@ -226,6 +269,12 @@ class MusicCommands(commands.Cog):
                 except Exception as e:
                     logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")
 
+                # Loop-Logik: Song zurück in die Queue legen bevor play_next aufgerufen wird
+                if self.loop_mode == "song" and self.current_track:
+                    self.queue.appendleft(self.current_track)
+                elif self.loop_mode == "queue" and self.current_track:
+                    self.queue.append(self.current_track)
+
                 if self.queue and ctx.voice_client:
                     logger.info(f"[Warten] Queue hat {len(self.queue)} Songs. Warten auf nächsten...")
                     fut = asyncio.run_coroutine_threadsafe(
@@ -253,6 +302,8 @@ class MusicCommands(commands.Cog):
                 f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
             )
             self.is_playing = True
+            self.current_track = (url, title)
+            self.text_channel = ctx.channel
 
             # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
             if self.queue:
@@ -266,13 +317,47 @@ class MusicCommands(commands.Cog):
 
     @commands.command()
     async def p(self, ctx, *, eingabe):
-        """Spielt eine URL oder einen Suchbegriff. Erkennt Playlisten automatisch."""
+        """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
         logger.info(f"[p] Eingabe erhalten: {eingabe}")
 
         if ctx.voice_client is None:
             await ctx.send("❌ Bitte benutze `!j`, um den Bot in deinen Voice-Channel zu holen.")
             logger.warning("[p] Kein VoiceClient vorhanden.")
             return
+
+        # Wenn kein http am Anfang → Suchbegriff → Top-3 anzeigen statt blind den ersten nehmen
+        if not eingabe.startswith("http"):
+            search_opts = {
+                "quiet": True,
+                "extract_flat": True,
+                "skip_download": True,
+            }
+            try:
+                await ctx.send("🔎 Suche läuft...")
+                with yt_dlp.YoutubeDL(search_opts) as ydl:
+                    results = await asyncio.to_thread(
+                        ydl.extract_info, f"ytsearch3:{eingabe}", download=False
+                    )
+            except Exception:
+                logger.exception("[p] Fehler bei Suche")
+                await ctx.send("❌ Fehler bei der Suche.")
+                return
+
+            entries = (results.get("entries") or [])[:3]
+            if not entries:
+                await ctx.send("❌ Keine Ergebnisse gefunden.")
+                return
+
+            lines = ["🔎 **Suchergebnisse** – welcher Song soll's sein?\n"]
+            for i, e in enumerate(entries, 1):
+                lines.append(f"`{i}.` {e.get('title', 'Unbekannt')}")
+
+            view = SearchResultView(entries, self, ctx)
+            msg = await ctx.send("\n".join(lines), view=view)
+            view.message = msg  # Für on_timeout – damit die Nachricht aufgeräumt werden kann
+            return
+
+        # --- Ab hier: direkte URL oder Playlist ---
 
         # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
         # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
@@ -317,6 +402,10 @@ class MusicCommands(commands.Cog):
         else:
             url = info.get("webpage_url")
             title = info.get("title", "Unbekannter Titel")
+            # Warnen wenn der Titel schon in der Queue ist – könnte ein Versehen sein
+            dup_pos = next((i + 1 for i, (_, t) in enumerate(self.queue) if t == title), None)
+            if dup_pos:
+                await ctx.send(f"⚠️ **{title}** ist bereits in der Queue (Position {dup_pos}). Trotzdem hinzugefügt.")
             self.queue.append((url, title))
             await ctx.send(f"🎶 Hinzugefügt: **{title}**")
 
@@ -360,6 +449,30 @@ class MusicCommands(commands.Cog):
         else:
             await ctx.send("⚠️ Kein Song zum Fortsetzen.")
 
+    @commands.command(name="now")
+    async def now_playing(self, ctx):
+        """Zeigt den aktuell laufenden oder pausierten Song an."""
+        if self.current_track and self.is_playing:
+            _, title = self.current_track
+            await ctx.send(f"🎶 Läuft gerade: **{title}**")
+        elif self.current_track and not self.is_playing:
+            _, title = self.current_track
+            await ctx.send(f"⏸️ Pausiert: **{title}**")
+        else:
+            await ctx.send("⚠️ Es läuft gerade kein Song.")
+
+    @commands.command(name="loop")
+    async def loop(self, ctx):
+        """Schaltet den Loop-Modus durch: aus → Song wiederholen → Queue loopen → aus."""
+        modes = [None, "song", "queue"]
+        self.loop_mode = modes[(modes.index(self.loop_mode) + 1) % len(modes)]
+        messages = {
+            None: "➡️ Loop **aus**.",
+            "song": "🔂 Loop: **aktueller Song** wird wiederholt.",
+            "queue": "🔁 Loop: **gesamte Queue** wird wiederholt.",
+        }
+        await ctx.send(messages[self.loop_mode])
+
     @commands.command(name="q")
     async def queue_list(self, ctx):
         """Zeigt die aktuelle Queue. Bricht bei ~2000 Zeichen ab und zeigt die Restanzahl."""
@@ -382,9 +495,11 @@ class MusicCommands(commands.Cog):
 
     @commands.command()
     async def clear(self, ctx):
-        """Leert die Queue und stoppt die Wiedergabe."""
+        """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
         self.queue.clear()
         self.is_playing = False
+        self.current_track = None
+        self.loop_mode = None
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
         await ctx.send("🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt.")
