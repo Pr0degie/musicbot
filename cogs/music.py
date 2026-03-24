@@ -38,7 +38,7 @@ class MusicCommands(commands.Cog):
         self.last_played = None  # Wird von !replay genutzt
 
         # Standard-EQ und -Format beim Start
-        self.equalizer = "bassboost"
+        self.equalizer = "punchy"
         self.audio_format = "webm"
 
         # FFmpeg-Filterchains pro Preset. Die Werte werden direkt als
