@@ -44,4 +44,4 @@ git clone https://github.com/PabloTestobar/Musicbot.git
 cd discord-musikbot
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt --upgrade
