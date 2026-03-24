@@ -6,13 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 All working files are under `Musicbot/`. The entry point is `Musicbot/main.py`.
 
+**System requirement:** FFmpeg must be installed and available in PATH.
+- Windows: `winget install ffmpeg` or download from https://ffmpeg.org/download.html
+- Linux: `sudo apt install ffmpeg`
+
 **Install dependencies:**
 ```bash
 cd Musicbot
 python -m venv venv
 source venv/Scripts/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-pip install 'discord.py[voice]' -U
 ```
 
 **Configure:** Add `DISCORD_TOKEN=your_token` to `Musicbot/.env`.
