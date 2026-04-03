@@ -4,79 +4,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Setup & Running
 
-All working files are under `Musicbot/`. The entry point is `Musicbot/main.py`.
+Entry point: `Musicbot/main.py`. FFmpeg must be in PATH.
 
-**System requirement:** FFmpeg must be installed and available in PATH.
-- Windows: `winget install ffmpeg` or download from https://ffmpeg.org/download.html
-- Linux: `sudo apt install ffmpeg`
-
-**Install dependencies:**
 ```bash
 cd Musicbot
-python -m venv venv
-source venv/Scripts/activate  # Windows: venv\Scripts\activate
+python -m venv venv && source venv/Scripts/activate
 pip install -r requirements.txt
 ```
 
-**Configure:** Add `DISCORD_TOKEN=your_token` to `Musicbot/.env`.
+Add `DISCORD_TOKEN=your_token` to `Musicbot/.env`, then `python main.py`.
 
-**Run:**
-```bash
-cd Musicbot && python main.py
-```
-
-No test suite or linter is configured.
+No test suite or linter configured.
 
 ## Architecture
 
-The bot uses `discord.ext.commands` with two cogs loaded at startup:
+Two cogs loaded at startup, all responses in German:
 
-- **`cogs/basic.py`** — `BasicCommands`: Join/leave voice channel (`!j`, `!l`), `!ping`, `!echo`
-- **`cogs/music.py`** — `MusicCommands`: All playback logic — queue management, yt_dlp extraction, FFmpeg playback, equalizer presets, autoplay
-- **`views/music_controls.py`** — `MusicControlView`: Discord UI buttons (Pause, Resume, Skip, Autoplay) attached to now-playing messages. `timeout=None` means buttons never expire.
-
-**Note:** All bot response messages are in German.
+- **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
+- **`cogs/music.py`** — `MusicCommands`: queue, yt_dlp extraction, FFmpeg playback, EQ presets, autoplay
+- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons on now-playing messages. Only the current song's message keeps buttons — previous ones get `view=None` on next song start.
 
 ### Music Playback Flow
 
-1. `!p <url or search term>` extracts audio via `yt_dlp` using `asyncio.to_thread()` (non-blocking). Accepts YouTube URLs, playlist URLs, or plain search terms (uses `ytsearch`).
-2. Audio file saved to `downloads/%(id)s.%(ext)s`. Files are cached by video ID and reused on subsequent plays — no re-download if the file already exists.
-3. `discord.FFmpegPCMAudio` plays the file with an FFmpeg filter chain (equalizer preset)
-4. On track end, the `after` callback uses `asyncio.run_coroutine_threadsafe()` to trigger the next song
-5. Queue state is persisted to `last_queue.json` (in the working directory) after each track. The queue intentionally starts empty on each startup — `last_queue.json` is a log of the last session's queue, not a restore point.
-6. When the queue empties, the bot **stays in the voice channel** and waits for new `!p` commands.
+1. `!p` extracts audio via `yt_dlp` in `asyncio.to_thread()`. Accepts YouTube URLs, playlists, or search terms (`ytsearch`).
+2. Files cached in `downloads/%(id)s.%(ext)s` — reused if already downloaded.
+3. `FFmpegPCMAudio` plays with FFmpeg filter chain per EQ preset.
+4. `after` callback uses `run_coroutine_threadsafe()` to trigger next song.
+5. `last_queue.json` is written after each track as a session log — not reloaded on startup.
+6. Queue empty → bot stays in voice channel and waits for `!p`.
 
 ### Queue
 
-Stored as a `collections.deque` inside `MusicCommands`. `shuffle` and `remove` convert to list first (deque doesn't support those operations directly). Max playlist size: 150 songs.
+`collections.deque` in `MusicCommands`. `shuffle`/`remove`/`move` convert to list first. Max playlist size: 150.
 
 ### Audio Configuration
 
-Default audio format: `webm`. Default EQ preset: `bassboost`.
-
-FFmpeg filter chains per preset (in `music.py`):
-- `bassboost`: `bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000`
-- `flat`: no filter
-- `vocalboost`: `equalizer=f=1000:width_type=o:width=2:g=5`
-- `superbass`: `bass=g=20`
-
-Switch format with `!format mp3|webm`, switch preset with `!eq <preset>`. Changing format reinitializes `yt_dlp` options via `update_ydl()`.
+Default format: `webm`. Default EQ preset: `punchy`. Filter chains defined in `music.py`.
+Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`.
+`!eq` mid-song: restarts the current track with the new filter (prepends to queue, calls stop).
+Switch with `!format mp3|webm` or `!eq <preset>`. Format change reinitializes yt_dlp via `update_ydl()`.
 
 ### Logging
 
-There are two logger setups: `config.py` (basic) and `utils/logger.py` (file + stream handler writing to `bot.log`). `music.py` imports `logger` from `config`, not from `utils/logger.py`.
+Two setups: `config.py` (basic) and `utils/logger.py` (file+stream → `bot.log`). `music.py` uses `config`, not `utils/logger.py`.
 
 ### Key Bot Commands
 
 | Command | Description |
 |---|---|
-| `!p <url or query>` | Play from YouTube URL, playlist URL, or search term (max 150 for playlists) |
+| `!p <url or query>` | Play from YouTube URL, playlist, or search (max 150 for playlists) |
 | `!s` | Skip current track |
 | `!x` / `!resume` | Pause / resume |
 | `!q` | Show queue |
+| `!move <n>` | Jump to position n in queue and play from there |
 | `!shuffle` | Shuffle queue |
 | `!clear` | Stop and clear queue |
 | `!remove <n>` | Remove track at position n |
 | `!replay` | Re-queue last played song |
-| `!eq <preset>` | Set equalizer preset (or omit to list presets) |
+| `!eq <preset>` | Set equalizer preset (omit to list presets) |
 | `!format <type>` | Switch audio format (mp3 or webm) |

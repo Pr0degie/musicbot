@@ -40,6 +40,7 @@ class MusicCommands(commands.Cog):
         self.prefetch_task = None   # Läuft im Hintergrund während ein Song spielt
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
+        self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -59,6 +60,9 @@ class MusicCommands(commands.Cog):
             # gegen Matsch. loudnorm (EBU R128) sorgt für konsistente Lautstärke
             # ohne Pumpen – klingt auf basslastigen Liedern deutlich cleaner als bassboost.
             "punchy": "-af equalizer=f=80:width_type=o:width=2:g=5,equalizer=f=250:width_type=o:width=2:g=-2,alimiter=level_in=1:level_out=0.9:limit=0.9:attack=5:release=50,aresample=48000",
+            "nightcore": "-af asetrate=60000,aresample=48000",
+            "karaoke": "-af pan=stereo|c0=c0-0.5*c1|c1=c1-0.5*c0",
+            "8d": "-af apulsator=hz=0.125",
         }
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
@@ -76,6 +80,7 @@ class MusicCommands(commands.Cog):
         """
         base_opts = {
             "quiet": True,
+            "no_warnings": True,
             # Bevorzugt Opus/webm mit mindestens 128kbps – weniger Transkodierung,
             # höhere Ausgangsqualität. Fällt auf niedrigere Bitraten zurück falls nötig.
             "format": "bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio/best",
@@ -306,7 +311,12 @@ class MusicCommands(commands.Cog):
 
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
-            await ctx.send(
+            if self.now_playing_msg:
+                try:
+                    await self.now_playing_msg.edit(view=None)
+                except Exception:
+                    pass
+            self.now_playing_msg = await ctx.send(
                 f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
             )
             self.is_playing = True
@@ -546,6 +556,23 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Ungültiger Index. Bitte eine gültige Zahl angeben.")
 
     @commands.command()
+    async def move(self, ctx, index: int):
+        """Springt zu Position n in der Queue und spielt von dort weiter."""
+        if not self.queue:
+            await ctx.send("⚠️ Die Warteschlange ist leer.")
+            return
+        if not 1 <= index <= len(self.queue):
+            await ctx.send(f"❌ Ungültiger Index. Bitte eine Zahl zwischen 1 und {len(self.queue)} angeben.")
+            return
+        queue_list = list(self.queue)
+        self.queue = deque(queue_list[index - 1:])
+        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+            ctx.voice_client.stop()
+        else:
+            self.is_playing = True
+            await self.play_next(ctx)
+
+    @commands.command()
     async def shuffle(self, ctx):
         """Mischt die Queue zufällig durch."""
         # random.shuffle() arbeitet auf Listen, nicht auf deques – also kurz umwandeln.
@@ -578,7 +605,14 @@ class MusicCommands(commands.Cog):
             return
         if preset.lower() in self.eq_presets:
             self.equalizer = preset.lower()
-            await ctx.send(f"🎚️ Equalizer auf `{preset}` gesetzt.")
+            msg = f"🎚️ Equalizer auf `{preset}` gesetzt."
+            if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()) and self.current_track:
+                track_to_restart = self.current_track
+                self.current_track = None  # verhindert Doppel-Insert durch loop-Branch in after_playing
+                self.queue.appendleft(track_to_restart)
+                ctx.voice_client.stop()
+                msg += " – Song wird mit neuem EQ neu gestartet."
+            await ctx.send(msg)
         else:
             presets = ", ".join(self.eq_presets.keys())
             await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
