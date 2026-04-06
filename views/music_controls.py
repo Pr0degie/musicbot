@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 import discord
 from discord.ui import Button, View
 
@@ -22,21 +23,27 @@ class MusicControlView(View):
             self.ctx.voice_client.pause()
             # is_playing syncen, damit !resume und !p den richtigen Zustand sehen.
             self.music_cog.is_playing = False
-        await interaction.response.defer()
+            await interaction.response.send_message("⏸️ Pausiert.", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ Kein aktiver Song.", ephemeral=True)
 
     @discord.ui.button(label="▶️ Fortsetzen", style=discord.ButtonStyle.success)
     async def resume(self, interaction: discord.Interaction, button: Button):
         if self.ctx.voice_client and self.ctx.voice_client.is_paused():
             self.ctx.voice_client.resume()
             self.music_cog.is_playing = True
-        await interaction.response.defer()
+            await interaction.response.send_message("▶️ Fortgesetzt.", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ Kein Song zum Fortsetzen.", ephemeral=True)
 
     @discord.ui.button(label="⏭️ Überspringen", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: Button):
         # stop() löst den after_playing-Callback aus, der den nächsten Track startet.
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.stop()
-        await interaction.response.defer()
+            await interaction.response.send_message("⏭️ Übersprungen.", ephemeral=True)
+        else:
+            await interaction.response.send_message("⚠️ Kein aktiver Song.", ephemeral=True)
 
     @discord.ui.button(label="🔁 Autoplay", style=discord.ButtonStyle.danger)
     async def autoplay_toggle(self, interaction: discord.Interaction, button: Button):
@@ -100,7 +107,6 @@ class SearchAutoplayView(View):
                         queue_list[i] = (url, title)
                         replaced = True
                         break
-                from collections import deque
                 self.music_cog.queue = deque(queue_list)
                 if not replaced:
                     # Zur Sicherheit vorne einreihen falls der Song nicht mehr in der Queue ist
@@ -119,5 +125,5 @@ class SearchAutoplayView(View):
         if self.message:
             try:
                 await self.message.edit(content=self.base_content, view=None)
-            except Exception:
+            except discord.HTTPException:
                 pass

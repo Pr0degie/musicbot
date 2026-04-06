@@ -4,10 +4,12 @@
 import asyncio
 import json
 import random
+import time
 from collections import deque
 from pathlib import Path
 
 import discord
+import psutil
 import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
@@ -22,10 +24,10 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class MusicCommands(commands.Cog):
     """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay."""
 
-    # Beide Konstanten sind gleich – MAX_PLAYLIST_LENGTH ist der "weiche" Richtwert,
-    # HARD_PLAYLIST_LIMIT ist die tatsächlich durchgesetzte Grenze beim Einlesen.
-    MAX_PLAYLIST_LENGTH = 150
+    # Maximale Anzahl an Titeln die aus einer Playlist eingelesen werden.
     HARD_PLAYLIST_LIMIT = 150
+    # Sekunden ohne User im Channel bevor der Bot den Channel verlässt.
+    AUTO_LEAVE_SECONDS = 120
 
     def __init__(self, bot):
         self.bot = bot
@@ -49,6 +51,10 @@ class MusicCommands(commands.Cog):
         # Loop-Modi: None = aus, "song" = aktuellen Song wiederholen, "queue" = ganze Queue loopen
         self.loop_mode = None
 
+        # Zählt gespielte Songs – alle 50 Songs werden yt_dlp-Instanzen neu erstellt,
+        # damit deren interne Caches (Signatur-Parser, Format-Metadaten) nicht unbegrenzt wachsen.
+        self._songs_played = 0
+
         # FFmpeg-Filterchains pro Preset. Die Werte werden direkt als
         # CLI-Optionen an FFmpeg übergeben. "flat" hat keinen Filter.
         self.eq_presets = {
@@ -68,6 +74,12 @@ class MusicCommands(commands.Cog):
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
         # nach Mitternacht eigenständig Jazz spielt.
         self.autoplay_enabled = False
+
+        # Genres für den Autoplay-Modus – mit !genres anpassbar.
+        self.autoplay_genres = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
+
+        self._start_time = time.monotonic()
+        self._process = psutil.Process()
 
         self.update_ydl()
         logger.info("[INIT] MusicCommands erfolgreich initialisiert.")
@@ -89,6 +101,9 @@ class MusicCommands(commands.Cog):
             # prepare_filename() gibt später den exakt gleichen Pfad zurück den
             # yt_dlp beim Speichern verwendet – inklusive Sonderzeichen-Bereinigung.
             "outtmpl": str(DOWNLOAD_DIR / "%(title)s.%(ext)s"),
+            # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
+            # sodass asyncio.wait_for nicht auf den Thread warten muss.
+            "socket_timeout": 15,
         }
         if self.audio_format == "mp3":
             # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
@@ -101,6 +116,25 @@ class MusicCommands(commands.Cog):
                 }
             ]
         self.ydl = yt_dlp.YoutubeDL(base_opts)
+
+        # Gecachte Instanzen für Suche und URL-Abfragen – vermeidet Initialisierungs-
+        # Overhead bei jedem !p-Aufruf und erlaubt yt_dlp internen Cache-Reuse.
+        self.search_ydl = yt_dlp.YoutubeDL({
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "socket_timeout": 15,
+        })
+        _url_base = {
+            "quiet": True,
+            "no_warnings": True,
+            "format": "bestaudio/best",
+            "default_search": "ytsearch",
+            "socket_timeout": 15,
+        }
+        self.url_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
+        self.playlist_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
 
     @commands.command()
     async def format(self, ctx, typ: str):
@@ -119,12 +153,13 @@ class MusicCommands(commands.Cog):
         """Sucht einen zufälligen Song und fügt ihn vorne in die Queue ein."""
         logger.info("[Autoplay] Suche zufälligen Song")
 
-        # Kleine Vibe-Auswahl – wer mag, kann hier gerne seine Lieblings-Genres eintragen.
-        search_terms = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
-        random_query = random.choice(search_terms)
+        random_query = random.choice(self.autoplay_genres)
 
         try:
-            info = await asyncio.to_thread(self.ydl.extract_info, random_query, download=False)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, random_query, download=False),
+                timeout=30.0,
+            )
             if "entries" in info:
                 info = info["entries"][0]
             url = info.get("webpage_url")
@@ -138,6 +173,9 @@ class MusicCommands(commands.Cog):
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
+        except asyncio.TimeoutError:
+            await ctx.send("❌ Autoplay-Suche hat zu lange gedauert.")
+            logger.warning("[Autoplay] Timeout bei extract_info")
         except Exception:
             await ctx.send("❌ Fehler bei Autoplay.")
             logger.exception("[Autoplay Fehler]")
@@ -152,7 +190,10 @@ class MusicCommands(commands.Cog):
             return
         url, title = self.queue[0]  # Peek – nicht aus der Queue entfernen
         try:
-            info = await asyncio.to_thread(self.ydl.extract_info, url, download=False)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                timeout=30.0,
+            )
             if "entries" in info:
                 info = info["entries"][0]
             filename = Path(self.ydl.prepare_filename(info))
@@ -162,13 +203,15 @@ class MusicCommands(commands.Cog):
                 logger.info(f"[Prefetch] Fertig: {filename.name}")
             else:
                 logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
-        except Exception:
+        except asyncio.TimeoutError:
+            logger.warning(f"[Prefetch] Timeout für: {title}")
+        except Exception as e:
             # Prefetch-Fehler sind nicht fatal – play_next lädt im Zweifelsfall selbst.
-            logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}")
+            logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
 
     async def _auto_leave(self, voice_client):
-        """Verlässt den Channel nach 2 Minuten wenn kein User mehr drin ist."""
-        await asyncio.sleep(120)
+        """Verlässt den Channel nach AUTO_LEAVE_SECONDS wenn kein User mehr drin ist."""
+        await asyncio.sleep(self.AUTO_LEAVE_SECONDS)
         if voice_client.is_connected():
             self.queue.clear()
             self.is_playing = False
@@ -219,11 +262,15 @@ class MusicCommands(commands.Cog):
         try:
             # asyncio.to_thread verhindert, dass der Bot während des yt_dlp-Aufrufs
             # einfriert – yt_dlp ist synchron und würde sonst den Event-Loop blockieren.
-            info = await asyncio.to_thread(self.ydl.extract_info, url, download=False)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                timeout=30.0,
+            )
             if "entries" in info:
                 info = info["entries"][0]
 
             title = info.get("title", "Unbekannter Titel")
+            duration = info.get("duration", 0)
 
             # prepare_filename liefert exakt den Pfad den yt_dlp beim Download
             # verwendet – Sonderzeichen im Titel werden dabei automatisch bereinigt.
@@ -237,7 +284,7 @@ class MusicCommands(commands.Cog):
                     try:
                         await self.prefetch_task
                     except Exception:
-                        pass  # Prefetch gescheitert → selbst laden
+                        logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
 
                 if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
                     logger.info(f"[Download] Lade {title} herunter...")
@@ -282,11 +329,14 @@ class MusicCommands(commands.Cog):
                 except Exception as e:
                     logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")
 
-                # Loop-Logik: Song zurück in die Queue legen bevor play_next aufgerufen wird
+                # Loop-Logik: Song zurück in die Queue legen bevor play_next aufgerufen wird.
+                # Queue speichert 2-Tuples (url, title), current_track ist ein 3-Tuple.
                 if self.loop_mode == "song" and self.current_track:
-                    self.queue.appendleft(self.current_track)
+                    ct_url, ct_title, *_ = self.current_track
+                    self.queue.appendleft((ct_url, ct_title))
                 elif self.loop_mode == "queue" and self.current_track:
-                    self.queue.append(self.current_track)
+                    ct_url, ct_title, *_ = self.current_track
+                    self.queue.append((ct_url, ct_title))
 
                 if self.queue and ctx.voice_client:
                     logger.info(f"[Warten] Queue hat {len(self.queue)} Songs. Warten auf nächsten...")
@@ -313,26 +363,48 @@ class MusicCommands(commands.Cog):
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
                 try:
-                    await self.now_playing_msg.edit(view=None)
+                    old_title = self.current_track[1] if self.current_track else None
+                    old_content = f"🎶 **{old_title}**" if old_title else None
+                    await self.now_playing_msg.edit(content=old_content, embed=None, view=None)
                 except Exception:
                     pass
-            self.now_playing_msg = await ctx.send(
-                f"🎶 Jetzt läuft: **{title}**", view=MusicControlView(self, ctx)
-            )
+            duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"
+            embed = discord.Embed(title=title, url=info.get("webpage_url"), color=0x1db954)
+            embed.set_thumbnail(url=info.get("thumbnail"))
+            embed.add_field(name="Dauer", value=duration_str, inline=True)
+            if info.get("uploader"):
+                embed.set_footer(text=info.get("uploader"))
+            self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
             self.is_playing = True
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
-            self.current_track = (url, title)
+            self.current_track = (url, title, duration)
             self.text_channel = ctx.channel
 
+            # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
+            # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
+            self._songs_played += 1
+            if self._songs_played % 50 == 0:
+                logger.info(f"[Maintenance] {self._songs_played} Songs gespielt – yt_dlp-Instanzen werden neu erstellt.")
+                self.update_ydl()
+
             # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
+            # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
+            if self.prefetch_task and not self.prefetch_task.done():
+                self.prefetch_task.cancel()
             if self.queue:
                 self.prefetch_task = asyncio.create_task(self._prefetch_next())
 
+        except asyncio.TimeoutError:
+            await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
+            asyncio.create_task(self.play_next(ctx))
+            return
         except Exception:
             logger.exception("[Fehler bei play_next]")
-            await ctx.send(f"⚠️ Fehler beim Laden von {title}. Überspringe...")
-            # Fehlerhaften Track überspringen und einfach weitermachen.
-            await self.play_next(ctx)
+            await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")
+            # Fehlerhaften Track überspringen – create_task statt direkter Rekursion,
+            # damit bei vielen schlechten URLs der Call-Stack nicht überfüllt wird.
+            asyncio.create_task(self.play_next(ctx))
+            return
 
     @commands.command()
     async def p(self, ctx, *, eingabe):
@@ -347,17 +419,15 @@ class MusicCommands(commands.Cog):
         # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
         # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
         if not eingabe.startswith("http"):
-            search_opts = {
-                "quiet": True,
-                "extract_flat": True,
-                "skip_download": True,
-            }
             try:
                 await ctx.send("🔎 Suche läuft...")
-                with yt_dlp.YoutubeDL(search_opts) as ydl:
-                    results = await asyncio.to_thread(
-                        ydl.extract_info, f"ytsearch3:{eingabe}", download=False
-                    )
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                await ctx.send("❌ Suche hat zu lange gedauert. Bitte versuche es erneut.")
+                return
             except Exception:
                 logger.exception("[p] Fehler bei Suche")
                 await ctx.send("❌ Fehler bei der Suche.")
@@ -401,20 +471,17 @@ class MusicCommands(commands.Cog):
         # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
         # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
         is_playlist = "playlist?" in eingabe or "list=" in eingabe
-        ydl_opts = {
-            "quiet": True,
-            "format": "bestaudio/best",
-            "default_search": "ytsearch",
-            "noplaylist": not is_playlist,
-            # extract_flat holt nur Metadaten der Playlist-Einträge, ohne jeden
-            # Track einzeln aufzulösen – viel schneller bei langen Playlisten.
-            "extract_flat": "in_playlist" if is_playlist else False,
-        }
+        ydl_instance = self.playlist_ydl if is_playlist else self.url_ydl
 
         try:
             await ctx.send("🔎 Verarbeite Eingabe... bitte warten.")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = await asyncio.to_thread(ydl.extract_info, eingabe, download=False)
+            info = await asyncio.wait_for(
+                asyncio.to_thread(ydl_instance.extract_info, eingabe, download=False),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            await ctx.send("❌ Anfrage hat zu lange gedauert. Bitte überprüfe die URL und versuche es erneut.")
+            return
         except Exception:
             logger.exception("[p] Fehler beim Abrufen von yt_dlp-Infos")
             await ctx.send("❌ Fehler beim Abrufen der Informationen. Bitte überprüfe die URL.")
@@ -448,6 +515,82 @@ class MusicCommands(commands.Cog):
             self.queue.append((url, title))
             await ctx.send(f"🎶 Hinzugefügt: **{title}**")
 
+        if not self.is_playing:
+            self.is_playing = True
+            await self.play_next(ctx)
+
+    @commands.command(name="next")
+    async def next_song(self, ctx, *, eingabe):
+        """Fügt einen Song an die erste Stelle der Queue ein (spielt als nächstes).
+        Format: !next URL  oder  !next URL||Titel  oder  !next Suchbegriff"""
+        if ctx.voice_client is None:
+            await ctx.send("❌ Bitte benutze `!j`, um den Bot in deinen Voice-Channel zu holen.")
+            return
+
+        # Format: URL||Titel → direkt ohne yt_dlp-Lookup hinzufügen
+        if "||" in eingabe:
+            parts = eingabe.split("||", 1)
+            url = parts[0].strip()
+            title = parts[1].strip()
+            self.queue.appendleft((url, title))
+            await ctx.send(f"⏭️ Als nächstes: **{title}**")
+            if not self.is_playing:
+                self.is_playing = True
+                await self.play_next(ctx)
+            return
+
+        # Suchbegriff → ersten Treffer an erste Stelle
+        if not eingabe.startswith("http"):
+            try:
+                await ctx.send("🔎 Suche läuft...")
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch1:{eingabe}", download=False),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                await ctx.send("❌ Suche hat zu lange gedauert.")
+                return
+            except Exception:
+                logger.exception("[next] Fehler bei Suche")
+                await ctx.send("❌ Fehler bei der Suche.")
+                return
+            entries = results.get("entries") or []
+            if not entries:
+                await ctx.send("❌ Keine Ergebnisse gefunden.")
+                return
+            first = entries[0]
+            url = first.get("webpage_url") or first.get("url")
+            title = first.get("title", "Unbekannter Titel")
+            self.queue.appendleft((url, title))
+            await ctx.send(f"⏭️ Als nächstes: **{title}**")
+            if not self.is_playing:
+                self.is_playing = True
+                await self.play_next(ctx)
+            return
+
+        # Direkte URL → yt_dlp-Lookup
+        try:
+            await ctx.send("🔎 Verarbeite URL...")
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.url_ydl.extract_info, eingabe, download=False),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            await ctx.send("❌ Anfrage hat zu lange gedauert.")
+            return
+        except Exception:
+            logger.exception("[next] Fehler beim Abrufen von yt_dlp-Infos")
+            await ctx.send("❌ Fehler beim Abrufen der Informationen.")
+            return
+
+        if "entries" in info:
+            await ctx.send("⚠️ Playlists werden von `!next` nicht unterstützt. Bitte eine einzelne URL angeben.")
+            return
+
+        url = info.get("webpage_url") or eingabe
+        title = info.get("title", "Unbekannter Titel")
+        self.queue.appendleft((url, title))
+        await ctx.send(f"⏭️ Als nächstes: **{title}**")
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
@@ -491,12 +634,15 @@ class MusicCommands(commands.Cog):
     @commands.command(name="now")
     async def now_playing(self, ctx):
         """Zeigt den aktuell laufenden oder pausierten Song an."""
-        if self.current_track and self.is_playing:
-            _, title = self.current_track
-            await ctx.send(f"🎶 Läuft gerade: **{title}**")
-        elif self.current_track and not self.is_playing:
-            _, title = self.current_track
-            await ctx.send(f"⏸️ Pausiert: **{title}**")
+        if self.current_track:
+            ct_url, ct_title, ct_duration, *_ = (*self.current_track, 0)  # 0 als Fallback für alte 2-Tuples
+            duration_str = f"{ct_duration // 60}:{ct_duration % 60:02d}" if ct_duration else "Unbekannt"
+            color = 0x1db954 if self.is_playing else 0x808080
+            embed = discord.Embed(title=ct_title, url=ct_url, color=color)
+            embed.add_field(name="Dauer", value=duration_str, inline=True)
+            status = "🎶 Läuft gerade" if self.is_playing else "⏸️ Pausiert"
+            embed.set_author(name=status)
+            await ctx.send(embed=embed)
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
@@ -588,8 +734,9 @@ class MusicCommands(commands.Cog):
     async def replay(self, ctx):
         """Stellt den zuletzt gespielten Song an den Anfang der Queue."""
         if self.last_played:
-            self.queue.appendleft(self.last_played)
-            await ctx.send(f"🔁 Wiederhole: **{self.last_played[1]}**")
+            lp_url, lp_title, *_ = self.last_played
+            self.queue.appendleft((lp_url, lp_title))
+            await ctx.send(f"🔁 Wiederhole: **{lp_title}**")
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -607,9 +754,9 @@ class MusicCommands(commands.Cog):
             self.equalizer = preset.lower()
             msg = f"🎚️ Equalizer auf `{preset}` gesetzt."
             if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()) and self.current_track:
-                track_to_restart = self.current_track
+                tr_url, tr_title, *_ = self.current_track
                 self.current_track = None  # verhindert Doppel-Insert durch loop-Branch in after_playing
-                self.queue.appendleft(track_to_restart)
+                self.queue.appendleft((tr_url, tr_title))
                 ctx.voice_client.stop()
                 msg += " – Song wird mit neuem EQ neu gestartet."
             await ctx.send(msg)
@@ -617,7 +764,93 @@ class MusicCommands(commands.Cog):
             presets = ", ".join(self.eq_presets.keys())
             await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
 
+    @commands.command(name="stats")
+    async def stats(self, ctx):
+        """Zeigt Live-Metriken zum Bot-Prozess: RAM, CPU, Uptime, Queue, Cache."""
+        proc = self._process
+
+        # RAM
+        mem = proc.memory_info()
+        rss_mb = mem.rss / 1024 / 1024
+        vms_mb = mem.vms / 1024 / 1024
+
+        # CPU (non-blocking: 0.1s Interval im Thread)
+        cpu_pct = await asyncio.to_thread(proc.cpu_percent, 0.1)
+
+        # Uptime
+        uptime_s = int(time.monotonic() - self._start_time)
+        h, rem = divmod(uptime_s, 3600)
+        m, s = divmod(rem, 60)
+        uptime_str = f"{h}h {m}m {s}s"
+
+        # asyncio Tasks
+        all_tasks = asyncio.all_tasks()
+        running_tasks = sum(1 for t in all_tasks if not t.done())
+
+        # Downloads-Ordner
+        dl_files = list(DOWNLOAD_DIR.glob("*"))
+        dl_count = len(dl_files)
+        dl_size_mb = sum(f.stat().st_size for f in dl_files if f.is_file()) / 1024 / 1024
+
+        # Queue
+        queue_len = len(self.queue)
+
+        embed = discord.Embed(title="📊 Bot Stats", color=0x5865f2)
+        embed.add_field(name="⏱️ Uptime", value=uptime_str, inline=True)
+        embed.add_field(name="🎵 Songs gespielt", value=str(self._songs_played), inline=True)
+        embed.add_field(name="📋 Queue", value=f"{queue_len} Songs", inline=True)
+        embed.add_field(name="🧠 RAM (RSS)", value=f"{rss_mb:.1f} MB", inline=True)
+        embed.add_field(name="🧠 RAM (VMS)", value=f"{vms_mb:.1f} MB", inline=True)
+        embed.add_field(name="⚡ CPU", value=f"{cpu_pct:.1f}%", inline=True)
+        embed.add_field(name="⚙️ asyncio Tasks", value=str(running_tasks), inline=True)
+        embed.add_field(name="💾 Cache-Dateien", value=f"{dl_count} Dateien", inline=True)
+        embed.add_field(name="💾 Cache-Größe", value=f"{dl_size_mb:.0f} MB", inline=True)
+        await ctx.send(embed=embed)
+
     @commands.command(name="baba")
     async def baba(self, ctx):
         """Spielt Babas Playlist ab. Kein Argument nötig – einfach !baba und los."""
         await ctx.invoke(self.p, eingabe="https://www.youtube.com/playlist?list=PLhqD5zya16QavuozTOLCZ3Jn6gQu66Tvj")
+
+    @commands.command(name="genres")
+    async def genres(self, ctx, aktion: str = None, *, genre: str = None):
+        """Verwaltet die Autoplay-Genres. Nutzung: !genres | !genres add <genre> | !genres remove <genre> | !genres reset"""
+        DEFAULT_GENRES = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
+
+        if aktion is None:
+            genre_list = "\n".join(f"• {g}" for g in self.autoplay_genres)
+            await ctx.send(f"🎵 Aktuelle Autoplay-Genres:\n{genre_list}")
+
+        elif aktion.lower() == "add":
+            if not genre:
+                await ctx.send("❌ Bitte ein Genre angeben: `!genres add <genre>`")
+                return
+            if len(self.autoplay_genres) >= 20:
+                await ctx.send("❌ Maximal 20 Genres erlaubt. Entferne zuerst ein Genre mit `!genres remove`.")
+                return
+            if genre.lower() in [g.lower() for g in self.autoplay_genres]:
+                await ctx.send(f"⚠️ **{genre}** ist bereits in der Liste.")
+                return
+            self.autoplay_genres.append(genre)
+            await ctx.send(f"✅ **{genre}** zur Autoplay-Liste hinzugefügt.")
+
+        elif aktion.lower() == "remove":
+            if not genre:
+                await ctx.send("❌ Bitte ein Genre angeben: `!genres remove <genre>`")
+                return
+            match = next((g for g in self.autoplay_genres if g.lower() == genre.lower()), None)
+            if not match:
+                await ctx.send(f"❌ **{genre}** nicht in der Liste gefunden.")
+                return
+            self.autoplay_genres.remove(match)
+            await ctx.send(f"🗑️ **{match}** entfernt.")
+            if not self.autoplay_genres:
+                self.autoplay_genres = list(DEFAULT_GENRES)
+                await ctx.send("⚠️ Liste war leer – Standard-Genres wiederhergestellt.")
+
+        elif aktion.lower() == "reset":
+            self.autoplay_genres = list(DEFAULT_GENRES)
+            await ctx.send("🔄 Autoplay-Genres auf Standard zurückgesetzt.")
+
+        else:
+            await ctx.send("❌ Unbekannte Aktion. Nutze: `!genres`, `!genres add <genre>`, `!genres remove <genre>`, `!genres reset`")
