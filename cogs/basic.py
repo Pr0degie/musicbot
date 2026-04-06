@@ -15,7 +15,7 @@ class BasicCommands(commands.Cog):
             "```\n"
             "🎵 Musik\n"
             "  !p <url/suche>   – Lied, Playlist oder Suchbegriff abspielen\n"
-            "  !next <url/suche/url||titel> – Als nächstes abspielen\n"
+            "  !next <url/suche>   – Als nächstes abspielen\n"
             "  !baba            – Baba Playlist abspielen\n"
             "  !s               – Aktuellen Song überspringen\n"
             "  !x               – Pause\n"
@@ -50,6 +50,7 @@ class BasicCommands(commands.Cog):
             "  !l               – Voice-Channel verlassen\n"
             "\n"
             "  !stats           – RAM, CPU, Uptime und Cache-Infos\n"
+            "  !reloadcookies   – cookies.txt neu laden (nach Server-Upload)\n"
             "  !help / !        – Diese Übersicht\n"
             "```"
         )

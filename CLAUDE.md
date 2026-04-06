@@ -22,7 +22,7 @@ Two cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
 - **`cogs/music.py`** — `MusicCommands`: queue, yt_dlp extraction, FFmpeg playback, EQ presets, autoplay
-- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons on now-playing messages. Only the current song's message keeps buttons — previous ones get `view=None` on next song start. Buttons send ephemeral feedback to the user.
+- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons on now-playing messages. Only the current song's message keeps buttons — previous ones get `view=None` on next song start. Buttons send ephemeral feedback to the user. `SearchAutoplayView`: shown after `!p` and `!next` searches — first result plays/queues immediately, alternatives appear as buttons (timeout 30 s). Accepts optional `base_content` for the timeout fallback text.
 
 ### Music Playback Flow
 
@@ -50,28 +50,30 @@ Switch with `!format mp3|webm` or `!eq <preset>`. Format change reinitializes yt
 
 **yt_dlp** prefers highest-quality Opus/webm — see `update_ydl()` in `music.py` for selector details.
 
+### YouTube Authentication (Cookies)
+
+YouTube bot-detection requires cookie auth. Configured via `.env`:
+
+| Variable | Purpose |
+|---|---|
+| `YDL_COOKIES_FILE` | Path to an exported `cookies.txt` (takes priority) |
+| `YDL_BROWSER` | Browser to extract cookies from live (`firefox`, `chrome`, …) — local use only, won't work on headless servers |
+
+`cookiefile` takes priority over `cookiesfrombrowser` when both are set. All three ydl instances (`ydl`, `search_ydl`, `url_ydl`/`playlist_ydl`) receive the same cookie config.
+
+**EJS challenge solver:** yt-dlp requires `yt-dlp[default]` (installs `yt-dlp-ejs`) and Node.js in PATH to solve YouTube's signature challenges. `js_runtimes: {node: {}}` must be set in ydl opts — yt-dlp defaults to Deno only.
+
+**Cookie renewal:** Cookies last ~1–3 months. Export with `yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <any-yt-url>`, upload via SCP, then run `!reloadcookies` in Discord (no bot restart needed).
+
 ### Logging
 
 Single setup in `utils/logger.py` — writes to both console and `bot.log`. `config.py` only loads `.env` and exports `TOKEN`; it does NOT call `logging.basicConfig()` (that would silently disable the file handler in `utils/logger.py`). `music.py` imports `logger` from `utils.logger`.
 
 ### Key Bot Commands
 
-| Command | Description |
-|---|---|
-| `!p <url or query>` | Play from YouTube URL, playlist, or search (max 150 for playlists) |
-| `!s` | Skip current track |
-| `!x` / `!resume` | Pause / resume |
-| `!q` | Show queue |
-| `!move <n>` | Jump to position n in queue and play from there |
-| `!shuffle` | Shuffle queue |
-| `!clear` | Stop and clear queue |
-| `!remove <n>` | Remove track at position n |
-| `!replay` | Re-queue last played song |
-| `!text` | Show lyrics for current song (via lyrics.ovh, parses "Artist - Title" from YouTube title) |
-| `!eq <preset>` | Set equalizer preset (omit to list presets) |
-| `!format <type>` | Switch audio format (mp3 or webm) |
-| `!genres` | List autoplay genres |
-| `!genres add <genre>` | Add a genre to autoplay (max 20) |
-| `!genres remove <genre>` | Remove a genre from autoplay |
-| `!genres reset` | Restore default autoplay genres |
-| `!stats` | Live metrics: RAM (RSS/VMS), CPU, uptime, asyncio tasks, songs played, cache size |
+See `!help` (implemented in `cogs/basic.py`) for the full command list. Architectural notes on specific commands:
+
+- **`!p` / `!next`** — yt-dlp extraction in `asyncio.to_thread()`, 30 s timeout; search shows `SearchAutoplayView` with alternatives
+- **`!eq`** — mid-song restart: prepends current track to queue, calls stop
+- **`!reloadcookies`** — calls `update_ydl()` to pick up a newly uploaded `cookies.txt` without restart
+- **`!text`** — lyrics via lyrics.ovh, parses "Artist - Title" from YouTube title

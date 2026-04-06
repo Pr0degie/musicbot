@@ -18,6 +18,7 @@ import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
 from cogs.presets import EQ_PRESETS
+from config import YDL_BROWSER, YDL_COOKIES_FILE
 from views.music_controls import MusicControlView, SearchAutoplayView
 
 # Downloads landen hier. Der Ordner wird beim Start automatisch angelegt,
@@ -82,13 +83,19 @@ class MusicCommands(commands.Cog):
         Wird beim Start und nach jedem !format-Wechsel aufgerufen, da yt_dlp-Optionen
         nach der Initialisierung nicht mehr änderbar sind.
         """
+        if YDL_COOKIES_FILE:
+            _cookies = {"cookiefile": YDL_COOKIES_FILE}
+        elif YDL_BROWSER:
+            _cookies = {"cookiesfrombrowser": (YDL_BROWSER,)}
+        else:
+            _cookies = {}
         base_opts = {
             "quiet": True,
             "no_warnings": True,
             # Bevorzugt Opus/webm mit mindestens 160kbps (YouTube's höchste Audio-Tier),
             # fällt auf 128kbps, dann beliebiges webm, dann Opus, dann best zurück.
             # prefer_free_formats bevorzugt Opus über AAC bei gleichwertiger Qualität.
-            "format": "bestaudio[ext=webm][abr>=160]/bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio[acodec=opus]/bestaudio/best",
+            "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "prefer_free_formats": True,
             "default_search": "ytsearch",  # Suchbegriffe werden automatisch als YT-Suche behandelt
             "noplaylist": False,
@@ -98,6 +105,10 @@ class MusicCommands(commands.Cog):
             # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
             # sodass asyncio.wait_for nicht auf den Thread warten muss.
             "socket_timeout": 15,
+            # Node.js als JS-Runtime für den EJS-Signature-Solver aktivieren.
+            # yt-dlp startet standardmäßig nur mit Deno – Node muss explizit gesetzt werden.
+            "js_runtimes": {"node": {}},
+            **_cookies,
         }
         if self.audio_format == "mp3":
             # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
@@ -113,12 +124,15 @@ class MusicCommands(commands.Cog):
 
         # Gecachte Instanzen für Suche und URL-Abfragen – vermeidet Initialisierungs-
         # Overhead bei jedem !p-Aufruf und erlaubt yt_dlp internen Cache-Reuse.
+        _js = {"js_runtimes": {"node": {}}}
         self.search_ydl = yt_dlp.YoutubeDL({
             "quiet": True,
             "no_warnings": True,
             "extract_flat": True,
             "skip_download": True,
             "socket_timeout": 15,
+            **_cookies,
+            **_js,
         })
         _url_base = {
             "quiet": True,
@@ -126,9 +140,24 @@ class MusicCommands(commands.Cog):
             "format": "bestaudio/best",
             "default_search": "ytsearch",
             "socket_timeout": 15,
+            **_cookies,
+            **_js,
         }
         self.url_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
         self.playlist_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
+
+    @commands.command(name="reloadcookies")
+    async def reloadcookies(self, ctx):
+        """Lädt die cookies.txt neu ohne Bot-Neustart (nach manuellem Upload auf den Server)."""
+        self.update_ydl()
+        from config import YDL_COOKIES_FILE, YDL_BROWSER
+        if YDL_COOKIES_FILE:
+            source = f"`{YDL_COOKIES_FILE}`"
+        elif YDL_BROWSER:
+            source = f"Browser ({YDL_BROWSER})"
+        else:
+            source = "keine Cookie-Quelle konfiguriert"
+        await ctx.send(f"Cookies neu geladen. Quelle: {source}")
 
     @commands.command()
     async def format(self, ctx, typ: str):
