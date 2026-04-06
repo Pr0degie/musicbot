@@ -23,6 +23,7 @@ class BasicCommands(commands.Cog):
             "  !now             – Aktuell laufenden Song anzeigen\n"
             "  !loop            – Loop-Modus: aus → Song → Queue → aus\n"
             "  !replay          – Letzten Song nochmal abspielen\n"
+            "  !text            – Liedtext des aktuellen Songs anzeigen\n"
             "\n"
             "📜 Queue\n"
             "  !q               – Warteschlange anzeigen\n"

@@ -4,15 +4,20 @@
 import asyncio
 import json
 import random
+import re
 import time
+import urllib.parse
 from collections import deque
 from pathlib import Path
+
+import aiohttp
 
 import discord
 import psutil
 import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
+from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
 
 # Downloads landen hier. Der Ordner wird beim Start automatisch angelegt,
@@ -43,6 +48,7 @@ class MusicCommands(commands.Cog):
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
+        self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -55,21 +61,7 @@ class MusicCommands(commands.Cog):
         # damit deren interne Caches (Signatur-Parser, Format-Metadaten) nicht unbegrenzt wachsen.
         self._songs_played = 0
 
-        # FFmpeg-Filterchains pro Preset. Die Werte werden direkt als
-        # CLI-Optionen an FFmpeg übergeben. "flat" hat keinen Filter.
-        self.eq_presets = {
-            "bassboost": "-af bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",
-            "flat": "",
-            "vocalboost": "-af equalizer=f=1000:width_type=o:width=2:g=5",
-            "superbass": "-af bass=g=20",  # Für wenn die Nachbarn noch wach sind
-            # Sub-Bass (~80Hz) boosten für Punch, Upper-Bass (~250Hz) leicht senken
-            # gegen Matsch. loudnorm (EBU R128) sorgt für konsistente Lautstärke
-            # ohne Pumpen – klingt auf basslastigen Liedern deutlich cleaner als bassboost.
-            "punchy": "-af equalizer=f=80:width_type=o:width=2:g=5,equalizer=f=250:width_type=o:width=2:g=-2,alimiter=level_in=1:level_out=0.9:limit=0.9:attack=5:release=50,aresample=48000",
-            "nightcore": "-af asetrate=60000,aresample=48000",
-            "karaoke": "-af pan=stereo|c0=c0-0.5*c1|c1=c1-0.5*c0",
-            "8d": "-af apulsator=hz=0.125",
-        }
+        self.eq_presets = EQ_PRESETS
 
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
         # nach Mitternacht eigenständig Jazz spielt.
@@ -93,9 +85,11 @@ class MusicCommands(commands.Cog):
         base_opts = {
             "quiet": True,
             "no_warnings": True,
-            # Bevorzugt Opus/webm mit mindestens 128kbps – weniger Transkodierung,
-            # höhere Ausgangsqualität. Fällt auf niedrigere Bitraten zurück falls nötig.
-            "format": "bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio/best",
+            # Bevorzugt Opus/webm mit mindestens 160kbps (YouTube's höchste Audio-Tier),
+            # fällt auf 128kbps, dann beliebiges webm, dann Opus, dann best zurück.
+            # prefer_free_formats bevorzugt Opus über AAC bei gleichwertiger Qualität.
+            "format": "bestaudio[ext=webm][abr>=160]/bestaudio[ext=webm][abr>=128]/bestaudio[ext=webm]/bestaudio[acodec=opus]/bestaudio/best",
+            "prefer_free_formats": True,
             "default_search": "ytsearch",  # Suchbegriffe werden automatisch als YT-Suche behandelt
             "noplaylist": False,
             # prepare_filename() gibt später den exakt gleichen Pfad zurück den
@@ -245,6 +239,47 @@ class MusicCommands(commands.Cog):
                 self.auto_leave_task.cancel()
                 self.auto_leave_task = None
 
+    async def _resolve_track(self, url: str, title: str):
+        """Löst eine URL auf: extrahiert Metadaten via yt_dlp und stellt sicher,
+        dass die Audiodatei lokal vorliegt (Download oder Cache-Hit).
+
+        Raises asyncio.TimeoutError wenn extract_info > 30 s dauert.
+        Returns: (info dict, Path, title str, duration int)
+        """
+        info = await asyncio.wait_for(
+            asyncio.to_thread(self.ydl.extract_info, url, download=False),
+            timeout=30.0,
+        )
+        if "entries" in info:
+            info = info["entries"][0]
+
+        title = info.get("title", "Unbekannter Titel")
+        duration = info.get("duration", 0)
+        # prepare_filename liefert exakt den Pfad den yt_dlp beim Download
+        # verwendet – Sonderzeichen im Titel werden dabei automatisch bereinigt.
+        filename = Path(self.ydl.prepare_filename(info))
+
+        if not filename.exists():
+            # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
+            # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
+            if self.prefetch_task and not self.prefetch_task.done():
+                logger.info(f"[Download] Warte auf laufenden Prefetch für: {title}")
+                try:
+                    await self.prefetch_task
+                except Exception:
+                    logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
+
+            if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
+                logger.info(f"[Download] Lade {title} herunter...")
+                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
+                logger.info(f"[Download] Gespeichert als: {filename.name}")
+            else:
+                logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
+        else:
+            logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
+
+        return info, filename, title, duration
+
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if not self.queue:
@@ -260,41 +295,7 @@ class MusicCommands(commands.Cog):
         logger.info(f"[Nächster Track] {title} ({url})")
 
         try:
-            # asyncio.to_thread verhindert, dass der Bot während des yt_dlp-Aufrufs
-            # einfriert – yt_dlp ist synchron und würde sonst den Event-Loop blockieren.
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=False),
-                timeout=30.0,
-            )
-            if "entries" in info:
-                info = info["entries"][0]
-
-            title = info.get("title", "Unbekannter Titel")
-            duration = info.get("duration", 0)
-
-            # prepare_filename liefert exakt den Pfad den yt_dlp beim Download
-            # verwendet – Sonderzeichen im Titel werden dabei automatisch bereinigt.
-            filename = Path(self.ydl.prepare_filename(info))
-
-            if not filename.exists():
-                # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
-                # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
-                if self.prefetch_task and not self.prefetch_task.done():
-                    logger.info(f"[Download] Warte auf laufenden Prefetch für: {title}")
-                    try:
-                        await self.prefetch_task
-                    except Exception:
-                        logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
-
-                if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
-                    logger.info(f"[Download] Lade {title} herunter...")
-                    await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
-                    logger.info(f"[Download] Gespeichert als: {filename.name}")
-                else:
-                    logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
-            else:
-                # Cache-Hit! Kein erneuter Download nötig. Spart Zeit und Bandbreite.
-                logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
+            info, filename, title, duration = await self._resolve_track(url, title)
 
             eq_filter = self.eq_presets.get(self.equalizer, "")
 
@@ -318,6 +319,12 @@ class MusicCommands(commands.Cog):
                 """
                 if error:
                     logger.warning(f"[Fehler beim Abspielen] {error}")
+                elapsed = time.monotonic() - self.track_start_time if self.track_start_time else 999
+                if elapsed < 2.0:
+                    logger.warning(
+                        f"[FFmpeg] Track lief nur {elapsed:.2f}s – wahrscheinlich ungültiger Filter. "
+                        f"Aktives Preset: '{self.equalizer}', Filter: {self.eq_presets.get(self.equalizer, '(keiner)')}"
+                    )
 
                 # Queue-Stand nach jedem Track in Datei sichern – nicht als
                 # Restore-Point gedacht, nur als Protokoll der letzten Session.
@@ -355,10 +362,12 @@ class MusicCommands(commands.Cog):
                 elif not self.queue and ctx.voice_client:
                     # Queue leer, aber Bot bleibt im Kanal und wartet auf !p.
                     # Kein automatisches Verlassen – das wäre unhöflich.
+                    self.is_playing = False
                     logger.info("[PAUSE] Queue leer, aber Bot bleibt im Kanal. Warte auf !p ...")
                 else:
                     logger.info("[KEINE VERBINDUNG] Keine Verbindung. Warte auf !j ...")
 
+            self.track_start_time = time.monotonic()
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
@@ -372,6 +381,8 @@ class MusicCommands(commands.Cog):
             embed = discord.Embed(title=title, url=info.get("webpage_url"), color=0x1db954)
             embed.set_thumbnail(url=info.get("thumbnail"))
             embed.add_field(name="Dauer", value=duration_str, inline=True)
+            embed.add_field(name="EQ", value=self.equalizer, inline=True)
+            embed.add_field(name="Format", value=self.audio_format, inline=True)
             if info.get("uploader"):
                 embed.set_footer(text=info.get("uploader"))
             self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
@@ -539,12 +550,12 @@ class MusicCommands(commands.Cog):
                 await self.play_next(ctx)
             return
 
-        # Suchbegriff → ersten Treffer an erste Stelle
+        # Suchbegriff → ersten Treffer an erste Stelle, Alternativen als Buttons
         if not eingabe.startswith("http"):
             try:
                 await ctx.send("🔎 Suche läuft...")
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch1:{eingabe}", download=False),
+                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
                     timeout=30.0,
                 )
             except asyncio.TimeoutError:
@@ -554,7 +565,7 @@ class MusicCommands(commands.Cog):
                 logger.exception("[next] Fehler bei Suche")
                 await ctx.send("❌ Fehler bei der Suche.")
                 return
-            entries = results.get("entries") or []
+            entries = (results.get("entries") or [])[:3]
             if not entries:
                 await ctx.send("❌ Keine Ergebnisse gefunden.")
                 return
@@ -562,7 +573,24 @@ class MusicCommands(commands.Cog):
             url = first.get("webpage_url") or first.get("url")
             title = first.get("title", "Unbekannter Titel")
             self.queue.appendleft((url, title))
-            await ctx.send(f"⏭️ Als nächstes: **{title}**")
+            alternatives = entries[1:]
+            if alternatives:
+                view = SearchAutoplayView(
+                    first, alternatives, self, ctx,
+                    base_content=f"⏭️ Als nächstes: **{title}**",
+                )
+                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                alt_lines = "\n".join(
+                    f"**Option {letters[i]}:** {e.get('title', 'Unbekannter Titel')}"
+                    for i, e in enumerate(alternatives)
+                )
+                msg = await ctx.send(
+                    f"⏭️ Als nächstes: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*\n{alt_lines}",
+                    view=view,
+                )
+                view.message = msg
+            else:
+                await ctx.send(f"⏭️ Als nächstes: **{title}**")
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -640,11 +668,61 @@ class MusicCommands(commands.Cog):
             color = 0x1db954 if self.is_playing else 0x808080
             embed = discord.Embed(title=ct_title, url=ct_url, color=color)
             embed.add_field(name="Dauer", value=duration_str, inline=True)
+            embed.add_field(name="EQ", value=self.equalizer, inline=True)
+            embed.add_field(name="Format", value=self.audio_format, inline=True)
             status = "🎶 Läuft gerade" if self.is_playing else "⏸️ Pausiert"
             embed.set_author(name=status)
             await ctx.send(embed=embed)
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
+
+    @commands.command(name="text")
+    async def lyrics_cmd(self, ctx):
+        """Zeigt den Liedtext des aktuell laufenden Songs via lyrics.ovh an."""
+        if not self.current_track:
+            await ctx.send("⚠️ Es läuft gerade kein Song.")
+            return
+
+        title_raw = self.current_track[1]
+
+        # YouTube-Titel folgen meist dem Muster "Artist - Title (Remix/Edit/...)"
+        if " - " in title_raw:
+            artist, song = title_raw.split(" - ", 1)
+            song = re.sub(r'\s*\([^)]*\)', '', song).strip()
+            artist = artist.strip()
+        else:
+            artist = ""
+            song = re.sub(r'\s*\([^)]*\)', '', title_raw).strip()
+
+        display = f"**{artist} – {song}**" if artist else f"**{song}**"
+        await ctx.send(f"🔎 Suche Liedtext für {display}...")
+
+        try:
+            url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        await ctx.send("❌ Liedtext nicht gefunden.")
+                        return
+                    data = await resp.json(content_type=None)
+                    lyrics = data.get("lyrics", "").strip()
+        except asyncio.TimeoutError:
+            await ctx.send("❌ Anfrage hat zu lange gedauert.")
+            return
+        except Exception:
+            logger.exception("[text] Fehler beim Abrufen des Liedtexts")
+            await ctx.send("❌ Fehler beim Abrufen des Liedtexts.")
+            return
+
+        if not lyrics:
+            await ctx.send("❌ Liedtext nicht gefunden.")
+            return
+
+        # Discord-Limit: 2000 Zeichen pro Nachricht → bei Bedarf aufteilen
+        chunks = [lyrics[i:i+1900] for i in range(0, len(lyrics), 1900)]
+        for i, chunk in enumerate(chunks):
+            header = f"{display}\n" if i == 0 else ""
+            await ctx.send(f"{header}```\n{chunk}\n```")
 
     @commands.command(name="loop")
     async def loop(self, ctx):
@@ -685,6 +763,8 @@ class MusicCommands(commands.Cog):
         self.is_playing = False
         self.current_track = None
         self.loop_mode = None
+        if self.prefetch_task and not self.prefetch_task.done():
+            self.prefetch_task.cancel()
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
         await ctx.send("🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt.")

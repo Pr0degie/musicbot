@@ -68,13 +68,13 @@ class SearchAutoplayView(View):
     er nicht das Richtige war. Nach 30 Sekunden verschwinden sie einfach.
     """
 
-    def __init__(self, added_entry, alternatives, music_cog, ctx):
+    def __init__(self, added_entry, alternatives, music_cog, ctx, base_content=None):
         super().__init__(timeout=30)
         self.added_entry = added_entry
         self.music_cog = music_cog
         self.ctx = ctx
         self.message = None
-        self.base_content = f"🎶 Spiele: **{added_entry.get('title', 'Unbekannter Titel')}**"
+        self.base_content = base_content or f"🎶 Spiele: **{added_entry.get('title', 'Unbekannter Titel')}**"
 
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         for i, entry in enumerate(alternatives):
