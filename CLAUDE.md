@@ -8,7 +8,7 @@ Two cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
 - **`cogs/music.py`** — `MusicCommands`: queue, yt_dlp extraction, FFmpeg playback, EQ presets, autoplay
-- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons on now-playing messages. Only the current song's message keeps buttons — previous ones get `view=None` on next song start. Buttons send ephemeral feedback to the user. **Resume button** has three cases: (1) paused → resume, (2) not playing but queue has songs → `play_next`, (3) not playing, queue empty, autoplay on → `autoplay()`. `SearchAutoplayView`: shown after `!p` and `!next` searches — first result plays/queues immediately, alternatives appear as buttons (timeout 30 s). Accepts optional `base_content` for the timeout fallback text.
+- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`, (3) autoplay on → `autoplay()`. `SearchAutoplayView`: first search result plays immediately, alternatives as buttons (30 s timeout).
 
 ### Music Playback Flow
 
@@ -65,10 +65,7 @@ Reference track priority: `current_track` → `last_played`. `last_played` is up
 
 ### Key Bot Commands
 
-See `!help` (implemented in `cogs/basic.py`) for the full command list. Architectural notes on specific commands:
+Full list via `!help`. Non-obvious internals:
 
-- **`!p` / `!next`** — yt-dlp extraction in `asyncio.to_thread()`, 30 s timeout; search shows `SearchAutoplayView` with alternatives
 - **`!loop`** — cycles `loop_mode`: `None` → `"song"` → `"queue"` → `None`; handled in `after_playing`
-- **`!eq`** — mid-song restart: prepends current track to queue, calls stop
-- **`!reloadcookies`** — calls `update_ydl()` to pick up a newly uploaded `cookies.txt` without restart
 - **`!text`** — lyrics via lyrics.ovh, parses "Artist - Title" from YouTube title
