@@ -1,13 +1,24 @@
 # FFmpeg-Filterchains pro EQ-Preset.
 #
-# Alle aktiven Presets beginnen mit asetpts=N/SR/TB (normalisiert YouTube-Stream-
-# Timestamps vor dem ersten Filter, verhindert Geschwindigkeits-Artefakte) und
-# enden mit aresample=48000 (explizite Ausgabe auf 48 kHz für Discord).
+# Struktur aller aktiven Presets:
+#   asetpts=N/SR/TB  → normalisiert YouTube-Stream-Timestamps vor dem ersten Filter;
+#                      verhindert Geschwindigkeits-Artefakte bei manchen Videos –
+#                      NICHT entfernen.
+#   <Filter>         → preset-spezifische Kette
+#   aresample=48000  → explizite Ausgabe auf 48 kHz für Discord
 #
-# "flat" ist leer → play_next verwendet codec="copy" (verlustfreies Durchreichen).
+# "flat" ist leer → play_next übergibt codec="copy" (verlustfreies Opus-Durchreichen,
+# kein Re-Encode, kein Qualitätsverlust).
 #
-# NICHT hinzufügen: resampler=soxr, aformat=sample_fmts=fltp, stereotools
-# → crashen auf diesem FFmpeg-Build.
+# !vol gibt es bewusst nicht – Lautstärke-Normalisierung ist Aufgabe des EQ-Presets.
+#
+# Tracks die kürzer als 2 s laufen, loggen eine Warnung mit aktivem Preset
+# (Hinweis auf defekten Filter oder ungültige Datei).
+#
+# NICHT hinzufügen:
+#   resampler=soxr       → crash auf diesem FFmpeg-Build
+#   aformat=sample_fmts=fltp → crash auf diesem FFmpeg-Build
+#   stereotools          → crash auf diesem FFmpeg-Build
 
 EQ_PRESETS: dict[str, str] = {
     "bassboost": "-af asetpts=N/SR/TB,bass=g=12,dynaudnorm=f=200,volume=0.85,aresample=48000",

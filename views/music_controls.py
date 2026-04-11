@@ -2,6 +2,7 @@ import asyncio
 from collections import deque
 import discord
 from discord.ui import Button, View
+from utils.logger import logger
 
 
 class MusicControlView(View):
@@ -33,6 +34,15 @@ class MusicControlView(View):
             self.ctx.voice_client.resume()
             self.music_cog.is_playing = True
             await interaction.response.send_message("▶️ Fortgesetzt.", ephemeral=True)
+        elif not self.music_cog.is_playing and self.music_cog.queue:
+            # Queue vorhanden, aber nichts läuft → starten
+            self.music_cog.is_playing = True
+            await interaction.response.send_message("▶️ Wiedergabe gestartet.", ephemeral=True)
+            await self.music_cog.play_next(self.ctx)
+        elif not self.music_cog.is_playing and self.music_cog.autoplay_enabled:
+            # Queue leer, aber Autoplay ist an → sofort loslegen
+            await interaction.response.send_message("🔁 Autoplay startet...", ephemeral=True)
+            asyncio.create_task(self.music_cog.autoplay(self.ctx))
         else:
             await interaction.response.send_message("⚠️ Kein Song zum Fortsetzen.", ephemeral=True)
 
@@ -54,6 +64,7 @@ class MusicControlView(View):
         """
         self.music_cog.autoplay_enabled = not self.music_cog.autoplay_enabled
         status = "aktiviert" if self.music_cog.autoplay_enabled else "deaktiviert"
+        logger.info(f"[Autoplay] {status.capitalize()} per Button")
         await interaction.response.send_message(f"🔁 Autoplay {status}.", ephemeral=True)
 
         # Sofort loslegen, wenn Autoplay gerade eingeschaltet wurde und die Queue leer ist.

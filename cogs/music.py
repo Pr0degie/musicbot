@@ -45,7 +45,8 @@ class MusicCommands(commands.Cog):
         self.is_playing = False
         self.current_track = None   # Aktuell spielender Song (url, title) – für !now
         self.last_played = None     # Wird von !replay genutzt
-        self.prefetch_task = None   # Läuft im Hintergrund während ein Song spielt
+        self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
+        self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
@@ -67,9 +68,6 @@ class MusicCommands(commands.Cog):
         # Autoplay ist standardmäßig aus – niemand will, dass der Bot
         # nach Mitternacht eigenständig Jazz spielt.
         self.autoplay_enabled = False
-
-        # Genres für den Autoplay-Modus – mit !genres anpassbar.
-        self.autoplay_genres = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
 
         self._start_time = time.monotonic()
         self._process = psutil.Process()
@@ -145,6 +143,18 @@ class MusicCommands(commands.Cog):
         }
         self.url_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
         self.playlist_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
+        # Autoplay: nur Metadaten, max. 6 Einträge – kein vollständiger Playlist-Scan
+        self.autoplay_ydl = yt_dlp.YoutubeDL({
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": True,
+            "skip_download": True,
+            "noplaylist": False,
+            "playlistend": 6,
+            "socket_timeout": 15,
+            **_cookies,
+            **_js,
+        })
 
     @commands.command(name="reloadcookies")
     async def reloadcookies(self, ctx):
@@ -173,26 +183,74 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Ungültiges Format. Verfügbare Optionen: mp3, webm")
 
     async def autoplay(self, ctx):
-        """Sucht einen zufälligen Song und fügt ihn vorne in die Queue ein."""
-        logger.info("[Autoplay] Suche zufälligen Song")
+        """Sucht einen zum letzten Song passenden Track und spielt ihn einmalig.
 
-        random_query = random.choice(self.autoplay_genres)
+        Nutzt den Titel des zuletzt gespielten Songs als Suchbasis, damit das
+        Ergebnis thematisch passt. Autoplay deaktiviert sich danach selbst –
+        für dauerhafte Wiederholung gibt es !loop.
+        """
+        # Referenz-Track: aktueller Song wenn vorhanden, sonst letzter gespielter
+        ref_url = None
+        ref_title = None
+        if self.current_track:
+            ref_url, ref_title, *_ = self.current_track
+        elif self.last_played:
+            ref_url, ref_title, *_ = self.last_played
+
+        # YouTube Mix/Radio-URL: gibt echte Empfehlungen basierend auf dem Video
+        yt_id = None
+        if ref_url:
+            m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", ref_url)
+            if m:
+                yt_id = m.group(1)
+
+        if yt_id:
+            # YouTube-eigene Empfehlungen via RD-Mix-Playlist
+            fetch_url = f"https://www.youtube.com/watch?v={yt_id}&list=RD{yt_id}"
+            logger.info(f"[Autoplay] Lade YouTube-Mix für Video {yt_id} (Basis: {ref_title!r})")
+        else:
+            # Fallback für Nicht-YouTube-Quellen: titelbasierte Suche
+            fetch_url = f"ytsearch5:{ref_title}" if ref_title else "ytsearch5:top music"
+            logger.info(f"[Autoplay] Kein YT-Video-ID – Suche per Query: {fetch_url!r}")
 
         try:
             info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, random_query, download=False),
+                asyncio.to_thread(self.autoplay_ydl.extract_info, fetch_url, download=False),
                 timeout=30.0,
             )
-            if "entries" in info:
-                info = info["entries"][0]
-            url = info.get("webpage_url")
-            title = info.get("title", "Unbekannt")
+            entries = (info.get("entries") or []) if info else []
 
-            # appendleft, damit der Autoplay-Song sofort als nächstes läuft
-            # und nicht ans Ende der Queue wandert.
+            def entry_url(e):
+                """Gibt die beste verfügbare URL eines Eintrags zurück (webpage_url > url)."""
+                return e.get("webpage_url") or e.get("url") or ""
+
+            def is_video(e):
+                """Nur echte Videos – keine Playlists, keine leeren URLs."""
+                if not e:
+                    return False
+                if e.get("_type") == "playlist":
+                    return False
+                u = entry_url(e)
+                return bool(u) and "playlist?" not in u and "/playlist/" not in u
+
+            # Originaltitel ausschließen, danach erstes passendes Video nehmen
+            candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+            if not candidates:
+                candidates = [e for e in entries if is_video(e)]
+
+            if not candidates:
+                await ctx.send("❌ Autoplay: Keine verwandten Songs gefunden.")
+                logger.warning("[Autoplay] Keine nutzbaren Einträge im Mix")
+                return
+
+            # Erstes Element aus dem Mix nehmen (YouTube sortiert nach Relevanz)
+            chosen = candidates[0]
+            url = entry_url(chosen)
+            title = chosen.get("title", "Unbekannt")
+
             self.queue.appendleft((url, title))
             logger.info(f"[Autoplay] Hinzugefügt: {title} ({url})")
-            await ctx.send(f"🔁 Autoplay hinzugefügt: **{title}**")
+            await ctx.send(f"🔁 Autoplay: **{title}**")
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -231,6 +289,79 @@ class MusicCommands(commands.Cog):
         except Exception as e:
             # Prefetch-Fehler sind nicht fatal – play_next lädt im Zweifelsfall selbst.
             logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
+
+    async def _prefetch_autoplay(self, ctx):
+        """Sucht und lädt den nächsten Autoplay-Song im Hintergrund während der aktuelle läuft.
+
+        Wird beim Song-Start gestartet wenn Autoplay an und Queue leer ist.
+        Hängt das Ergebnis an die Queue an, damit play_next es ohne Suchverzögerung
+        starten kann. Falls dieser Task noch läuft wenn der Song endet, wartet play_next
+        kurz darauf – statt sofort neu zu suchen.
+        """
+        # Referenz-Track bestimmen (aktuell spielend)
+        ref_url, ref_title = None, None
+        if self.current_track:
+            ref_url, ref_title, *_ = self.current_track
+
+        yt_id = None
+        if ref_url:
+            m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", ref_url)
+            if m:
+                yt_id = m.group(1)
+
+        fetch_url = (
+            f"https://www.youtube.com/watch?v={yt_id}&list=RD{yt_id}"
+            if yt_id
+            else (f"ytsearch5:{ref_title}" if ref_title else "ytsearch5:top music")
+        )
+        logger.info(f"[Autoplay Prefetch] Starte Hintergrundsuche für: {ref_title!r}")
+
+        try:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.autoplay_ydl.extract_info, fetch_url, download=False),
+                timeout=30.0,
+            )
+            entries = (info.get("entries") or []) if info else []
+
+            def entry_url(e):
+                return e.get("webpage_url") or e.get("url") or ""
+
+            def is_video(e):
+                if not e or e.get("_type") == "playlist":
+                    return False
+                u = entry_url(e)
+                return bool(u) and "playlist?" not in u and "/playlist/" not in u
+
+            candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+            if not candidates:
+                candidates = [e for e in entries if is_video(e)]
+            if not candidates:
+                logger.warning("[Autoplay Prefetch] Keine nutzbaren Einträge")
+                return
+
+            chosen = candidates[0]
+            url = entry_url(chosen)
+            title = chosen.get("title", "Unbekannt")
+
+            # Datei herunterladen während der aktuelle Song noch läuft
+            logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
+            dl_info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, url, download=True),
+                timeout=120.0,
+            )
+            if dl_info and "entries" in dl_info:
+                dl_info = dl_info["entries"][0]
+            logger.info(f"[Autoplay Prefetch] Fertig: {title}")
+
+            # Nur in Queue hängen wenn Autoplay noch aktiv ist
+            if self.autoplay_enabled:
+                self.queue.append((url, title))
+                logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
+
+        except asyncio.TimeoutError:
+            logger.warning("[Autoplay Prefetch] Timeout – play_next fällt auf normales autoplay() zurück")
+        except Exception as e:
+            logger.warning(f"[Autoplay Prefetch] Fehler: {e}")
 
     async def _auto_leave(self, voice_client):
         """Verlässt den Channel nach AUTO_LEAVE_SECONDS wenn kein User mehr drin ist."""
@@ -314,10 +445,27 @@ class MusicCommands(commands.Cog):
         if not self.queue:
             logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
             self.is_playing = False
+            # current_track als last_played sichern bevor es gecleant wird,
+            # damit autoplay() noch weiß was zuletzt lief.
+            if self.current_track:
+                self.last_played = self.current_track
             self.current_track = None
             # Autoplay rettet die Stille – aber nur wenn gewünscht.
             if self.autoplay_enabled:
-                await self.autoplay(ctx)
+                # Wenn der Prefetch-Task noch läuft, kurz warten – er hat den Song
+                # bereits heruntergeladen und hängt ihn gleich in die Queue.
+                if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+                    logger.info("[Autoplay] Warte auf laufenden Prefetch-Task...")
+                    try:
+                        await asyncio.wait_for(asyncio.shield(self._autoplay_prefetch_task), timeout=60.0)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        logger.warning("[Autoplay] Prefetch-Task nicht rechtzeitig fertig – Fallback")
+                # Queue prüfen: Prefetch hat ggf. schon etwas eingereiht
+                if self.queue:
+                    self.is_playing = True
+                    await self.play_next(ctx)
+                else:
+                    await self.autoplay(ctx)
             return
 
         url, title = self.queue.popleft()
@@ -374,8 +522,8 @@ class MusicCommands(commands.Cog):
                     ct_url, ct_title, *_ = self.current_track
                     self.queue.append((ct_url, ct_title))
 
-                if self.queue and ctx.voice_client:
-                    logger.info(f"[Warten] Queue hat {len(self.queue)} Songs. Warten auf nächsten...")
+                if ctx.voice_client:
+                    # Immer play_next aufrufen – die Queue-leer+Autoplay-Logik liegt dort.
                     fut = asyncio.run_coroutine_threadsafe(
                         self.play_next(ctx), self.bot.loop
                     )
@@ -388,11 +536,6 @@ class MusicCommands(commands.Cog):
                             )
 
                     fut.add_done_callback(log_exception)
-                elif not self.queue and ctx.voice_client:
-                    # Queue leer, aber Bot bleibt im Kanal und wartet auf !p.
-                    # Kein automatisches Verlassen – das wäre unhöflich.
-                    self.is_playing = False
-                    logger.info("[PAUSE] Queue leer, aber Bot bleibt im Kanal. Warte auf !p ...")
                 else:
                     logger.info("[KEINE VERBINDUNG] Keine Verbindung. Warte auf !j ...")
 
@@ -433,6 +576,12 @@ class MusicCommands(commands.Cog):
                 self.prefetch_task.cancel()
             if self.queue:
                 self.prefetch_task = asyncio.create_task(self._prefetch_next())
+
+            # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
+            if self.autoplay_enabled and not self.queue:
+                if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+                    self._autoplay_prefetch_task.cancel()
+                self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
         except asyncio.TimeoutError:
             await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
@@ -921,45 +1070,3 @@ class MusicCommands(commands.Cog):
         """Spielt Babas Playlist ab. Kein Argument nötig – einfach !baba und los."""
         await ctx.invoke(self.p, eingabe="https://www.youtube.com/playlist?list=PLhqD5zya16QavuozTOLCZ3Jn6gQu66Tvj")
 
-    @commands.command(name="genres")
-    async def genres(self, ctx, aktion: str = None, *, genre: str = None):
-        """Verwaltet die Autoplay-Genres. Nutzung: !genres | !genres add <genre> | !genres remove <genre> | !genres reset"""
-        DEFAULT_GENRES = ["chill music", "lofi", "pop", "edm", "jazz", "gaming music"]
-
-        if aktion is None:
-            genre_list = "\n".join(f"• {g}" for g in self.autoplay_genres)
-            await ctx.send(f"🎵 Aktuelle Autoplay-Genres:\n{genre_list}")
-
-        elif aktion.lower() == "add":
-            if not genre:
-                await ctx.send("❌ Bitte ein Genre angeben: `!genres add <genre>`")
-                return
-            if len(self.autoplay_genres) >= 20:
-                await ctx.send("❌ Maximal 20 Genres erlaubt. Entferne zuerst ein Genre mit `!genres remove`.")
-                return
-            if genre.lower() in [g.lower() for g in self.autoplay_genres]:
-                await ctx.send(f"⚠️ **{genre}** ist bereits in der Liste.")
-                return
-            self.autoplay_genres.append(genre)
-            await ctx.send(f"✅ **{genre}** zur Autoplay-Liste hinzugefügt.")
-
-        elif aktion.lower() == "remove":
-            if not genre:
-                await ctx.send("❌ Bitte ein Genre angeben: `!genres remove <genre>`")
-                return
-            match = next((g for g in self.autoplay_genres if g.lower() == genre.lower()), None)
-            if not match:
-                await ctx.send(f"❌ **{genre}** nicht in der Liste gefunden.")
-                return
-            self.autoplay_genres.remove(match)
-            await ctx.send(f"🗑️ **{match}** entfernt.")
-            if not self.autoplay_genres:
-                self.autoplay_genres = list(DEFAULT_GENRES)
-                await ctx.send("⚠️ Liste war leer – Standard-Genres wiederhergestellt.")
-
-        elif aktion.lower() == "reset":
-            self.autoplay_genres = list(DEFAULT_GENRES)
-            await ctx.send("🔄 Autoplay-Genres auf Standard zurückgesetzt.")
-
-        else:
-            await ctx.send("❌ Unbekannte Aktion. Nutze: `!genres`, `!genres add <genre>`, `!genres remove <genre>`, `!genres reset`")
