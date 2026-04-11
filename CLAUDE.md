@@ -79,6 +79,10 @@ Toggled via the `🔁 Autoplay` button in `MusicControlView`. When enabled:
 
 Reference track priority: `current_track` → `last_played`. `last_played` is updated in the queue-empty branch of `play_next` (before `current_track` is cleared) so it's always available when autoplay runs. Autoplay stays enabled until the button is pressed again — no one-shot behaviour.
 
+`_autoplay_queued_url` tracks the URL that was most recently added to the queue by autoplay (either via `_prefetch_autoplay` or `autoplay()`). It is cleared when that entry is popped by `play_next` or evicted by `_evict_autoplay_song()`.
+
+**`!p` with autoplay active** — `_evict_autoplay_song()` is called before adding the new song. It cancels any running `_prefetch_autoplay` task, removes the tracked autoplay URL from the queue, and the new song is inserted at the front (`appendleft`) so it plays next. Playlist additions also evict but append at the end as usual.
+
 ### Key Bot Commands
 
 See `!help` (implemented in `cogs/basic.py`) for the full command list. Architectural notes on specific commands:
