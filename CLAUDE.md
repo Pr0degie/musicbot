@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 Setup → see `README.md`. No test suite or linter configured.
 
 ## Architecture
@@ -25,10 +23,6 @@ Two cogs loaded at startup, all responses in German:
 
 Background tasks on `MusicCommands`: `prefetch_task` (downloads next queued song while current plays), `_autoplay_prefetch_task` (searches + downloads next autoplay song while current plays — started when queue is empty and autoplay is on).
 
-### Queue
-
-`collections.deque` in `MusicCommands`. `shuffle`/`remove`/`move` convert to list first. Max playlist size: 150.
-
 ### Audio Configuration
 
 Default format: `webm`. Default EQ preset: `punchy`. Filter chains defined in `cogs/presets.py` (`EQ_PRESETS`), imported into `MusicCommands` as `self.eq_presets`.
@@ -45,8 +39,6 @@ Switch with `!format mp3|webm` or `!eq <preset>`. Format change reinitializes yt
 | `autoplay_ydl` | YouTube Mix metadata only — `extract_flat=True`, `playlistend=6`, no download |
 
 FFmpeg filter notes and the "do not add" list are documented as comments at the top of `cogs/presets.py`.
-
-**yt_dlp** prefers highest-quality Opus/webm — see `update_ydl()` in `music.py` for selector details.
 
 ### YouTube Authentication (Cookies)
 
