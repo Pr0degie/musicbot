@@ -2,19 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Setup & Running
-
-Entry point: `Musicbot/main.py`. FFmpeg must be in PATH.
-
-```bash
-cd Musicbot
-python -m venv venv && source venv/Scripts/activate
-pip install -r requirements.txt
-```
-
-Add `DISCORD_TOKEN=your_token` to `Musicbot/.env`, then `python main.py`.
-
-No test suite or linter configured.
+Setup → see `README.md`. No test suite or linter configured.
 
 ## Architecture
 
