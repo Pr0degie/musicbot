@@ -48,6 +48,7 @@ class MusicCommands(commands.Cog):
         self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
         self._autoplay_queued_url = None     # URL die zuletzt von Autoplay in die Queue gelegt wurde
+        self._recently_played: deque = deque(maxlen=10)  # URLs der zuletzt gespielten Songs
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
@@ -235,7 +236,9 @@ class MusicCommands(commands.Cog):
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
             # Originaltitel ausschließen, danach erstes passendes Video nehmen
-            candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+            candidates = [e for e in entries if is_video(e) and entry_url(e) not in self._recently_played]
+            if not candidates:
+                candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
             if not candidates:
                 candidates = [e for e in entries if is_video(e)]
 
@@ -334,7 +337,9 @@ class MusicCommands(commands.Cog):
                 u = entry_url(e)
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
-            candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+            candidates = [e for e in entries if is_video(e) and entry_url(e) not in self._recently_played]
+            if not candidates:
+                candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
             if not candidates:
                 candidates = [e for e in entries if is_video(e)]
             if not candidates:
@@ -566,6 +571,7 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title, duration)
+            self._recently_played.append(url)
             self.text_channel = ctx.channel
 
             # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches

@@ -61,6 +61,8 @@ Reference track priority: `current_track` → `last_played`. `last_played` is up
 
 `_autoplay_queued_url` tracks the URL that was most recently added to the queue by autoplay (either via `_prefetch_autoplay` or `autoplay()`). It is cleared when that entry is popped by `play_next` or evicted by `_evict_autoplay_song()`.
 
+`_recently_played` is a `deque(maxlen=10)` of URLs. Each track appended to `current_track` in `play_next` gets added here. Autoplay candidate selection filters against this list first to prevent recent songs from repeating; falls back to filtering only `ref_url` if all candidates are in history.
+
 **`!p` with autoplay active** — `_evict_autoplay_song()` is called before adding the new song. It cancels any running `_prefetch_autoplay` task, removes the tracked autoplay URL from the queue, and the new song is inserted at the front (`appendleft`) so it plays next. Playlist additions also evict but append at the end as usual.
 
 ### Key Bot Commands
