@@ -47,6 +47,7 @@ class MusicCommands(commands.Cog):
         self.last_played = None     # Wird von !replay genutzt
         self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
+        self._autoplay_queued_url = None     # URL die zuletzt von Autoplay in die Queue gelegt wurde
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
@@ -249,6 +250,7 @@ class MusicCommands(commands.Cog):
             title = chosen.get("title", "Unbekannt")
 
             self.queue.appendleft((url, title))
+            self._autoplay_queued_url = url
             logger.info(f"[Autoplay] Hinzugefügt: {title} ({url})")
             await ctx.send(f"🔁 Autoplay: **{title}**")
             if not self.is_playing:
@@ -356,6 +358,7 @@ class MusicCommands(commands.Cog):
             # Nur in Queue hängen wenn Autoplay noch aktiv ist
             if self.autoplay_enabled:
                 self.queue.append((url, title))
+                self._autoplay_queued_url = url
                 logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
 
         except asyncio.TimeoutError:
@@ -469,6 +472,8 @@ class MusicCommands(commands.Cog):
             return
 
         url, title = self.queue.popleft()
+        if url == self._autoplay_queued_url:
+            self._autoplay_queued_url = None
         logger.info(f"[Nächster Track] {title} ({url})")
 
         try:
@@ -595,6 +600,34 @@ class MusicCommands(commands.Cog):
             asyncio.create_task(self.play_next(ctx))
             return
 
+    def _evict_autoplay_song(self) -> str | None:
+        """Entfernt den von Autoplay vorgereihten Song aus der Queue (falls vorhanden).
+
+        Bricht außerdem einen laufenden Prefetch-Task ab, damit kein weiterer
+        Autoplay-Song nachgeschoben wird bevor der manuelle !p-Song gespielt hat.
+        Gibt den Titel des entfernten Songs zurück (für Logging), sonst None.
+        """
+        # Laufenden Prefetch sofort stoppen
+        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+            self._autoplay_prefetch_task.cancel()
+            self._autoplay_prefetch_task = None
+
+        if not self._autoplay_queued_url:
+            return None
+
+        queue_list = list(self.queue)
+        removed_title = None
+        new_queue = []
+        for u, t in queue_list:
+            if u == self._autoplay_queued_url and removed_title is None:
+                removed_title = t  # nur erstes Vorkommen entfernen
+            else:
+                new_queue.append((u, t))
+        if removed_title is not None:
+            self.queue = deque(new_queue)
+            self._autoplay_queued_url = None
+        return removed_title
+
     @commands.command()
     async def p(self, ctx, *, eingabe):
         """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
@@ -627,11 +660,18 @@ class MusicCommands(commands.Cog):
                 await ctx.send("❌ Keine Ergebnisse gefunden.")
                 return
 
-            # Ersten Treffer direkt in die Queue legen
+            # Ersten Treffer direkt in die Queue legen.
+            # Wenn Autoplay einen Song vorgemerkt hat, fliegt der raus – der manuelle
+            # Wunsch hat Vorrang und soll als nächstes spielen.
             first = entries[0]
             url = first.get("webpage_url") or first.get("url")
             title = first.get("title", "Unbekannter Titel")
-            self.queue.append((url, title))
+            evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
+            if evicted:
+                logger.info(f"[p] Autoplay-Song verdrängt: {evicted}")
+                self.queue.appendleft((url, title))
+            else:
+                self.queue.append((url, title))
 
             # Alternativen (Treffer 2 und 3) als Buttons anzeigen
             alternatives = entries[1:]
@@ -701,7 +741,12 @@ class MusicCommands(commands.Cog):
             dup_pos = next((i + 1 for i, (_, t) in enumerate(self.queue) if t == title), None)
             if dup_pos:
                 await ctx.send(f"⚠️ **{title}** ist bereits in der Queue (Position {dup_pos}). Trotzdem hinzugefügt.")
-            self.queue.append((url, title))
+            evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
+            if evicted:
+                logger.info(f"[p] Autoplay-Song verdrängt: {evicted}")
+                self.queue.appendleft((url, title))
+            else:
+                self.queue.append((url, title))
             await ctx.send(f"🎶 Hinzugefügt: **{title}**")
 
         if not self.is_playing:
