@@ -71,6 +71,12 @@ class MusicCommands(commands.Cog):
         # nach Mitternacht eigenständig Jazz spielt.
         self.autoplay_enabled = False
 
+        # Metadaten-Cache: URL → info-dict von yt_dlp (download=False).
+        # Verhindert redundante extract_info-Aufrufe wenn dieselbe URL z.B.
+        # von _prefetch_next() und kurz danach von _resolve_track() abgefragt wird.
+        # Wird bei update_ydl() und clear() geleert.
+        self._url_cache: dict = {}
+
         self._start_time = time.monotonic()
         self._process = psutil.Process()
 
@@ -83,6 +89,9 @@ class MusicCommands(commands.Cog):
         Wird beim Start und nach jedem !format-Wechsel aufgerufen, da yt_dlp-Optionen
         nach der Initialisierung nicht mehr änderbar sind.
         """
+        # Cache leeren – neue ydl-Instanz kann andere Format-URLs liefern.
+        if hasattr(self, "_url_cache"):
+            self._url_cache.clear()
         if YDL_COOKIES_FILE:
             _cookies = {"cookiefile": YDL_COOKIES_FILE}
         elif YDL_BROWSER:
@@ -266,22 +275,27 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Fehler bei Autoplay.")
             logger.exception("[Autoplay Fehler]")
 
-    async def _prefetch_next(self):
-        """Lädt den nächsten Song in der Queue still im Hintergrund herunter.
+    async def _prefetch_next(self, idx: int = 0):
+        """Lädt Song an Position idx der Queue still im Hintergrund herunter.
 
         Wird direkt nach dem Start eines Tracks gestartet, damit der nächste
         Song idealerweise schon bereit liegt wenn er dran ist.
         """
-        if not self.queue:
+        if len(self.queue) <= idx:
             return
-        url, title = self.queue[0]  # Peek – nicht aus der Queue entfernen
+        url, title = self.queue[idx]  # Peek – nicht aus der Queue entfernen
         try:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=False),
-                timeout=30.0,
-            )
-            if "entries" in info:
-                info = info["entries"][0]
+            if url in self._url_cache:
+                info = self._url_cache[url]
+                logger.info(f"[Prefetch] Metadaten aus Cache: {title}")
+            else:
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                    timeout=30.0,
+                )
+                if "entries" in info:
+                    info = info["entries"][0]
+                self._url_cache[url] = info
             filename = Path(self.ydl.prepare_filename(info))
             if not filename.exists():
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
@@ -414,12 +428,17 @@ class MusicCommands(commands.Cog):
         Raises asyncio.TimeoutError wenn extract_info > 30 s dauert.
         Returns: (info dict, Path, title str, duration int)
         """
-        info = await asyncio.wait_for(
-            asyncio.to_thread(self.ydl.extract_info, url, download=False),
-            timeout=30.0,
-        )
-        if "entries" in info:
-            info = info["entries"][0]
+        if url in self._url_cache:
+            info = self._url_cache[url]
+            logger.info(f"[Resolve] Metadaten aus Cache: {title}")
+        else:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                timeout=30.0,
+            )
+            if "entries" in info:
+                info = info["entries"][0]
+            self._url_cache[url] = info
 
         title = info.get("title", "Unbekannter Titel")
         duration = info.get("duration", 0)
@@ -586,7 +605,12 @@ class MusicCommands(commands.Cog):
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             if self.queue:
-                self.prefetch_task = asyncio.create_task(self._prefetch_next())
+                # Bis zu 2 Songs parallel vorladen – reduziert Wartezeit bei
+                # kurzen Tracks oder wenn der User viele Songs überspringt.
+                n = min(len(self.queue), 2)
+                self.prefetch_task = asyncio.create_task(
+                    asyncio.gather(*[self._prefetch_next(i) for i in range(n)])
+                )
 
             # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
             if self.autoplay_enabled and not self.queue:
@@ -989,6 +1013,7 @@ class MusicCommands(commands.Cog):
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
         self.queue.clear()
+        self._url_cache.clear()
         self.is_playing = False
         self.current_track = None
         self.loop_mode = None
@@ -1099,7 +1124,9 @@ class MusicCommands(commands.Cog):
         # Downloads-Ordner
         dl_files = list(DOWNLOAD_DIR.glob("*"))
         dl_count = len(dl_files)
-        dl_size_mb = sum(f.stat().st_size for f in dl_files if f.is_file()) / 1024 / 1024
+        dl_size_mb = await asyncio.to_thread(
+            lambda: sum(f.stat().st_size for f in dl_files if f.is_file()) / 1024 / 1024
+        )
 
         # Queue
         queue_len = len(self.queue)

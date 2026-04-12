@@ -10,7 +10,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 - Musik abspielen per YouTube-Link, Playlist oder Suchbegriff
 - Steuerbuttons direkt in Discord: ⏸️ ▶️ ⏭️ 🔁
 - Autoplay-Toggle: aktiviert automatische Wiedergabe wenn die Queue leer läuft
-- Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`
+- Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audioformat wählbar: `webm` (Standard) oder `mp3`
 - Warteschlange verwalten: `!q`, `!shuffle`, `!clear`, `!remove`
 - Download-Cache: bereits gespielte Songs werden lokal gespeichert und nicht neu geladen
