@@ -495,6 +495,13 @@ class MusicCommands(commands.Cog):
                     await self.autoplay(ctx)
             return
 
+        # Guard: verhindert die "Already playing audio"-Kaskade bei gleichzeitigen
+        # play_next-Aufrufen (z.B. after_playing-Callback + Error-Handler-create_task).
+        # Song NICHT aus der Queue nehmen – erst nach dem Check.
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            logger.warning("[play_next] Voice client bereits am spielen – konkurrenten Aufruf ignoriert.")
+            return
+
         url, title = self.queue.popleft()
         if url == self._autoplay_queued_url:
             self._autoplay_queued_url = None
@@ -605,12 +612,14 @@ class MusicCommands(commands.Cog):
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             if self.queue:
-                # Bis zu 2 Songs parallel vorladen – reduziert Wartezeit bei
-                # kurzen Tracks oder wenn der User viele Songs überspringt.
-                n = min(len(self.queue), 2)
-                self.prefetch_task = asyncio.create_task(
-                    asyncio.gather(*[self._prefetch_next(i) for i in range(n)])
-                )
+                # Bis zu 2 Songs sequenziell vorladen – self.ydl ist nicht thread-safe,
+                # daher kein paralleles gather. Sequenziell reicht: während Song N spielt,
+                # werden N+1 und N+2 nacheinander heruntergeladen.
+                async def _prefetch_two():
+                    await self._prefetch_next(0)
+                    if len(self.queue) >= 2:
+                        await self._prefetch_next(1)
+                self.prefetch_task = asyncio.create_task(_prefetch_two())
 
             # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
             if self.autoplay_enabled and not self.queue:
@@ -629,6 +638,25 @@ class MusicCommands(commands.Cog):
             # damit bei vielen schlechten URLs der Call-Stack nicht überfüllt wird.
             asyncio.create_task(self.play_next(ctx))
             return
+
+    async def _ensure_voice(self, ctx) -> bool:
+        """Stellt sicher, dass der Bot im Voice-Channel des Users ist.
+
+        Verbindet automatisch wenn nötig. Gibt True zurück wenn verbunden,
+        False wenn der User selbst in keinem Channel ist (mit Fehlermeldung).
+        """
+        if ctx.voice_client is not None:
+            return True
+        if not ctx.author.voice:
+            await ctx.send("❌ Du bist in keinem Voice-Channel.")
+            return False
+        try:
+            await ctx.author.voice.channel.connect()
+            logger.info(f"[Auto-Join] Verbunden mit: {ctx.author.voice.channel.name}")
+        except Exception as e:
+            await ctx.send(f"❌ Verbindung fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
+            return False
+        return True
 
     def _evict_autoplay_song(self) -> str | None:
         """Entfernt den von Autoplay vorgereihten Song aus der Queue (falls vorhanden).
@@ -663,9 +691,7 @@ class MusicCommands(commands.Cog):
         """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
         logger.info(f"[p] Eingabe erhalten: {eingabe}")
 
-        if ctx.voice_client is None:
-            await ctx.send("❌ Bitte benutze `!j`, um den Bot in deinen Voice-Channel zu holen.")
-            logger.warning("[p] Kein VoiceClient vorhanden.")
+        if not await self._ensure_voice(ctx):
             return
 
         # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
@@ -787,8 +813,7 @@ class MusicCommands(commands.Cog):
     async def next_song(self, ctx, *, eingabe):
         """Fügt einen Song an die erste Stelle der Queue ein (spielt als nächstes).
         Format: !next URL  oder  !next URL||Titel  oder  !next Suchbegriff"""
-        if ctx.voice_client is None:
-            await ctx.send("❌ Bitte benutze `!j`, um den Bot in deinen Voice-Channel zu holen.")
+        if not await self._ensure_voice(ctx):
             return
 
         # Format: URL||Titel → direkt ohne yt_dlp-Lookup hinzufügen
