@@ -1025,7 +1025,7 @@ class MusicCommands(commands.Cog):
             for i, (url, title) in enumerate(self.queue, 1):
                 line = f"{i}. {title}\n"
                 # Discord-Nachrichten dürfen max. 2000 Zeichen haben.
-                if len(message) + len(line) >= 1980:
+                if len(message) + len(line) >= 1950:
                     break
                 message += line
                 shown += 1
