@@ -26,6 +26,9 @@ from views.music_controls import MusicControlView, SearchAutoplayView
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+PLAYLISTS_DIR = Path("playlists")
+PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 class MusicCommands(commands.Cog):
     """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay."""
@@ -1047,6 +1050,60 @@ class MusicCommands(commands.Cog):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
         await ctx.send("🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt.")
+
+    @commands.command(name="saveq")
+    async def saveq(self, ctx, *, name: str):
+        """Speichert die aktuelle Queue unter einem Namen. Verwendung: !saveq <name>"""
+        if not self.queue and not self.current_track:
+            await ctx.send("⚠️ Nichts zu speichern – Queue und aktueller Track sind leer.")
+            return
+        safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+        if not safe_name:
+            await ctx.send("❌ Ungültiger Name.")
+            return
+        tracks = []
+        if self.current_track:
+            ct_url, ct_title, *_ = self.current_track
+            tracks.append([ct_url, ct_title])
+        tracks.extend([url, title] for url, title in self.queue)
+        path = PLAYLISTS_DIR / f"{safe_name}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(tracks, f, ensure_ascii=False, indent=2)
+        await ctx.send(f"💾 Queue als **{safe_name}** gespeichert ({len(tracks)} Titel).")
+
+    @commands.command(name="loadq")
+    async def loadq(self, ctx, *, name: str):
+        """Lädt eine gespeicherte Queue und hängt sie an die aktuelle an. Verwendung: !loadq <name>"""
+        safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+        path = PLAYLISTS_DIR / f"{safe_name}.json"
+        if not path.exists():
+            await ctx.send(f"❌ Keine gespeicherte Queue mit dem Namen **{safe_name}** gefunden.")
+            return
+        with open(path, encoding="utf-8") as f:
+            tracks = json.load(f)
+        for url, title in tracks:
+            self.queue.append((url, title))
+        await ctx.send(f"📂 **{safe_name}** geladen – {len(tracks)} Titel zur Queue hinzugefügt.")
+        if not self.is_playing:
+            self.is_playing = True
+            await self.play_next(ctx)
+
+    @commands.command(name="lists")
+    async def lists(self, ctx):
+        """Zeigt alle gespeicherten Queues."""
+        files = sorted(PLAYLISTS_DIR.glob("*.json"))
+        if not files:
+            await ctx.send("📭 Keine gespeicherten Queues vorhanden.")
+            return
+        lines = []
+        for p in files:
+            try:
+                with open(p, encoding="utf-8") as f:
+                    count = len(json.load(f))
+                lines.append(f"• **{p.stem}** ({count} Titel)")
+            except Exception:
+                lines.append(f"• **{p.stem}**")
+        await ctx.send("📋 Gespeicherte Queues:\n" + "\n".join(lines))
 
     @commands.command()
     async def remove(self, ctx, index: int):
