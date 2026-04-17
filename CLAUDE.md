@@ -23,7 +23,7 @@ Two cogs loaded at startup, all responses in German:
 
 Background tasks on `MusicCommands`: `prefetch_task` (downloads the next **two** queued songs in parallel while the current plays — `asyncio.gather(_prefetch_next(0), _prefetch_next(1))`), `_autoplay_prefetch_task` (searches + downloads next autoplay song while current plays — started when queue is empty and autoplay is on).
 
-`_url_cache` is a `dict` mapping URL → yt_dlp info-dict (`download=False`). Populated by `_prefetch_next()` and `_resolve_track()`; prevents a second `extract_info` call when the prefetch already fetched the metadata. Cleared by `update_ydl()` (every 50 songs) and `clear()`.
+`_url_cache` is a `dict` mapping URL → yt_dlp info-dict (`download=False`). Populated by `_prefetch_next()`, `_resolve_track()`, and `_prefetch_autoplay()` (stores the search-phase metadata so `_resolve_track` gets a cache hit later); prevents a second `extract_info` call when the prefetch already fetched the metadata. `update_ydl()` (every 50 songs) keeps only entries whose URLs are still in the queue or `current_track`; `clear()` wipes it entirely.
 
 ### Audio Configuration
 
