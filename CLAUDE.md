@@ -7,7 +7,8 @@ Setup → see `README.md`. No test suite or linter configured.
 Two cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
-- **`cogs/music.py`** — `MusicCommands`: queue, yt_dlp extraction, FFmpeg playback, EQ presets, autoplay
+- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`
+- **`cogs/downloader.py`** — `Downloader`: all five yt_dlp instances, `_url_cache`, `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()`. Held by `MusicCommands` as `self.dl`. Also defines `DOWNLOAD_DIR`.
 - **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`, (3) autoplay on → `autoplay()`. `SearchAutoplayView`: first search result plays immediately, alternatives as buttons (30 s timeout).
 
 ### Music Playback Flow
@@ -23,22 +24,22 @@ Two cogs loaded at startup, all responses in German:
 
 Background tasks on `MusicCommands`: `prefetch_task` (downloads the next **two** queued songs in parallel while the current plays — `asyncio.gather(_prefetch_next(0), _prefetch_next(1))`), `_autoplay_prefetch_task` (searches + downloads next autoplay song while current plays — started when queue is empty and autoplay is on).
 
-`_url_cache` is a `dict` mapping URL → yt_dlp info-dict (`download=False`). Populated by `_prefetch_next()`, `_resolve_track()`, and `_prefetch_autoplay()` (stores the search-phase metadata so `_resolve_track` gets a cache hit later); prevents a second `extract_info` call when the prefetch already fetched the metadata. `update_ydl()` (every 50 songs) keeps only entries whose URLs are still in the queue or `current_track`; `clear()` wipes it entirely.
+`_url_cache` lives on `Downloader` (`self.dl._url_cache`), mapping URL → yt_dlp info-dict (`download=False`). Populated by `prefetch_next()`, `resolve_track()`, and `prefetch_autoplay()` (stores search-phase metadata so `resolve_track` gets a cache hit later); prevents a second `extract_info` call when prefetch already fetched the metadata. `update_ydl()` (every 50 songs) keeps only entries whose URLs are still in the queue or `current_track`; `clear()` wipes it entirely.
 
 ### Audio Configuration
 
 Default format: `webm`. Default EQ preset: `punchy`. Filter chains defined in `cogs/presets.py` (`EQ_PRESETS`), imported into `MusicCommands` as `self.eq_presets`.
 Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`.
 `!eq` mid-song: restarts the current track with the new filter (prepends to queue, calls stop).
-Switch with `!format mp3|webm` or `!eq <preset>`. Format change reinitializes yt_dlp via `update_ydl()`, which rebuilds all cached ydl instances:
+Switch with `!format mp3|webm` or `!eq <preset>`. Format change calls `update_ydl()` (thin wrapper → `self.dl.rebuild()`), which recreates all instances in `Downloader`:
 
-| Instance | Purpose |
-|---|---|
-| `ydl` | Main download instance |
-| `search_ydl` | `extract_flat=True`, for `ytsearch` queries |
-| `url_ydl` | Single-video URL resolution, `noplaylist=True` |
-| `playlist_ydl` | Playlist extraction, `extract_flat="in_playlist"` |
-| `autoplay_ydl` | YouTube Mix metadata only — `extract_flat=True`, `playlistend=6`, no download |
+| Instance | Access | Purpose |
+|---|---|---|
+| `ydl` | `self.dl.ydl` | Main download instance |
+| `search_ydl` | `self.dl.search_ydl` | `extract_flat=True`, for `ytsearch` queries |
+| `url_ydl` | `self.dl.url_ydl` | Single-video URL resolution, `noplaylist=True` |
+| `playlist_ydl` | `self.dl.playlist_ydl` | Playlist extraction, `extract_flat="in_playlist"` |
+| `autoplay_ydl` | `self.dl.autoplay_ydl` | YouTube Mix metadata only — `extract_flat=True`, `playlistend=6`, no download |
 
 FFmpeg filter notes and the "do not add" list are documented as comments at the top of `cogs/presets.py`.
 
