@@ -2,6 +2,7 @@
 # Kurz gesagt: die wichtigste Datei im ganzen Bot. Treat her well.
 
 import asyncio
+import itertools
 import json
 import random
 import re
@@ -92,9 +93,13 @@ class MusicCommands(commands.Cog):
         Wird beim Start und nach jedem !format-Wechsel aufgerufen, da yt_dlp-Optionen
         nach der Initialisierung nicht mehr änderbar sind.
         """
-        # Cache leeren – neue ydl-Instanz kann andere Format-URLs liefern.
-        if hasattr(self, "_url_cache"):
-            self._url_cache.clear()
+        # Cache: nur Einträge für Songs behalten die noch in der Queue oder aktuell spielen.
+        # Alle anderen können andere Format-URLs liefern und müssen neu geholt werden.
+        if hasattr(self, "_url_cache") and self._url_cache:
+            queue_urls = {url for url, _ in self.queue} if hasattr(self, "queue") else set()
+            if hasattr(self, "current_track") and self.current_track:
+                queue_urls.add(self.current_track[0])
+            self._url_cache = {k: v for k, v in self._url_cache.items() if k in queue_urls}
         if YDL_COOKIES_FILE:
             _cookies = {"cookiefile": YDL_COOKIES_FILE}
         elif YDL_BROWSER:
@@ -367,14 +372,15 @@ class MusicCommands(commands.Cog):
             url = entry_url(chosen)
             title = chosen.get("title", "Unbekannt")
 
-            # Datei herunterladen während der aktuelle Song noch läuft
+            # Metadaten aus Suchphase cachen damit _resolve_track() sie wiederverwendet.
+            self._url_cache[url] = chosen
+            # Datei herunterladen während der aktuelle Song noch läuft.
+            # Nur ydl.download() – Metadaten sind bereits oben via extract_info geholt.
             logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            dl_info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=True),
+            await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.download, [url]),
                 timeout=120.0,
             )
-            if dl_info and "entries" in dl_info:
-                dl_info = dl_info["entries"][0]
             logger.info(f"[Autoplay Prefetch] Fertig: {title}")
 
             # Nur in Queue hängen wenn Autoplay noch aktiv ist
@@ -596,9 +602,7 @@ class MusicCommands(commands.Cog):
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
                 try:
-                    old_title = self.current_track[1] if self.current_track else None
-                    old_content = f"🎶 **{old_title}**" if old_title else None
-                    await self.now_playing_msg.edit(content=old_content, embed=None, view=None)
+                    await self.now_playing_msg.delete()
                 except Exception:
                     pass
             duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"
@@ -1232,9 +1236,13 @@ class MusicCommands(commands.Cog):
         all_tasks = asyncio.all_tasks()
         running_tasks = sum(1 for t in all_tasks if not t.done())
 
-        # Downloads-Ordner
-        dl_files = list(DOWNLOAD_DIR.glob("*"))
-        dl_count = len(dl_files)
+        # Downloads-Ordner – auf 500 Dateien begrenzen damit stat() nicht ewig läuft
+        _SCAN_LIMIT = 500
+        dl_files = list(itertools.islice(DOWNLOAD_DIR.glob("*"), _SCAN_LIMIT + 1))
+        capped = len(dl_files) > _SCAN_LIMIT
+        if capped:
+            dl_files = dl_files[:_SCAN_LIMIT]
+        dl_count = f"{len(dl_files)}+" if capped else str(len(dl_files))
         dl_size_mb = await asyncio.to_thread(
             lambda: sum(f.stat().st_size for f in dl_files if f.is_file()) / 1024 / 1024
         )
