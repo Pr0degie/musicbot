@@ -15,17 +15,11 @@ import aiohttp
 
 import discord
 import psutil
-import yt_dlp
 from utils.logger import logger
 from discord.ext import commands
+from cogs.downloader import Downloader, DOWNLOAD_DIR
 from cogs.presets import EQ_PRESETS
-from config import YDL_BROWSER, YDL_COOKIES_FILE
 from views.music_controls import MusicControlView, SearchAutoplayView
-
-# Downloads landen hier. Der Ordner wird beim Start automatisch angelegt,
-# falls er noch nicht existiert – kein manuelles Erstellen nötig.
-DOWNLOAD_DIR = Path("downloads")
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,105 +69,19 @@ class MusicCommands(commands.Cog):
         # nach Mitternacht eigenständig Jazz spielt.
         self.autoplay_enabled = False
 
-        # Metadaten-Cache: URL → info-dict von yt_dlp (download=False).
-        # Verhindert redundante extract_info-Aufrufe wenn dieselbe URL z.B.
-        # von _prefetch_next() und kurz danach von _resolve_track() abgefragt wird.
-        # Wird bei update_ydl() und clear() geleert.
-        self._url_cache: dict = {}
-
         self._start_time = time.monotonic()
         self._process = psutil.Process()
 
-        self.update_ydl()
+        # Downloader hält alle yt_dlp-Instanzen und den Metadaten-Cache.
+        self.dl = Downloader(self.audio_format)
         logger.info("[INIT] MusicCommands erfolgreich initialisiert.")
 
     def update_ydl(self):
-        """Erstellt eine neue yt_dlp-Instanz mit den aktuellen Format-Einstellungen.
-
-        Wird beim Start und nach jedem !format-Wechsel aufgerufen, da yt_dlp-Optionen
-        nach der Initialisierung nicht mehr änderbar sind.
-        """
-        # Cache: nur Einträge für Songs behalten die noch in der Queue oder aktuell spielen.
-        # Alle anderen können andere Format-URLs liefern und müssen neu geholt werden.
-        if hasattr(self, "_url_cache") and self._url_cache:
-            queue_urls = {url for url, _ in self.queue} if hasattr(self, "queue") else set()
-            if hasattr(self, "current_track") and self.current_track:
-                queue_urls.add(self.current_track[0])
-            self._url_cache = {k: v for k, v in self._url_cache.items() if k in queue_urls}
-        if YDL_COOKIES_FILE:
-            _cookies = {"cookiefile": YDL_COOKIES_FILE}
-        elif YDL_BROWSER:
-            _cookies = {"cookiesfrombrowser": (YDL_BROWSER,)}
-        else:
-            _cookies = {}
-        base_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            # Bevorzugt Opus/webm mit mindestens 160kbps (YouTube's höchste Audio-Tier),
-            # fällt auf 128kbps, dann beliebiges webm, dann Opus, dann best zurück.
-            # prefer_free_formats bevorzugt Opus über AAC bei gleichwertiger Qualität.
-            "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
-            "prefer_free_formats": True,
-            "default_search": "ytsearch",  # Suchbegriffe werden automatisch als YT-Suche behandelt
-            "noplaylist": False,
-            # prepare_filename() gibt später den exakt gleichen Pfad zurück den
-            # yt_dlp beim Speichern verwendet – inklusive Sonderzeichen-Bereinigung.
-            "outtmpl": str(DOWNLOAD_DIR / "%(title)s.%(ext)s"),
-            # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
-            # sodass asyncio.wait_for nicht auf den Thread warten muss.
-            "socket_timeout": 15,
-            # Node.js als JS-Runtime für den EJS-Signature-Solver aktivieren.
-            # yt-dlp startet standardmäßig nur mit Deno – Node muss explizit gesetzt werden.
-            "js_runtimes": {"node": {}},
-            **_cookies,
-        }
-        if self.audio_format == "mp3":
-            # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
-            # webm braucht das nicht – der Stream wird direkt gespeichert.
-            base_opts["postprocessors"] = [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ]
-        self.ydl = yt_dlp.YoutubeDL(base_opts)
-
-        # Gecachte Instanzen für Suche und URL-Abfragen – vermeidet Initialisierungs-
-        # Overhead bei jedem !p-Aufruf und erlaubt yt_dlp internen Cache-Reuse.
-        _js = {"js_runtimes": {"node": {}}}
-        self.search_ydl = yt_dlp.YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "skip_download": True,
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-        })
-        _url_base = {
-            "quiet": True,
-            "no_warnings": True,
-            "format": "bestaudio/best",
-            "default_search": "ytsearch",
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-        }
-        self.url_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
-        self.playlist_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
-        # Autoplay: nur Metadaten, max. 6 Einträge – kein vollständiger Playlist-Scan
-        self.autoplay_ydl = yt_dlp.YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "skip_download": True,
-            "noplaylist": False,
-            "playlistend": 6,
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-        })
+        """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
+        keep = {url for url, _ in self.queue}
+        if self.current_track:
+            keep.add(self.current_track[0])
+        self.dl.rebuild(self.audio_format, keep_urls=keep)
 
     @commands.command(name="reloadcookies")
     async def reloadcookies(self, ctx):
@@ -234,7 +142,7 @@ class MusicCommands(commands.Cog):
 
         try:
             info = await asyncio.wait_for(
-                asyncio.to_thread(self.autoplay_ydl.extract_info, fetch_url, download=False),
+                asyncio.to_thread(self.dl.autoplay_ydl.extract_info, fetch_url, download=False),
                 timeout=30.0,
             )
             entries = (info.get("entries") or []) if info else []
@@ -284,115 +192,20 @@ class MusicCommands(commands.Cog):
             logger.exception("[Autoplay Fehler]")
 
     async def _prefetch_next(self, idx: int = 0):
-        """Lädt Song an Position idx der Queue still im Hintergrund herunter.
-
-        Wird direkt nach dem Start eines Tracks gestartet, damit der nächste
-        Song idealerweise schon bereit liegt wenn er dran ist.
-        """
-        if len(self.queue) <= idx:
-            return
-        url, title = self.queue[idx]  # Peek – nicht aus der Queue entfernen
-        try:
-            if url in self._url_cache:
-                info = self._url_cache[url]
-                logger.info(f"[Prefetch] Metadaten aus Cache: {title}")
-            else:
-                info = await asyncio.wait_for(
-                    asyncio.to_thread(self.ydl.extract_info, url, download=False),
-                    timeout=30.0,
-                )
-                if "entries" in info:
-                    info = info["entries"][0]
-                self._url_cache[url] = info
-            filename = Path(self.ydl.prepare_filename(info))
-            if not filename.exists():
-                logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
-                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
-                logger.info(f"[Prefetch] Fertig: {filename.name}")
-            else:
-                logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
-        except asyncio.TimeoutError:
-            logger.warning(f"[Prefetch] Timeout für: {title}")
-        except Exception as e:
-            # Prefetch-Fehler sind nicht fatal – play_next lädt im Zweifelsfall selbst.
-            logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
+        """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
+        await self.dl.prefetch_next(self.queue, idx)
 
     async def _prefetch_autoplay(self, ctx):
-        """Sucht und lädt den nächsten Autoplay-Song im Hintergrund während der aktuelle läuft.
-
-        Wird beim Song-Start gestartet wenn Autoplay an und Queue leer ist.
-        Hängt das Ergebnis an die Queue an, damit play_next es ohne Suchverzögerung
-        starten kann. Falls dieser Task noch läuft wenn der Song endet, wartet play_next
-        kurz darauf – statt sofort neu zu suchen.
-        """
-        # Referenz-Track bestimmen (aktuell spielend)
-        ref_url, ref_title = None, None
+        """Sucht und lädt nächsten Autoplay-Song im Hintergrund während der aktuelle läuft."""
+        ref_url = ref_title = None
         if self.current_track:
             ref_url, ref_title, *_ = self.current_track
-
-        yt_id = None
-        if ref_url:
-            m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", ref_url)
-            if m:
-                yt_id = m.group(1)
-
-        fetch_url = (
-            f"https://www.youtube.com/watch?v={yt_id}&list=RD{yt_id}"
-            if yt_id
-            else (f"ytsearch5:{ref_title}" if ref_title else "ytsearch5:top music")
-        )
-        logger.info(f"[Autoplay Prefetch] Starte Hintergrundsuche für: {ref_title!r}")
-
-        try:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.autoplay_ydl.extract_info, fetch_url, download=False),
-                timeout=30.0,
-            )
-            entries = (info.get("entries") or []) if info else []
-
-            def entry_url(e):
-                return e.get("webpage_url") or e.get("url") or ""
-
-            def is_video(e):
-                if not e or e.get("_type") == "playlist":
-                    return False
-                u = entry_url(e)
-                return bool(u) and "playlist?" not in u and "/playlist/" not in u
-
-            candidates = [e for e in entries if is_video(e) and entry_url(e) not in self._recently_played]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e)]
-            if not candidates:
-                logger.warning("[Autoplay Prefetch] Keine nutzbaren Einträge")
-                return
-
-            chosen = candidates[0]
-            url = entry_url(chosen)
-            title = chosen.get("title", "Unbekannt")
-
-            # Metadaten aus Suchphase cachen damit _resolve_track() sie wiederverwendet.
-            self._url_cache[url] = chosen
-            # Datei herunterladen während der aktuelle Song noch läuft.
-            # Nur ydl.download() – Metadaten sind bereits oben via extract_info geholt.
-            logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.download, [url]),
-                timeout=120.0,
-            )
-            logger.info(f"[Autoplay Prefetch] Fertig: {title}")
-
-            # Nur in Queue hängen wenn Autoplay noch aktiv ist
-            if self.autoplay_enabled:
-                self.queue.append((url, title))
-                self._autoplay_queued_url = url
-                logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
-
-        except asyncio.TimeoutError:
-            logger.warning("[Autoplay Prefetch] Timeout – play_next fällt auf normales autoplay() zurück")
-        except Exception as e:
-            logger.warning(f"[Autoplay Prefetch] Fehler: {e}")
+        result = await self.dl.prefetch_autoplay(ref_url, ref_title, self._recently_played)
+        if result and self.autoplay_enabled:
+            url, title = result
+            self.queue.append((url, title))
+            self._autoplay_queued_url = url
+            logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
 
     async def _auto_leave(self, voice_client):
         """Verlässt den Channel nach AUTO_LEAVE_SECONDS wenn kein User mehr drin ist."""
@@ -431,50 +244,11 @@ class MusicCommands(commands.Cog):
                 self.auto_leave_task = None
 
     async def _resolve_track(self, url: str, title: str):
-        """Löst eine URL auf: extrahiert Metadaten via yt_dlp und stellt sicher,
-        dass die Audiodatei lokal vorliegt (Download oder Cache-Hit).
+        """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
 
-        Raises asyncio.TimeoutError wenn extract_info > 30 s dauert.
-        Returns: (info dict, Path, title str, duration int)
+        Returns: (info, filename, title, duration)
         """
-        if url in self._url_cache:
-            info = self._url_cache[url]
-            logger.info(f"[Resolve] Metadaten aus Cache: {title}")
-        else:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=False),
-                timeout=30.0,
-            )
-            if "entries" in info:
-                info = info["entries"][0]
-            self._url_cache[url] = info
-
-        title = info.get("title", "Unbekannter Titel")
-        duration = info.get("duration", 0)
-        # prepare_filename liefert exakt den Pfad den yt_dlp beim Download
-        # verwendet – Sonderzeichen im Titel werden dabei automatisch bereinigt.
-        filename = Path(self.ydl.prepare_filename(info))
-
-        if not filename.exists():
-            # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
-            # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
-            if self.prefetch_task and not self.prefetch_task.done():
-                logger.info(f"[Download] Warte auf laufenden Prefetch für: {title}")
-                try:
-                    await self.prefetch_task
-                except Exception:
-                    logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
-
-            if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
-                logger.info(f"[Download] Lade {title} herunter...")
-                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
-                logger.info(f"[Download] Gespeichert als: {filename.name}")
-            else:
-                logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
-        else:
-            logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
-
-        return info, filename, title, duration
+        return await self.dl.resolve_track(url, title, self.prefetch_task)
 
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
@@ -632,7 +406,7 @@ class MusicCommands(commands.Cog):
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             if self.queue:
-                # Bis zu 2 Songs sequenziell vorladen – self.ydl ist nicht thread-safe,
+                # Bis zu 2 Songs sequenziell vorladen – yt_dlp ist nicht thread-safe,
                 # daher kein paralleles gather. Sequenziell reicht: während Song N spielt,
                 # werden N+1 und N+2 nacheinander heruntergeladen.
                 async def _prefetch_two():
@@ -736,7 +510,7 @@ class MusicCommands(commands.Cog):
             try:
                 await ctx.send("🔎 Suche läuft...")
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
+                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
                     timeout=30.0,
                 )
             except asyncio.TimeoutError:
@@ -792,7 +566,7 @@ class MusicCommands(commands.Cog):
         # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
         # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
         is_playlist = "playlist?" in eingabe or "list=" in eingabe
-        ydl_instance = self.playlist_ydl if is_playlist else self.url_ydl
+        ydl_instance = self.dl.playlist_ydl if is_playlist else self.dl.url_ydl
 
         try:
             await ctx.send("🔎 Verarbeite Eingabe... bitte warten.")
@@ -869,7 +643,7 @@ class MusicCommands(commands.Cog):
             try:
                 await ctx.send("🔎 Suche läuft...")
                 results = await asyncio.wait_for(
-                    asyncio.to_thread(self.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
+                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
                     timeout=30.0,
                 )
             except asyncio.TimeoutError:
@@ -914,7 +688,7 @@ class MusicCommands(commands.Cog):
         try:
             await ctx.send("🔎 Verarbeite URL...")
             info = await asyncio.wait_for(
-                asyncio.to_thread(self.url_ydl.extract_info, eingabe, download=False),
+                asyncio.to_thread(self.dl.url_ydl.extract_info, eingabe, download=False),
                 timeout=30.0,
             )
         except asyncio.TimeoutError:
@@ -1074,7 +848,7 @@ class MusicCommands(commands.Cog):
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
         self.queue.clear()
-        self._url_cache.clear()
+        self.dl.clear_cache()
         self.is_playing = False
         self.current_track = None
         self.loop_mode = None
