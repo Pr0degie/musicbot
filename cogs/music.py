@@ -644,6 +644,7 @@ class MusicCommands(commands.Cog):
                 self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
         except asyncio.TimeoutError:
+            self._recently_played.append(url)
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
                     await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
@@ -656,6 +657,7 @@ class MusicCommands(commands.Cog):
             return
         except Exception:
             logger.exception("[Fehler bei play_next]")
+            self._recently_played.append(url)
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
                     await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")
