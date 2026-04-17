@@ -501,9 +501,16 @@ class MusicCommands(commands.Cog):
         # Guard: verhindert die "Already playing audio"-Kaskade bei gleichzeitigen
         # play_next-Aufrufen (z.B. after_playing-Callback + Error-Handler-create_task).
         # Song NICHT aus der Queue nehmen – erst nach dem Check.
+        # Kurzes Warten: nach einem Reconnect kann FFmpeg noch im Cleanup sein (exit-code 1)
+        # obwohl after_playing bereits ausgelöst wurde – is_playing() wäre dann fälschlicherweise True.
         if ctx.voice_client and ctx.voice_client.is_playing():
-            logger.warning("[play_next] Voice client bereits am spielen – konkurrenten Aufruf ignoriert.")
-            return
+            for _ in range(10):
+                await asyncio.sleep(0.1)
+                if not ctx.voice_client or not ctx.voice_client.is_playing():
+                    break
+            else:
+                logger.warning("[play_next] Voice client bereits am spielen – konkurrenten Aufruf ignoriert.")
+                return
 
         url, title = self.queue.popleft()
         if url == self._autoplay_queued_url:
@@ -578,6 +585,12 @@ class MusicCommands(commands.Cog):
                 else:
                     logger.info("[KEINE VERBINDUNG] Keine Verbindung. Warte auf !j ...")
 
+            if not ctx.voice_client or not ctx.voice_client.is_connected():
+                logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
+                self.is_playing = False
+                self.queue.appendleft((url, title))
+                return
+
             self.track_start_time = time.monotonic()
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
@@ -631,15 +644,29 @@ class MusicCommands(commands.Cog):
                 self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
         except asyncio.TimeoutError:
-            await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
-            asyncio.create_task(self.play_next(ctx))
+            if ctx.voice_client and ctx.voice_client.is_connected():
+                try:
+                    await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
+                except Exception:
+                    pass
+                asyncio.create_task(self.play_next(ctx))
+            else:
+                logger.warning("[play_next] TimeoutError – Voice client weg, kein Retry.")
+                self.is_playing = False
             return
         except Exception:
             logger.exception("[Fehler bei play_next]")
-            await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")
-            # Fehlerhaften Track überspringen – create_task statt direkter Rekursion,
-            # damit bei vielen schlechten URLs der Call-Stack nicht überfüllt wird.
-            asyncio.create_task(self.play_next(ctx))
+            if ctx.voice_client and ctx.voice_client.is_connected():
+                try:
+                    await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")
+                except Exception:
+                    pass
+                # Fehlerhaften Track überspringen – create_task statt direkter Rekursion,
+                # damit bei vielen schlechten URLs der Call-Stack nicht überfüllt wird.
+                asyncio.create_task(self.play_next(ctx))
+            else:
+                logger.warning("[play_next] Exception – Voice client weg, kein Retry.")
+                self.is_playing = False
             return
 
     async def _ensure_voice(self, ctx) -> bool:
