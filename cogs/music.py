@@ -23,6 +23,7 @@ from views.music_controls import MusicControlView, SearchAutoplayView
 
 PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+SCORE_FILE = Path("play_counts.json")
 
 
 class MusicCommands(commands.Cog):
@@ -73,6 +74,12 @@ class MusicCommands(commands.Cog):
         self._start_time = time.monotonic()
         self._process = psutil.Process()
 
+        try:
+            with open(SCORE_FILE, encoding="utf-8") as f:
+                self._play_counts: dict = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            self._play_counts: dict = {}
+
         # Downloader hält alle yt_dlp-Instanzen und den Metadaten-Cache.
         self.dl = Downloader(self.audio_format)
         logger.info("[INIT] MusicCommands erfolgreich initialisiert.")
@@ -83,6 +90,19 @@ class MusicCommands(commands.Cog):
         if self.current_track:
             keep.add(self.current_track[0])
         self.dl.rebuild(self.audio_format, keep_urls=keep)
+
+    def _record_play(self, url: str, title: str):
+        entry = self._play_counts.get(url)
+        if entry:
+            entry["count"] += 1
+            entry["title"] = title
+        else:
+            self._play_counts[url] = {"title": title, "count": 1}
+        try:
+            with open(SCORE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._play_counts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[Score] Fehler beim Speichern: {e}")
 
     @commands.command(name="reloadcookies")
     async def reloadcookies(self, ctx):
@@ -398,6 +418,7 @@ class MusicCommands(commands.Cog):
             self.current_track = (url, title, duration)
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
+            self._record_play(url, title)
             self.text_channel = ctx.channel
 
             # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
@@ -851,6 +872,23 @@ class MusicCommands(commands.Cog):
             if remaining > 0:
                 message += f"... und {remaining} weitere Titel."
             await ctx.send(message)
+
+    @commands.command(name="score")
+    async def score(self, ctx):
+        """Zeigt die Top-10 der am häufigsten gespielten Songs."""
+        if not self._play_counts:
+            await ctx.send("📊 Noch keine Wiedergaben aufgezeichnet.")
+            return
+
+        top = sorted(self._play_counts.items(), key=lambda x: x[1]["count"], reverse=True)[:10]
+        embed = discord.Embed(title="🏆 Most Played", color=discord.Color.gold())
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for i, (_, entry) in enumerate(top):
+            prefix = medals[i] if i < 3 else f"`{i + 1}.`"
+            lines.append(f"{prefix} **{entry['title']}** — {entry['count']}x")
+        embed.description = "\n".join(lines)
+        await ctx.send(embed=embed)
 
     @commands.command()
     async def clear(self, ctx):
