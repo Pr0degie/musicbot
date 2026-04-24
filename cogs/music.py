@@ -17,7 +17,7 @@ import discord
 import psutil
 from utils.logger import logger
 from discord.ext import commands
-from cogs.downloader import Downloader, DOWNLOAD_DIR
+from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title
 from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
 
@@ -46,7 +46,8 @@ class MusicCommands(commands.Cog):
         self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
         self._autoplay_queued_url = None     # URL die zuletzt von Autoplay in die Queue gelegt wurde
-        self._recently_played: deque = deque(maxlen=10)  # URLs der zuletzt gespielten Songs
+        self._recently_played: deque = deque(maxlen=15)       # URLs der zuletzt gespielten Songs
+        self._recently_played_titles: deque = deque(maxlen=15)  # normalisierte Titel (Duplikat-Check)
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
@@ -160,8 +161,12 @@ class MusicCommands(commands.Cog):
                 u = entry_url(e)
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
-            # Originaltitel ausschließen, danach erstes passendes Video nehmen
-            candidates = [e for e in entries if is_video(e) and entry_url(e) not in self._recently_played]
+            def is_seen(e):
+                if entry_url(e) in self._recently_played:
+                    return True
+                return normalize_title(e.get("title", "")) in self._recently_played_titles
+
+            candidates = [e for e in entries if is_video(e) and not is_seen(e)]
             if not candidates:
                 candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
             if not candidates:
@@ -200,7 +205,7 @@ class MusicCommands(commands.Cog):
         ref_url = ref_title = None
         if self.current_track:
             ref_url, ref_title, *_ = self.current_track
-        result = await self.dl.prefetch_autoplay(ref_url, ref_title, self._recently_played)
+        result = await self.dl.prefetch_autoplay(ref_url, ref_title, self._recently_played, self._recently_played_titles)
         if result and self.autoplay_enabled:
             url, title = result
             self.queue.append((url, title))
@@ -392,6 +397,7 @@ class MusicCommands(commands.Cog):
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title, duration)
             self._recently_played.append(url)
+            self._recently_played_titles.append(normalize_title(title))
             self.text_channel = ctx.channel
 
             # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
@@ -423,6 +429,7 @@ class MusicCommands(commands.Cog):
 
         except asyncio.TimeoutError:
             self._recently_played.append(url)
+            self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
                     await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
@@ -436,6 +443,7 @@ class MusicCommands(commands.Cog):
         except Exception:
             logger.exception("[Fehler bei play_next]")
             self._recently_played.append(url)
+            self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
                     await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")

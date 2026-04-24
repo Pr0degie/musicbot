@@ -11,6 +11,29 @@ from utils.logger import logger
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+_SUFFIX_RE = re.compile(
+    r"[\(\[][^\)\]]*"
+    r"(?:official|video|audio|lyrics?|lyric|hd|4k|remaster(?:ed)?|remake"
+    r"|visuali[sz]er|mv|clip|live|acoustic|cover|karaoke|extended|radio\s*edit)"
+    r"[^\)\]]*[\)\]]",
+    re.IGNORECASE,
+)
+_FEAT_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring)\s+\S.*", re.IGNORECASE)
+
+
+def normalize_title(title: str) -> str:
+    """Normalisiert einen Song-Titel für Duplikat-Vergleiche.
+
+    Entfernt Klammer-Suffixe (official video, remastered, …), Feature-Vermerke,
+    Sonderzeichen und Großschreibung, sodass z.B. "AHA - Take on Me (Official Video)"
+    und "AHA Take on me" zum gleichen String kollabieren.
+    """
+    t = _SUFFIX_RE.sub("", title)
+    t = _FEAT_RE.sub("", t)
+    t = re.sub(r"[^\w\s]", " ", t)
+    words = re.sub(r"\s+", " ", t).strip().lower().split()
+    return " ".join(sorted(words))
+
 
 class Downloader:
     """Verwaltet alle yt_dlp-Instanzen, den Metadaten-Cache und Download-Logik.
@@ -157,7 +180,7 @@ class Downloader:
 
             if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
                 logger.info(f"[Download] Lade {title} herunter...")
-                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
+                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
                 logger.info(f"[Download] Gespeichert als: {filename.name}")
             else:
                 logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
@@ -186,7 +209,7 @@ class Downloader:
             filename = Path(self.ydl.prepare_filename(info))
             if not filename.exists():
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
-                await asyncio.to_thread(self.ydl.download, [info["webpage_url"]])
+                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
                 logger.info(f"[Prefetch] Fertig: {filename.name}")
             else:
                 logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
@@ -196,7 +219,7 @@ class Downloader:
             # Prefetch-Fehler sind nicht fatal – resolve_track lädt im Zweifelsfall selbst.
             logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
 
-    async def prefetch_autoplay(self, ref_url, ref_title, recently_played):
+    async def prefetch_autoplay(self, ref_url, ref_title, recently_played, recently_played_titles=()):
         """Sucht + lädt nächsten Autoplay-Song im Hintergrund.
 
         Returns: (url, title) bei Erfolg, None bei Fehler/kein Ergebnis.
@@ -231,7 +254,12 @@ class Downloader:
                 u = entry_url(e)
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
-            candidates = [e for e in entries if is_video(e) and entry_url(e) not in recently_played]
+            def is_seen(e):
+                if entry_url(e) in recently_played:
+                    return True
+                return normalize_title(e.get("title", "")) in recently_played_titles
+
+            candidates = [e for e in entries if is_video(e) and not is_seen(e)]
             if not candidates:
                 candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
             if not candidates:
@@ -244,13 +272,19 @@ class Downloader:
             url = entry_url(chosen)
             title = chosen.get("title", "Unbekannt")
 
-            # Metadaten aus Suchphase cachen damit resolve_track() sie wiederverwendet.
-            self._url_cache[url] = chosen
             logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.download, [url]),
+            # extract_info(download=True) lädt die Datei herunter UND gibt das volle
+            # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
+            # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
+            # resolve_track() würden sonst fehlschlagen.
+            full_info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, url, download=True),
                 timeout=120.0,
             )
+            if full_info:
+                if "entries" in full_info:
+                    full_info = full_info["entries"][0]
+                self._url_cache[url] = full_info
             logger.info(f"[Autoplay Prefetch] Fertig: {title}")
             return url, title
 

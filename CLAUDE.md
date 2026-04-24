@@ -21,7 +21,7 @@ Two cogs loaded at startup, all responses in German:
 
 Background tasks: `prefetch_task` downloads the next two queued songs sequentially (`_prefetch_next(0)` then `_prefetch_next(1)` — sequential because yt_dlp is not thread-safe); `_autoplay_prefetch_task` searches + downloads next autoplay song while current plays.
 
-`_url_cache` on `self.dl`: URL → yt_dlp info-dict. Populated by `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()` (search-phase metadata cached so `resolve_track` gets a hit later). `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely.
+`_url_cache` on `self.dl`: URL → yt_dlp info-dict. Populated by `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()` — alle cachen das **volle** Info-Dict (mit `ext`, `webpage_url`), damit `prepare_filename()` und `resolve_track()` korrekt arbeiten. `autoplay_ydl` liefert nur flache Einträge; `prefetch_autoplay()` holt deshalb das volle Dict via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely.
 
 ### Audio Configuration
 
@@ -47,7 +47,7 @@ Reference track: `current_track` → `last_played`. Autoplay stays on until butt
 
 `_autoplay_queued_url`: URL last added by autoplay; cleared when popped by `play_next` or evicted by `_evict_autoplay_song()`.
 
-`_recently_played`: `deque(maxlen=10)` of URLs. Autoplay filters candidates against this first; falls back to filtering only `ref_url` if all candidates are in history.
+`_recently_played`: `deque(maxlen=15)` of URLs. `_recently_played_titles`: `deque(maxlen=15)` of normalized titles (via `normalize_title()` from `downloader.py` — strips suffixes like "(Official Video)", special chars, lowercase, sorts words alphabetically — so "AHA Take on Me" and "Take on Me AHA" map to the same key). Autoplay filters candidates against both; falls back to filtering only `ref_url` if all candidates are in history.
 
 **`!p` with autoplay active** — `_evict_autoplay_song()` cancels prefetch, removes autoplay URL from queue, inserts new song at front (`appendleft`). Playlist additions evict but append at end.
 
