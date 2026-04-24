@@ -401,7 +401,7 @@ class MusicCommands(commands.Cog):
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
                 try:
-                    await self.now_playing_msg.delete()
+                    await self.now_playing_msg.edit(view=None)
                 except Exception:
                     pass
             duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"
