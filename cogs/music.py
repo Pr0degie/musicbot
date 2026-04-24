@@ -526,8 +526,11 @@ class MusicCommands(commands.Cog):
         return removed_title
 
     @commands.command()
-    async def p(self, ctx, *, eingabe):
+    async def p(self, ctx, *, eingabe: str = None):
         """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
+        if not eingabe:
+            await ctx.send("❓ Verwendung: `!p <Suchbegriff oder URL>`")
+            return
         logger.info(f"[p] Eingabe erhalten: {eingabe}")
 
         if not await self._ensure_voice(ctx):
