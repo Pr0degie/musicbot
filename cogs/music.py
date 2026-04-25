@@ -17,7 +17,7 @@ import discord
 import psutil
 from utils.logger import logger
 from discord.ext import commands
-from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title
+from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
 
@@ -48,7 +48,7 @@ class MusicCommands(commands.Cog):
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
         self._autoplay_queued_url = None     # URL die zuletzt von Autoplay in die Queue gelegt wurde
         self._recently_played: deque = deque(maxlen=15)       # URLs der zuletzt gespielten Songs
-        self._recently_played_titles: deque = deque(maxlen=15)  # normalisierte Titel (Duplikat-Check)
+        self._recently_played_titles: deque = deque(maxlen=15)  # normalisierte Titel (Subset-Duplikat-Check)
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
@@ -181,14 +181,24 @@ class MusicCommands(commands.Cog):
                 u = entry_url(e)
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
-            def is_seen(e):
-                if entry_url(e) in self._recently_played:
-                    return True
-                return normalize_title(e.get("title", "")) in self._recently_played_titles
+            played_ids = {yt_video_id(u) for u in self._recently_played} - {None}
 
+            def is_seen(e):
+                e_url = entry_url(e)
+                if e_url in self._recently_played:
+                    return True
+                e_id = yt_video_id(e_url)
+                if e_id and e_id in played_ids:
+                    return True
+                e_words = set(normalize_title(e.get("title", "")).split())
+                if e_words:
+                    return any(e_words.issubset(set(t.split())) for t in self._recently_played_titles)
+                return False
+
+            ref_id = yt_video_id(ref_url)
             candidates = [e for e in entries if is_video(e) and not is_seen(e)]
             if not candidates:
-                candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+                candidates = [e for e in entries if is_video(e) and (yt_video_id(entry_url(e)) or entry_url(e)) != (ref_id or ref_url)]
             if not candidates:
                 candidates = [e for e in entries if is_video(e)]
 
@@ -401,7 +411,9 @@ class MusicCommands(commands.Cog):
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
                 try:
-                    await self.now_playing_msg.edit(view=None)
+                    prev_title = self.current_track[1] if self.current_track else None
+                    prev_text = f"🎶 {prev_title}" if prev_title else None
+                    await self.now_playing_msg.edit(content=prev_text, embed=None, view=None)
                 except Exception:
                     pass
             duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"

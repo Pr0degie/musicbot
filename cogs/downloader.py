@@ -11,6 +11,12 @@ from utils.logger import logger
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+def yt_video_id(url: str) -> str | None:
+    """Extrahiert die YouTube-Video-ID aus einer URL (v=..., youtu.be/...). Gibt None zurück wenn keine ID gefunden."""
+    m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url or "")
+    return m.group(1) if m else None
+
+
 _SUFFIX_RE = re.compile(
     r"[\(\[][^\)\]]*"
     r"(?:official|video|audio|lyrics?|lyric|hd|4k|remaster(?:ed)?|remake"
@@ -22,12 +28,7 @@ _FEAT_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring)\s+\S.*", re.IGNORECASE)
 
 
 def normalize_title(title: str) -> str:
-    """Normalisiert einen Song-Titel für Duplikat-Vergleiche.
-
-    Entfernt Klammer-Suffixe (official video, remastered, …), Feature-Vermerke,
-    Sonderzeichen und Großschreibung, sodass z.B. "AHA - Take on Me (Official Video)"
-    und "AHA Take on me" zum gleichen String kollabieren.
-    """
+    """Normalisiert einen Song-Titel: entfernt Klammer-Suffixe, Feature-Vermerke, Sonderzeichen; sortiert Wörter."""
     t = _SUFFIX_RE.sub("", title)
     t = _FEAT_RE.sub("", t)
     t = re.sub(r"[^\w\s]", " ", t)
@@ -254,14 +255,24 @@ class Downloader:
                 u = entry_url(e)
                 return bool(u) and "playlist?" not in u and "/playlist/" not in u
 
-            def is_seen(e):
-                if entry_url(e) in recently_played:
-                    return True
-                return normalize_title(e.get("title", "")) in recently_played_titles
+            played_ids = {yt_video_id(u) for u in recently_played} - {None}
 
+            def is_seen(e):
+                e_url = entry_url(e)
+                if e_url in recently_played:
+                    return True
+                e_id = yt_video_id(e_url)
+                if e_id and e_id in played_ids:
+                    return True
+                e_words = set(normalize_title(e.get("title", "")).split())
+                if e_words:
+                    return any(e_words.issubset(set(t.split())) for t in recently_played_titles)
+                return False
+
+            ref_id = yt_video_id(ref_url)
             candidates = [e for e in entries if is_video(e) and not is_seen(e)]
             if not candidates:
-                candidates = [e for e in entries if is_video(e) and entry_url(e) != ref_url]
+                candidates = [e for e in entries if is_video(e) and (yt_video_id(entry_url(e)) or entry_url(e)) != (ref_id or ref_url)]
             if not candidates:
                 candidates = [e for e in entries if is_video(e)]
             if not candidates:
