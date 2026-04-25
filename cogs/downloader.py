@@ -17,19 +17,13 @@ def yt_video_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-_SUFFIX_RE = re.compile(
-    r"[\(\[][^\)\]]*"
-    r"(?:official|video|audio|lyrics?|lyric|hd|4k|remaster(?:ed)?|remake"
-    r"|visuali[sz]er|mv|clip|live|acoustic|cover|karaoke|extended|radio\s*edit)"
-    r"[^\)\]]*[\)\]]",
-    re.IGNORECASE,
-)
+_BRACKET_RE = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
 _FEAT_RE = re.compile(r"\s*(?:feat\.?|ft\.?|featuring)\s+\S.*", re.IGNORECASE)
 
 
 def normalize_title(title: str) -> str:
     """Normalisiert einen Song-Titel: entfernt Klammer-Suffixe, Feature-Vermerke, Sonderzeichen; sortiert Wörter."""
-    t = _SUFFIX_RE.sub("", title)
+    t = _BRACKET_RE.sub("", title)
     t = _FEAT_RE.sub("", t)
     t = re.sub(r"[^\w\s]", " ", t)
     words = re.sub(r"\s+", " ", t).strip().lower().split()
