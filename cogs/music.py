@@ -215,7 +215,7 @@ class MusicCommands(commands.Cog):
             self.queue.appendleft((url, title))
             self._autoplay_queued_url = url
             logger.info(f"[Autoplay] Hinzugefügt: {title} ({url})")
-            await ctx.send(f"🔁 Autoplay: **{title}**")
+            await ctx.send(f"🔁 Autoplay: **{title}**", delete_after=20)
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -760,7 +760,7 @@ class MusicCommands(commands.Cog):
         """Überspringt den aktuellen Track. after_playing kümmert sich um den Rest."""
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...")
+            await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...", delete_after=20)
         else:
             await ctx.send("⚠️ Es läuft gerade kein Song.")
 
