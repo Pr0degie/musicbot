@@ -51,6 +51,14 @@ Reference track: `current_track` → `last_played`. Autoplay stays on until butt
 
 **`!p` with autoplay active** — `_evict_autoplay_song()` cancels prefetch, removes autoplay URL from queue, inserts new song at front (`appendleft`). Playlist additions evict but append at end.
 
+### Radio
+
+`RADIO_STATIONS_FILE` = `radio_stations.json` (key → `{name, url}`).
+State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
+`_play_radio_stream()` spielt via FFmpeg direkt (kein yt_dlp), `after_radio`-Callback reconnectet bis 3× bei Fehler.
+`!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
+`!stop` beendet Radio. Radio-Modus und Song-Modus schließen sich gegenseitig aus.
+
 ### Key Bot Commands
 
 Full list via `!help`. Non-obvious:

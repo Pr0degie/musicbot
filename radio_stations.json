@@ -38,5 +38,25 @@
   "absolutrelax": {
     "name": "absolut relax",
     "url": "https://absolut-relax.live-sm.absolutradio.de/absolut-relax/stream/mp3"
+  },
+  "goaone": {
+    "name": "Goa One",
+    "url": "http://laut.fm/goa-channel-one"
+  },
+  "bollerwagen": {
+    "name": "Bollerwagen",
+    "url": "https://ffn.stream37.radiohost.de/radiobollerwagen_mp3-192?upd-meta&upd-scheme=https&_art=dD0xNzc3ODIwOTA4JmQ9OGUyNTk0YWU2NzQyMDlkYzM1MTQ"
+  },
+  "raggae": {
+    "name": "Raggae",
+    "url": "https://hd.lagrosseradio.info/lagrosseradio-reggae-192.mp3"
+  },
+  "scifihorrorfilmmusik": {
+    "name": "scifi-horror-filmmusik",
+    "url": "https://scifi-horror-filmmusik.stream.laut.fm/scifi-horror-filmmusik?ref=radiode&t302=2026-05-03_15-31-15&uuid=b188ffa5-e082-468b-acd8-333a8a056762"
+  },
+  "rootslegacyradio": {
+    "name": "Roots Legacy Radio",
+    "url": "https://l.rootslegacy.fr/stream/1/"
   }
 }
