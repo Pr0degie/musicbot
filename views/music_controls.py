@@ -34,12 +34,12 @@ class MusicControlView(View):
             self.ctx.voice_client.resume()
             self.music_cog.is_playing = True
             await interaction.response.send_message("▶️ Fortgesetzt.", ephemeral=True)
-        elif not self.music_cog.is_playing and self.music_cog.queue:
+        elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:
             # Queue vorhanden, aber nichts läuft → starten
             self.music_cog.is_playing = True
             await interaction.response.send_message("▶️ Wiedergabe gestartet.", ephemeral=True)
             await self.music_cog.play_next(self.ctx)
-        elif not self.music_cog.is_playing and self.music_cog.autoplay_enabled:
+        elif not self.music_cog.is_playing and self.music_cog.autoplay_enabled and not self.music_cog.is_radio:
             # Queue leer, aber Autoplay ist an → sofort loslegen
             await interaction.response.send_message("🔁 Autoplay startet...", ephemeral=True)
             asyncio.create_task(self.music_cog.autoplay(self.ctx))
@@ -48,6 +48,15 @@ class MusicControlView(View):
 
     @discord.ui.button(label="⏭️ Überspringen", style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: Button):
+        if self.music_cog.is_radio:
+            self.music_cog._stop_radio()
+            if self.ctx.voice_client and self.ctx.voice_client.is_playing():
+                self.ctx.voice_client.stop()
+            await interaction.response.send_message("⏹️ Radio beendet.", ephemeral=True)
+            if self.music_cog.queue:
+                self.music_cog.is_playing = True
+                asyncio.create_task(self.music_cog.play_next(self.ctx))
+            return
         # stop() löst den after_playing-Callback aus, der den nächsten Track startet.
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.stop()
@@ -62,6 +71,9 @@ class MusicControlView(View):
         Wenn Autoplay aktiviert wird und gerade nichts läuft (leere Queue, Bot idle),
         wird sofort ein Song gesucht und gestartet – kein manuelles !p nötig.
         """
+        if self.music_cog.is_radio:
+            await interaction.response.send_message("📻 Autoplay nicht verfügbar im Radio-Modus.", ephemeral=True)
+            return
         self.music_cog.autoplay_enabled = not self.music_cog.autoplay_enabled
         status = "aktiviert" if self.music_cog.autoplay_enabled else "deaktiviert"
         logger.info(f"[Autoplay] {status.capitalize()} per Button")

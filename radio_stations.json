@@ -1,0 +1,42 @@
+{
+  "swr3": {
+    "name": "SWR3",
+    "url": "https://liveradio.swr.de/sw282p3/swr3/play.mp3"
+  },
+  "1live": {
+    "name": "1LIVE",
+    "url": "https://wdr-1live-live.icecastssl.wdr.de/wdr/1live/live/mp3/128/stream.mp3"
+  },
+  "bayern3": {
+    "name": "Bayern 3",
+    "url": "https://dispatcher.rndfnk.com/br/br3/live/mp3/mid"
+  },
+  "antennebayern": {
+    "name": "Antenne Bayern",
+    "url": "http://stream.antenne.de/antenne/stream/mp3"
+  },
+  "ndr2": {
+    "name": "NDR 2",
+    "url": "http://icecast.ndr.de/ndr/ndr2/hamburg/mp3/128/stream.mp3"
+  },
+  "wdr2": {
+    "name": "WDR 2",
+    "url": "https://wdr-wdr2-rheinland.icecastssl.wdr.de/wdr/wdr2/rheinland/mp3/128/stream.mp3"
+  },
+  "hr3": {
+    "name": "HR3",
+    "url": "https://dispatcher.rndfnk.com/hr/hr3/live/mp3/high"
+  },
+  "radiobob": {
+    "name": "Radio BOB",
+    "url": "https://streams.radiobob.de/bob-national/mp3-192/streams.radiobob.de/"
+  },
+  "energy": {
+    "name": "Energy",
+    "url": "http://cdn.nrjaudio.fm/adwz1/de/33019/mp3_128.mp3"
+  },
+  "absolutrelax": {
+    "name": "absolut relax",
+    "url": "https://absolut-relax.live-sm.absolutradio.de/absolut-relax/stream/mp3"
+  }
+}

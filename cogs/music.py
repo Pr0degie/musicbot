@@ -24,6 +24,7 @@ from views.music_controls import MusicControlView, SearchAutoplayView
 PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 SCORE_FILE = Path("play_counts.json")
+RADIO_STATIONS_FILE = Path("radio_stations.json")
 
 
 class MusicCommands(commands.Cog):
@@ -71,6 +72,12 @@ class MusicCommands(commands.Cog):
         # nach Mitternacht eigenständig Jazz spielt.
         self.autoplay_enabled = False
 
+        # Radio-Modus
+        self.is_radio = False
+        self.radio_station_name = None
+        self.radio_stream_url = None
+        self._radio_reconnect_count = 0
+
         self._start_time = time.monotonic()
         self._process = psutil.Process()
 
@@ -90,6 +97,17 @@ class MusicCommands(commands.Cog):
         if self.current_track:
             keep.add(self.current_track[0])
         self.dl.rebuild(self.audio_format, keep_urls=keep)
+
+    def _stop_radio(self):
+        """Beendet Radio-Modus und setzt alle Flags zurück. Stoppt den Voice-Client NICHT."""
+        self.is_radio = False
+        self.radio_station_name = None
+        self.radio_stream_url = None
+        self._radio_reconnect_count = 0
+        self.is_playing = False
+        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+            self._autoplay_prefetch_task.cancel()
+            self._autoplay_prefetch_task = None
 
     def _record_play(self, url: str, title: str):
         entry = self._play_counts.get(url)
@@ -285,6 +303,94 @@ class MusicCommands(commands.Cog):
         """
         return await self.dl.resolve_track(url, title, self.prefetch_task)
 
+    async def _play_radio_stream(self, ctx, url: str, name: str) -> None:
+        """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp)."""
+        if not ctx.voice_client or not ctx.voice_client.is_connected():
+            await ctx.send("❌ Kein Voice-Channel verbunden.")
+            return
+
+        # Sicherheitsnetz: falls FFmpeg noch nicht terminiert ist, kurz warten.
+        if ctx.voice_client.is_playing():
+            for _ in range(20):
+                await asyncio.sleep(0.1)
+                if not ctx.voice_client.is_playing():
+                    break
+            else:
+                await ctx.send("❌ Stream konnte nicht gestartet werden (Voice-Client noch belegt).")
+                self._stop_radio()
+                return
+
+        if self.prefetch_task and not self.prefetch_task.done():
+            self.prefetch_task.cancel()
+
+        self.radio_stream_url = url
+        self.radio_station_name = name
+        self.is_radio = True
+        self.is_playing = True
+        self.current_track = (url, name, 0)
+
+        try:
+            source = discord.FFmpegOpusAudio(
+                url,
+                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+                options="-vn",
+            )
+        except Exception:
+            logger.exception(f"[Radio] Fehler beim Erstellen der FFmpeg-Quelle für {url}")
+            await ctx.send("❌ Fehler beim Verbinden mit dem Stream.")
+            self._stop_radio()
+            return
+
+        def after_radio(error):
+            if error:
+                logger.warning(f"[Radio] Stream-Fehler: {error}")
+            if not self.is_radio:
+                return
+            if error and self._radio_reconnect_count < 3:
+                self._radio_reconnect_count += 1
+                logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/3 für {name}")
+                asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx), self.bot.loop)
+            elif error:
+                logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
+                self.is_radio = False
+                self.is_playing = False
+                asyncio.run_coroutine_threadsafe(
+                    ctx.send("📻 Stream-Verbindung dauerhaft unterbrochen. Radio beendet.", delete_after=30),
+                    self.bot.loop,
+                )
+
+        if self.now_playing_msg:
+            try:
+                await self.now_playing_msg.edit(content=None, embed=None, view=None)
+            except Exception:
+                pass
+
+        self.track_start_time = time.monotonic()
+        ctx.voice_client.play(source, after=after_radio)
+
+        embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
+        embed.add_field(name="Status", value="🔴 Live", inline=True)
+        embed.add_field(name="EQ", value=self.equalizer, inline=True)
+        self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
+        self.text_channel = ctx.channel
+        logger.info(f"[Radio] Stream gestartet: {name} ({url})")
+
+    async def _reconnect_radio(self, ctx) -> None:
+        """Versucht einen abgebrochenen Radio-Stream neu zu verbinden."""
+        if not ctx.voice_client or not ctx.voice_client.is_connected():
+            logger.warning("[Radio] Kein Voice-Client mehr – Reconnect abgebrochen.")
+            self._stop_radio()
+            return
+        await asyncio.sleep(2)
+        try:
+            await ctx.send(
+                f"📻 Reconnect {self._radio_reconnect_count}/3 für **{self.radio_station_name}**...",
+                delete_after=10,
+            )
+        except Exception:
+            pass
+        await self._play_radio_stream(ctx, self.radio_stream_url, self.radio_station_name)
+
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if not self.queue:
@@ -417,7 +523,14 @@ class MusicCommands(commands.Cog):
                 except Exception:
                     pass
             duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"
-            embed = discord.Embed(title=title, url=info.get("webpage_url"), color=0x1db954)
+            if " - " in title:
+                _artist, _song = title.split(" - ", 1)
+                embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
+            elif info.get("uploader"):
+                embed_title = f"🎵 {title} – {info.get('uploader')}"
+            else:
+                embed_title = f"🎵 {title}"
+            embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
             embed.set_thumbnail(url=info.get("thumbnail"))
             embed.add_field(name="Dauer", value=duration_str, inline=True)
             embed.add_field(name="EQ", value=self.equalizer, inline=True)
@@ -548,6 +661,15 @@ class MusicCommands(commands.Cog):
         if not await self._ensure_voice(ctx):
             return
 
+        if self.is_radio:
+            self._stop_radio()
+            if ctx.voice_client and ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+            for _ in range(10):
+                await asyncio.sleep(0.1)
+                if not ctx.voice_client or not ctx.voice_client.is_playing():
+                    break
+
         # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
         # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
         if not eingabe.startswith("http"):
@@ -663,12 +785,102 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
             await self.play_next(ctx)
 
+    @commands.command(name="radio")
+    async def radio_play(self, ctx, *, eingabe: str = None):
+        """Spielt einen Internet-Radio-Stream. !radio <Nummer, Sendername oder URL>"""
+        try:
+            with open(RADIO_STATIONS_FILE, encoding="utf-8") as f:
+                stations = json.load(f)
+        except FileNotFoundError:
+            stations = {}
+
+        if not eingabe:
+            if not stations:
+                await ctx.send("❌ Keine Senderliste gefunden (`radio_stations.json`).")
+                return
+            lines = [
+                f"**{i + 1}.** {v['name']}"
+                for i, (k, v) in enumerate(stations.items())
+            ]
+            await ctx.send("📻 **Bekannte Sender** (Tipp: `!radio <Nummer>`):\n" + "\n".join(lines))
+            return
+
+        if not await self._ensure_voice(ctx):
+            return
+
+        eingabe = eingabe.strip()
+        if eingabe.startswith("http"):
+            url = eingabe
+            name = eingabe
+        else:
+            items = list(stations.items())
+            entry = None
+            if eingabe.isdigit():
+                idx = int(eingabe) - 1
+                if 0 <= idx < len(items):
+                    entry = items[idx][1]
+                else:
+                    await ctx.send(f"❌ Nummer `{eingabe}` existiert nicht (1–{len(items)}).")
+                    return
+            else:
+                key = eingabe.lower().replace(" ", "").replace("-", "")
+                entry = next(
+                    (v for k, v in items
+                     if k.lower().replace(" ", "").replace("-", "") == key),
+                    None,
+                )
+            if entry is None:
+                await ctx.send(f"❌ Sender `{eingabe}` nicht gefunden. `!radio` zeigt die Liste.")
+                return
+            url = entry["url"]
+            name = entry["name"]
+
+        if self.is_radio:
+            self._stop_radio()
+        else:
+            self.is_playing = False
+
+        # Immer warten bis FFmpeg wirklich fertig ist – egal ob Radio oder Song lief.
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+            for _ in range(30):
+                await asyncio.sleep(0.1)
+                if not ctx.voice_client or not ctx.voice_client.is_playing():
+                    break
+
+        self._radio_reconnect_count = 0
+        await self._play_radio_stream(ctx, url, name)
+
+    @commands.command(name="stop")
+    async def stop(self, ctx):
+        """Beendet Radio-Modus oder aktuelle Wiedergabe (Queue bleibt erhalten)."""
+        if self.is_radio:
+            self._stop_radio()
+            if ctx.voice_client and ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+            await ctx.send("⏹️ Radio beendet.")
+        elif ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+            self.is_playing = False
+            ctx.voice_client.stop()
+            await ctx.send("⏹️ Wiedergabe gestoppt.")
+        else:
+            await ctx.send("⚠️ Es läuft gerade nichts.")
+
     @commands.command(name="next")
     async def next_song(self, ctx, *, eingabe):
         """Fügt einen Song an die erste Stelle der Queue ein (spielt als nächstes).
         Format: !next URL  oder  !next URL||Titel  oder  !next Suchbegriff"""
         if not await self._ensure_voice(ctx):
             return
+
+        if self.is_radio:
+            self._stop_radio()
+            if ctx.voice_client and ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+            for _ in range(10):
+                await asyncio.sleep(0.1)
+                if not ctx.voice_client or not ctx.voice_client.is_playing():
+                    break
 
         # Format: URL||Titel → direkt ohne yt_dlp-Lookup hinzufügen
         if "||" in eingabe:
@@ -757,7 +969,16 @@ class MusicCommands(commands.Cog):
 
     @commands.command(name="s")
     async def skip(self, ctx):
-        """Überspringt den aktuellen Track. after_playing kümmert sich um den Rest."""
+        """Überspringt den aktuellen Track. Bei Radio: beendet den Radio-Modus."""
+        if self.is_radio:
+            self._stop_radio()
+            if ctx.voice_client and ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+            await ctx.send("⏹️ Radio beendet.", delete_after=20)
+            if self.queue:
+                self.is_playing = True
+                await self.play_next(ctx)
+            return
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...", delete_after=20)
@@ -908,6 +1129,7 @@ class MusicCommands(commands.Cog):
     @commands.command()
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
+        self._stop_radio()
         self.queue.clear()
         self.dl.clear_cache()
         self.is_playing = False
