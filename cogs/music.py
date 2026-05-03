@@ -810,8 +810,27 @@ class MusicCommands(commands.Cog):
 
         eingabe = eingabe.strip()
         if eingabe.startswith("http"):
-            url = eingabe
-            name = eingabe
+            parts = eingabe.split(None, 1)
+            url = parts[0]
+            if len(parts) > 1:
+                name = parts[1].strip()
+            else:
+                from urllib.parse import urlparse
+                name = urlparse(url).hostname or url
+
+            # Sender speichern falls noch nicht vorhanden
+            existing = next((v for v in stations.values() if v["url"] == url), None)
+            if existing is None:
+                key = name.lower().replace(" ", "").replace("-", "")
+                # Eindeutigen Key sicherstellen
+                base_key, n = key, 2
+                while key in stations:
+                    key = f"{base_key}{n}"
+                    n += 1
+                stations[key] = {"name": name, "url": url}
+                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(stations, f, ensure_ascii=False, indent=2)
+                await ctx.send(f"📻 Neuer Sender **{name}** gespeichert (Nr. {len(stations)}).")
         else:
             items = list(stations.items())
             entry = None
