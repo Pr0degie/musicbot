@@ -11,6 +11,8 @@ from utils.logger import logger
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+STREAM_THRESHOLD_SECONDS = 20 * 60  # Videos > 20 min werden gestreamt statt heruntergeladen
+
 def yt_video_id(url: str) -> str | None:
     """Extrahiert die YouTube-Video-ID aus einer URL (v=..., youtu.be/...). Gibt None zurück wenn keine ID gefunden."""
     m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url or "")
@@ -161,6 +163,13 @@ class Downloader:
 
         title = info.get("title", "Unbekannter Titel")
         duration = info.get("duration", 0)
+
+        if duration > STREAM_THRESHOLD_SECONDS:
+            # Langer Track → direkt streamen, kein lokaler Download nötig
+            audio_url = info.get("url") or url
+            logger.info(f"[Stream] {title} ({duration//60} min) wird gestreamt – kein Download")
+            return info, audio_url, title, duration
+
         filename = Path(self.ydl.prepare_filename(info))
 
         if not filename.exists():
@@ -201,6 +210,9 @@ class Downloader:
                 if "entries" in info:
                     info = info["entries"][0]
                 self._url_cache[url] = info
+            if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
+                logger.info(f"[Prefetch] Übersprungen – {info.get('title', title)} wird gestreamt")
+                return
             filename = Path(self.ydl.prepare_filename(info))
             if not filename.exists():
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")

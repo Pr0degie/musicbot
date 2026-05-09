@@ -450,7 +450,13 @@ class MusicCommands(commands.Cog):
 
             eq_filter = self.eq_presets.get(self.equalizer, "")
             seek_offset, self._seek_offset = self._seek_offset, 0
-            before_opts = f"-ss {seek_offset}" if seek_offset else None
+            is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
+
+            if is_stream:
+                _reconnect = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+                before_opts = f"{_reconnect} -ss {seek_offset}" if seek_offset else _reconnect
+            else:
+                before_opts = f"-ss {seek_offset}" if seek_offset else None
 
             if eq_filter:
                 # Filter aktiv → dekodieren, EQ anwenden, mit 192kbps zu Opus enkodieren.
@@ -461,6 +467,9 @@ class MusicCommands(commands.Cog):
                     before_options=before_opts,
                     options=f"-vn {eq_filter}",
                 )
+            elif is_stream:
+                # HTTP-Stream: codec=copy funktioniert nicht zuverlässig bei Netz-URLs → transkodieren.
+                source = discord.FFmpegOpusAudio(str(filename), bitrate=192, before_options=before_opts)
             else:
                 # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
                 source = discord.FFmpegOpusAudio(str(filename), codec="copy", before_options=before_opts)
