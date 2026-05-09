@@ -1,84 +1,91 @@
-# 🎵 Discord Musikbot in Python
+# 🎵 Discord Musikbot
 
-Ein modular aufgebauter Musikbot für Discord mit yt_dlp, FFmpeg, Buttons und Equalizer-Profilen.
+Ein modularer Discord-Musikbot mit yt_dlp, FFmpeg, Buttons und Equalizer-Profilen.  
 Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [yt_dlp](https://github.com/yt-dlp/yt-dlp).
 
 ---
 
-## 🚀 Features
+## Features
 
-- Musik abspielen per YouTube-Link, Playlist oder Suchbegriff
+- YouTube-Links, Playlists und Suchbegriffe abspielen
 - Steuerbuttons direkt in Discord: ⏸️ ▶️ ⏭️ 🔁
-- Autoplay-Toggle: aktiviert automatische Wiedergabe wenn die Queue leer läuft
+- Autoplay: sucht automatisch den nächsten Song wenn die Queue leer läuft
 - Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
-- Audioformat wählbar: `webm` (Standard) oder `mp3`
-- Warteschlange verwalten: `!q`, `!shuffle`, `!clear`, `!remove`
-- Download-Cache: bereits gespielte Songs werden lokal gespeichert und nicht neu geladen
-- Modularer Aufbau (`cogs/`, `views/`, `utils/`)
+- Audioformat: `webm` (Standard, verlustfrei) oder `mp3`
+- Internet-Radio via direktem Stream
+- Queue-Verwaltung mit Speichern/Laden, Shuffle, Loop-Modus
+- Kurze Songs werden gecacht, lange Songs (>20 min) und unbekannte Songs starten sofort per Stream
 
 ---
 
-## 🧠 Befehle (Prefix: `!`)
+## Befehle (Prefix: `!`)
 
-| Befehl            | Funktion                                        |
-|-------------------|-------------------------------------------------|
-| `!p <url/suche>`  | Spielt Musik – YouTube-URL, Playlist oder Suchbegriff |
-| `!s`              | Nächsten Song überspringen                      |
-| `!x`              | Pause                                           |
-| `!resume`         | Wiedergabe fortsetzen                           |
-| `!q`              | Warteschlange anzeigen                          |
-| `!shuffle`        | Warteschlange mischen                           |
-| `!clear`          | Stoppt Musik und leert die Queue                |
-| `!remove <n>`     | Song an Position `n` entfernen                  |
-| `!replay`         | Letzten Song nochmal in die Queue legen         |
-| `!eq <preset>`    | Equalizer-Profil setzen (ohne Argument: Liste)  |
-| `!format <typ>`   | Audioformat wechseln: `mp3` oder `webm`         |
-| `!j`              | Voice-Channel beitreten                         |
-| `!l`              | Voice-Channel verlassen                         |
-| `!ping` / `!echo` | Testbefehle                                     |
+**Wiedergabe**
 
----
+| Befehl | Funktion |
+|---|---|
+| `!p <url/suche>` | Musik abspielen — YouTube-URL, Playlist oder Suchbegriff |
+| `!next <url/suche>` | Song als nächsten in die Queue legen |
+| `!s` | Überspringen |
+| `!x` | Pause |
+| `!resume` | Fortsetzen |
+| `!now` | Aktuellen Song anzeigen |
+| `!seek <zeit>` | Position springen — z.B. `1:23` oder `83` |
+| `!replay` | Letzten Song nochmal in die Queue |
 
-## ⚙️ Installation
+**Queue**
 
-### 1. Klonen & Setup
+| Befehl | Funktion |
+|---|---|
+| `!q` | Queue anzeigen (paginiert) |
+| `!shuffle` | Queue mischen |
+| `!clear` | Stopp + Queue leeren |
+| `!remove <n>` | Song an Position `n` entfernen |
+| `!move <n>` | Ab Position `n` abspielen |
+| `!loop` | Loop-Modus: aus → Song → Queue → aus |
+| `!saveq <name>` | Aktuelle Queue speichern |
+| `!loadq <name>` | Gespeicherte Queue laden |
+| `!lists` | Gespeicherte Queues auflisten |
 
-```bash
-git clone https://github.com/PabloTestobar/Musicbot.git
-cd Musicbot
-python -m venv venv
-source venv/Scripts/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-pip install 'discord.py[voice]' -U
-```
+**Audio & Radio**
 
-### 2. Konfiguration
+| Befehl | Funktion |
+|---|---|
+| `!eq <preset>` | Equalizer-Preset setzen (ohne Argument: Liste) |
+| `!format <typ>` | Audioformat wechseln: `mp3` oder `webm` |
+| `!radio <nr/name/url>` | Internet-Radio abspielen oder neue Station hinzufügen |
+| `!stop` | Radio stoppen |
 
-`.env`-Datei im Projektordner anlegen:
+**Sonstiges**
 
-```
-DISCORD_TOKEN=dein_token_hier
-```
-
-### 3. Starten
-
-```bash
-python main.py
-```
+| Befehl | Funktion |
+|---|---|
+| `!text` | Songtext abrufen |
+| `!stats` | Bot-Statistiken (RAM, CPU, Cache) |
+| `!j` / `!l` | Voice-Channel beitreten / verlassen |
 
 ---
 
-## 📁 Projektstruktur
+## Projektstruktur
 
 ```
-├── main.py           # Einstiegspunkt, Bot-Initialisierung
-├── config.py         # Token-Laden, Logging-Basis
+├── main.py                    # Einstiegspunkt
+├── config.py                  # Env-Variablen laden
 ├── cogs/
-│   ├── basic.py      # Voice-Channel-Befehle (!j, !l, !ping, !echo)
-│   └── music.py      # Gesamte Musik-Logik
+│   ├── music.py               # Musik-Logik, Queue, Autoplay, Radio
+│   ├── downloader.py          # yt_dlp-Instanzen, Download-Cache, Streaming
+│   ├── presets.py             # EQ-Filterketten
+│   └── basic.py               # !j, !l, !ping, !echo, !help
 ├── views/
-│   └── music_controls.py  # Discord-UI-Buttons (Pause, Resume, Skip, Autoplay)
+│   └── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
 ├── utils/
-│   └── logger.py     # Logging-Setup (Konsole + bot.log)
-└── downloads/        # Lokaler Audio-Cache
+│   └── logger.py              # Logging (Konsole + bot.log)
+├── downloads/                 # Audio-Cache
+└── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
 ```
+
+---
+
+## Setup
+
+→ Siehe [`SETUP.md`](SETUP.md)

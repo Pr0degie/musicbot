@@ -182,10 +182,10 @@ class Downloader:
                 except Exception:
                     logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
 
-            if not filename.exists():  # Nochmal prüfen – Prefetch könnte es erledigt haben
-                logger.info(f"[Download] Lade {title} herunter...")
-                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
-                logger.info(f"[Download] Gespeichert als: {filename.name}")
+            if not filename.exists():  # Prefetch hat es nicht erledigt → sofort als Stream starten
+                audio_url = info.get("url") or url
+                logger.info(f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
+                return info, audio_url, title, duration
             else:
                 logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
         else:

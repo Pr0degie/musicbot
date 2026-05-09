@@ -1,44 +1,85 @@
-# Setup & Operations
+# Setup & Betrieb
 
-## YouTube Authentication (Cookies)
+## 1. Voraussetzungen
 
-YouTube blocks unauthenticated bot requests. Cookie auth is required.
+- Python 3.10+
+- FFmpeg im PATH
+- Node.js im PATH (für YouTube-Signatur-Solver)
 
-### Environment variables (`.env`)
-
-| Variable | Purpose |
-|---|---|
-| `YDL_COOKIES_FILE` | Path to an exported `cookies.txt` — takes priority over browser extraction |
-| `YDL_BROWSER` | Browser to extract cookies from live (`firefox`, `chrome`, …) — local use only, does not work on headless servers |
-
-### Initial setup (server)
-
-Export cookies from a logged-in browser and upload them:
+## 2. Installation
 
 ```bash
-yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <any-youtube-url>
-scp cookies.txt user@server:/path/to/MusicBot/cookies.txt
+git clone https://github.com/PabloTestobar/Musicbot.git
+cd Musicbot
+python -m venv venv
+
+# Windows:
+venv\Scripts\activate
+# Linux / macOS:
+source venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
-Set in `.env`:
+## 3. Konfiguration (`.env`)
+
+`.env`-Datei im Projektordner anlegen:
+
 ```
-YDL_COOKIES_FILE=/path/to/MusicBot/cookies.txt
+DISCORD_TOKEN=dein_token_hier
 ```
 
-### Cookie renewal
+Optionale Cookie-Variablen für YouTube-Authentifizierung (→ Abschnitt 4):
 
-Cookies last roughly 1–3 months. When YouTube starts blocking again:
+```
+YDL_COOKIES_FILE=/pfad/zur/cookies.txt
+YDL_BROWSER=firefox
+```
 
-1. Re-export with the command above
-2. Upload via SCP
-3. Run `!reloadcookies` in Discord — reloads without bot restart
+| Variable | Zweck |
+|---|---|
+| `DISCORD_TOKEN` | Discord-Bot-Token (erforderlich) |
+| `YDL_COOKIES_FILE` | Pfad zu einer exportierten `cookies.txt` — hat Vorrang vor Browser-Extraktion |
+| `YDL_BROWSER` | Browser für Live-Cookie-Extraktion (`firefox`, `chrome`, …) — nur lokal, nicht auf Servern ohne GUI |
 
-### EJS signature solver
+## 4. YouTube-Authentifizierung (Cookies)
 
-yt-dlp needs `yt-dlp[default]` (installs `yt-dlp-ejs`) and Node.js in PATH to solve YouTube signature challenges. Without it yt-dlp falls back to Deno only.
+YouTube blockiert unauthentifizierte Bot-Anfragen. Cookie-Auth ist notwendig.
+
+### Server-Setup (empfohlen)
+
+Cookies aus einem eingeloggten Browser exportieren und hochladen:
+
+```bash
+yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <beliebige-youtube-url>
+scp cookies.txt user@server:/pfad/zu/MusicBot/cookies.txt
+```
+
+In `.env` setzen:
+```
+YDL_COOKIES_FILE=/pfad/zu/MusicBot/cookies.txt
+```
+
+### Cookie-Erneuerung
+
+Cookies halten ca. 1–3 Monate. Wenn YouTube wieder blockiert:
+
+1. Cookies erneut exportieren (Befehl oben)
+2. Hochladen via SCP
+3. `!reloadcookies` in Discord — lädt ohne Bot-Neustart neu
+
+### EJS Signature Solver
+
+yt-dlp benötigt Node.js im PATH sowie `yt-dlp[default]` für YouTube-Signatur-Challenges:
 
 ```bash
 pip install "yt-dlp[default]"
 ```
 
-`js_runtimes: {node: {}}` is already set in all ydl option dicts in `update_ydl()`.
+`js_runtimes: {node: {}}` ist bereits in allen ydl-Instanzen in `update_ydl()` konfiguriert.
+
+## 5. Starten
+
+```bash
+python main.py
+```

@@ -21,7 +21,7 @@ Two cogs loaded at startup, all responses in German:
 
 Background tasks: `prefetch_task` downloads the next two queued songs sequentially (`_prefetch_next(0)` then `_prefetch_next(1)` — sequential because yt_dlp is not thread-safe); `_autoplay_prefetch_task` searches + downloads next autoplay song while current plays.
 
-`_url_cache` on `self.dl`: URL → yt_dlp info-dict. Populated by `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()` — alle cachen das **volle** Info-Dict (mit `ext`, `webpage_url`), damit `prepare_filename()` und `resolve_track()` korrekt arbeiten. `autoplay_ydl` liefert nur flache Einträge; `prefetch_autoplay()` holt deshalb das volle Dict via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely.
+`_url_cache` on `self.dl`: URL → yt_dlp info-dict. All three callers cache the **full** info-dict (with `ext`, `webpage_url`) so `prepare_filename()` works. `autoplay_ydl` yields shallow playlist entries; `prefetch_autoplay()` upgrades via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely.
 
 ### Audio Configuration
 
@@ -30,6 +30,15 @@ Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, 
 `!eq` mid-song: restarts current track with new filter (prepends to queue, calls stop).
 `!format mp3|webm` or `!eq <preset>` → `update_ydl()` → `self.dl.rebuild()` recreates all five instances.
 FFmpeg filter notes and "do not add" list → comments at top of `cogs/presets.py`.
+
+### Streaming vs. Download
+
+`STREAM_THRESHOLD_SECONDS = 20 * 60` (in `downloader.py`). `resolve_track()` returns a direct CDN URL (`str`, not `Path`) in two cases — **this is intentional, not a bug**:
+- Duration > 20 min → always stream, never download.
+- File not locally cached → stream immediately; `prefetch_next()` downloads queue songs in background.
+
+`play_next` detects streams via `isinstance(filename, str)` → adds FFmpeg reconnect options, skips `codec=copy`.
+`prefetch_next()` skips download for videos > 20 min.
 
 ### YouTube Authentication (Cookies)
 
@@ -55,7 +64,7 @@ Reference track: `current_track` → `last_played`. Autoplay stays on until butt
 
 `RADIO_STATIONS_FILE` = `radio_stations.json` (key → `{name, url}`).
 State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
-`_play_radio_stream()` spielt via FFmpeg direkt (kein yt_dlp), `after_radio`-Callback reconnectet bis 3× bei Fehler.
+`_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error.
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
 `!stop` beendet Radio. Radio-Modus und Song-Modus schließen sich gegenseitig aus.
 
