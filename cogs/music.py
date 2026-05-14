@@ -351,13 +351,15 @@ class MusicCommands(commands.Cog):
             self.bot.loop.call_soon_threadsafe(self._playback_done.set)
             if error:
                 logger.warning(f"[Radio] Stream-Fehler: {error}")
+            else:
+                logger.info(f"[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
             if not self.is_radio:
                 return
-            if error and self._radio_reconnect_count < 3:
+            if self._radio_reconnect_count < 3:
                 self._radio_reconnect_count += 1
                 logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/3 für {name}")
                 asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx), self.bot.loop)
-            elif error:
+            else:
                 logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
                 self.is_radio = False
                 self.is_playing = False
@@ -375,6 +377,7 @@ class MusicCommands(commands.Cog):
         self._playback_done.clear()
         self.track_start_time = time.monotonic()
         ctx.voice_client.play(source, after=after_radio)
+        self._radio_reconnect_count = 0
 
         embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
         embed.add_field(name="Status", value="🔴 Live", inline=True)
