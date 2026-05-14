@@ -401,6 +401,9 @@ class MusicCommands(commands.Cog):
 
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
+        if self.is_radio:
+            logger.info("[play_next] Radio aktiv – play_next übersprungen.")
+            return
         if not self.queue:
             logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
             self.is_playing = False
