@@ -33,7 +33,7 @@ class MusicCommands(commands.Cog):
     # Maximale Anzahl an Titeln die aus einer Playlist eingelesen werden.
     HARD_PLAYLIST_LIMIT = 150
     # Sekunden ohne User im Channel bevor der Bot den Channel verlässt.
-    AUTO_LEAVE_SECONDS = 120
+    AUTO_LEAVE_SECONDS = 300
 
     def __init__(self, bot):
         self.bot = bot
@@ -296,7 +296,7 @@ class MusicCommands(commands.Cog):
             if self.auto_leave_task:
                 self.auto_leave_task.cancel()
             self.auto_leave_task = asyncio.create_task(self._auto_leave(voice_client))
-            logger.info("[Auto-Leave] Channel leer – starte 2-Minuten-Timer.")
+            logger.info("[Auto-Leave] Channel leer – starte 5-Minuten-Timer.")
         else:
             # Jemand ist (wieder) da – Timer abbrechen
             if self.auto_leave_task and not self.auto_leave_task.done():
