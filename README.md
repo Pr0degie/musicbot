@@ -53,7 +53,11 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 |---|---|
 | `!eq <preset>` | Equalizer-Preset setzen (ohne Argument: Liste) |
 | `!format <typ>` | Audioformat wechseln: `mp3` oder `webm` |
-| `!radio <nr/name/url>` | Internet-Radio abspielen oder neue Station hinzufügen |
+| `!radio` | Senderliste anzeigen |
+| `!radio <nr/name>` | Sender abspielen |
+| `!radio <url> [Name]` | Stream abspielen & speichern |
+| `!radio delete <nr/name>` | Sender löschen |
+| `!radio rename <nr/name> <neuer name>` | Sender umbenennen |
 | `!stop` | Radio stoppen |
 
 **Sonstiges**
