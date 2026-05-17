@@ -442,8 +442,12 @@ class MusicCommands(commands.Cog):
             try:
                 await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
             except asyncio.TimeoutError:
-                logger.warning("[play_next] Voice client bereits am spielen – konkurrenten Aufruf ignoriert.")
-                return
+                if ctx.voice_client.is_playing():
+                    logger.warning("[play_next] Voice client noch am spielen – konkurrenten Aufruf ignoriert.")
+                    return
+                # Event stuck obwohl Wiedergabe bereits beendet → zurücksetzen und fortfahren.
+                logger.warning("[play_next] _playback_done blockiert, Wiedergabe aber beendet – Event zurückgesetzt.")
+                self._playback_done.set()
             self._playback_done.clear()
 
         url, title = self.queue.popleft()
@@ -575,10 +579,15 @@ class MusicCommands(commands.Cog):
 
             # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
             # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
+            # Im Hintergrund-Thread, damit der Event-Loop nicht blockiert wird.
             self._songs_played += 1
             if self._songs_played % 50 == 0:
                 logger.info(f"[Maintenance] {self._songs_played} Songs gespielt – yt_dlp-Instanzen werden neu erstellt.")
-                self.update_ydl()
+                _keep = {url for url, _ in self.queue}
+                if self.current_track:
+                    _keep.add(self.current_track[0])
+                _fmt = self.audio_format
+                asyncio.create_task(asyncio.to_thread(self.dl.rebuild, _fmt, _keep))
 
             # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
             # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
@@ -664,17 +673,13 @@ class MusicCommands(commands.Cog):
         if not self._autoplay_queued_url:
             return None
 
-        queue_list = list(self.queue)
         removed_title = None
-        new_queue = []
-        for u, t in queue_list:
-            if u == self._autoplay_queued_url and removed_title is None:
-                removed_title = t  # nur erstes Vorkommen entfernen
-            else:
-                new_queue.append((u, t))
-        if removed_title is not None:
-            self.queue = deque(new_queue)
-            self._autoplay_queued_url = None
+        for i, (u, t) in enumerate(self.queue):
+            if u == self._autoplay_queued_url:
+                del self.queue[i]
+                removed_title = t
+                self._autoplay_queued_url = None
+                break
         return removed_title
 
     @commands.command()
