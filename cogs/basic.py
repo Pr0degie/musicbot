@@ -30,7 +30,7 @@ class BasicCommands(commands.Cog):
             "  !shuffle         – Warteschlange mischen\n"
             "  !clear           – Queue leeren & Wiedergabe stoppen\n"
             "  !remove <n>      – Song an Position n entfernen\n"
-            "  !move <n>        – Zu Position n springen und von dort abspielen\n"
+            "  !move <n|titel>  – Song nach vorne schieben (per Position oder Titelsuche)\n"
             "\n"
             "🎚️ Audio\n"
             "  !eq <preset>     – EQ-Preset setzen (ohne Argument: Liste)\n"

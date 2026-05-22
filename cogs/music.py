@@ -1291,21 +1291,46 @@ class MusicCommands(commands.Cog):
             await ctx.send("❌ Ungültiger Index. Bitte eine gültige Zahl angeben.")
 
     @commands.command()
-    async def move(self, ctx, index: int):
-        """Springt zu Position n in der Queue und spielt von dort weiter."""
+    async def move(self, ctx, *, term: str):
+        """Verschiebt einen Song an den Anfang der Queue.
+
+        !move 3          → Song an Position 3 nach vorne schieben
+        !move songtitel  → ersten Treffer per Titelsuche nach vorne schieben
+        """
         if not self.queue:
             await ctx.send("⚠️ Die Warteschlange ist leer.")
             return
-        if not 1 <= index <= len(self.queue):
-            await ctx.send(f"❌ Ungültiger Index. Bitte eine Zahl zwischen 1 und {len(self.queue)} angeben.")
-            return
+
         queue_list = list(self.queue)
-        self.queue = deque(queue_list[index - 1:])
-        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-            ctx.voice_client.stop()
-        else:
-            self.is_playing = True
-            await self.play_next(ctx)
+
+        # Zahl → nach Index suchen
+        idx = None
+        try:
+            n = int(term)
+            if 1 <= n <= len(queue_list):
+                idx = n - 1
+            else:
+                await ctx.send(f"❌ Ungültiger Index. Bitte eine Zahl zwischen 1 und {len(queue_list)} angeben.")
+                return
+        except ValueError:
+            # Kein Integer → Titelsuche (case-insensitive, Teilstring)
+            term_lower = term.lower()
+            for i, (_, t) in enumerate(queue_list):
+                if term_lower in t.lower():
+                    idx = i
+                    break
+            if idx is None:
+                await ctx.send(f"❌ Kein Song mit **{term}** in der Warteschlange gefunden.")
+                return
+
+        if idx == 0:
+            await ctx.send(f"✅ **{queue_list[0][1]}** ist bereits an Position 1.")
+            return
+
+        entry = queue_list.pop(idx)
+        queue_list.insert(0, entry)
+        self.queue = deque(queue_list)
+        await ctx.send(f"⏫ **{entry[1]}** nach vorne verschoben.")
 
     @commands.command()
     async def shuffle(self, ctx):
