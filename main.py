@@ -34,4 +34,6 @@ class MusicBot(commands.Bot):
 
 
 bot = MusicBot()
-bot.run(TOKEN)
+# log_handler=None: Logging wird in utils/logger.py konfiguriert –
+# verhindert dass discord.py einen eigenen StreamHandler hinzufügt (doppelte Ausgabe).
+bot.run(TOKEN, log_handler=None)
