@@ -3,6 +3,7 @@ from collections import deque
 import discord
 from discord.ui import Button, View
 from utils.logger import logger
+from utils.i18n import t
 
 
 class MusicControlView(View):
@@ -18,41 +19,41 @@ class MusicControlView(View):
         self.music_cog = music_cog
         self.ctx = ctx
 
-    @discord.ui.button(label="⏸️ Pause", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label=t("button.pause"), style=discord.ButtonStyle.primary)
     async def pause(self, interaction: discord.Interaction, button: Button):
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.pause()
             # is_playing syncen, damit !resume und !p den richtigen Zustand sehen.
             self.music_cog.is_playing = False
-            await interaction.response.send_message("⏸️ Pausiert.", ephemeral=True)
+            await interaction.response.send_message(t("status.paused_eph"), ephemeral=True)
         else:
-            await interaction.response.send_message("⚠️ Kein aktiver Song.", ephemeral=True)
+            await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
-    @discord.ui.button(label="▶️ Fortsetzen", style=discord.ButtonStyle.success)
+    @discord.ui.button(label=t("button.resume"), style=discord.ButtonStyle.success)
     async def resume(self, interaction: discord.Interaction, button: Button):
         if self.ctx.voice_client and self.ctx.voice_client.is_paused():
             self.ctx.voice_client.resume()
             self.music_cog.is_playing = True
-            await interaction.response.send_message("▶️ Fortgesetzt.", ephemeral=True)
+            await interaction.response.send_message(t("status.resumed_eph"), ephemeral=True)
         elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:
             # Queue vorhanden, aber nichts läuft → starten
             self.music_cog.is_playing = True
-            await interaction.response.send_message("▶️ Wiedergabe gestartet.", ephemeral=True)
+            await interaction.response.send_message(t("status.playback_started"), ephemeral=True)
             await self.music_cog.play_next(self.ctx)
         elif not self.music_cog.is_playing and self.music_cog.autoplay_enabled and not self.music_cog.is_radio:
             # Queue leer, aber Autoplay ist an → sofort loslegen
-            await interaction.response.send_message("🔁 Autoplay startet...", ephemeral=True)
+            await interaction.response.send_message(t("status.autoplay_starting"), ephemeral=True)
             asyncio.create_task(self.music_cog.autoplay(self.ctx))
         else:
-            await interaction.response.send_message("⚠️ Kein Song zum Fortsetzen.", ephemeral=True)
+            await interaction.response.send_message(t("error.no_song_to_resume"), ephemeral=True)
 
-    @discord.ui.button(label="⏭️ Überspringen", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label=t("button.skip"), style=discord.ButtonStyle.secondary)
     async def skip(self, interaction: discord.Interaction, button: Button):
         if self.music_cog.is_radio:
             self.music_cog._stop_radio()
             if self.ctx.voice_client and self.ctx.voice_client.is_playing():
                 self.ctx.voice_client.stop()
-            await interaction.response.send_message("⏹️ Radio beendet.", ephemeral=True)
+            await interaction.response.send_message(t("status.radio_stopped"), ephemeral=True)
             if self.music_cog.queue:
                 self.music_cog.is_playing = True
                 asyncio.create_task(self.music_cog.play_next(self.ctx))
@@ -60,11 +61,11 @@ class MusicControlView(View):
         # stop() löst den after_playing-Callback aus, der den nächsten Track startet.
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.stop()
-            await interaction.response.send_message("⏭️ Übersprungen.", ephemeral=True)
+            await interaction.response.send_message(t("status.skipped_eph"), ephemeral=True)
         else:
-            await interaction.response.send_message("⚠️ Kein aktiver Song.", ephemeral=True)
+            await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
-    @discord.ui.button(label="🔁 Autoplay", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label=t("button.autoplay"), style=discord.ButtonStyle.danger)
     async def autoplay_toggle(self, interaction: discord.Interaction, button: Button):
         """Schaltet Autoplay an oder aus.
 
@@ -72,10 +73,10 @@ class MusicControlView(View):
         wird sofort ein Song gesucht und gestartet – kein manuelles !p nötig.
         """
         if self.music_cog.is_radio:
-            await interaction.response.send_message("📻 Autoplay nicht verfügbar im Radio-Modus.", ephemeral=True)
+            await interaction.response.send_message(t("error.autoplay_radio"), ephemeral=True)
             return
         self.music_cog.autoplay_enabled = not self.music_cog.autoplay_enabled
-        status = "aktiviert" if self.music_cog.autoplay_enabled else "deaktiviert"
+        status = t("misc.enabled") if self.music_cog.autoplay_enabled else t("misc.disabled")
         logger.info(f"[Autoplay] {status.capitalize()} per Button")
         await interaction.response.send_message(f"🔁 Autoplay {status}.", ephemeral=True)
 
@@ -97,18 +98,18 @@ class SearchAutoplayView(View):
         self.music_cog = music_cog
         self.ctx = ctx
         self.message = None
-        self.base_content = base_content or f"🎶 Spiele: **{added_entry.get('title', 'Unbekannter Titel')}**"
+        self.base_content = base_content or t("status.playing", title=added_entry.get("title", t("misc.unknown_title")))
 
         letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         for i, entry in enumerate(alternatives):
-            button = Button(label=f"Option {letters[i]}", style=discord.ButtonStyle.secondary)
+            button = Button(label=t("misc.option", letter=letters[i]), style=discord.ButtonStyle.secondary)
             button.callback = self._make_callback(entry)
             self.add_item(button)
 
     def _make_callback(self, entry):
         async def callback(interaction: discord.Interaction):
             url = entry.get("webpage_url") or entry.get("url")
-            title = entry.get("title", "Unbekannter Titel")
+            title = entry.get("title", t("misc.unknown_title"))
             added_title = self.added_entry.get("title", "")
 
             if self.music_cog.current_track and self.music_cog.current_track[1] == added_title:
@@ -119,7 +120,7 @@ class SearchAutoplayView(View):
                 ):
                     self.ctx.voice_client.stop()
                 await interaction.response.edit_message(
-                    content=f"🔀 Wechsle zu: **{title}**", view=None
+                    content=t("status.switching_to", title=title), view=None
                 )
             else:
                 # Song wartet noch in der Queue → direkt ersetzen
@@ -143,7 +144,7 @@ class SearchAutoplayView(View):
                     ):
                         self.ctx.voice_client.stop()
                 await interaction.response.edit_message(
-                    content=f"🔀 Wechsle zu: **{title}**", view=None
+                    content=t("status.switching_to", title=title), view=None
                 )
                 if not self.music_cog.is_playing:
                     self.music_cog.is_playing = True

@@ -1,95 +1,113 @@
-# 🎵 Discord Musikbot
+# 🎵 Discord Music Bot
 
-Ein modularer Discord-Musikbot mit yt_dlp, FFmpeg, Buttons und Equalizer-Profilen.  
-Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [yt_dlp](https://github.com/yt-dlp/yt-dlp).
+Modular Discord music bot powered by yt_dlp, FFmpeg, buttons and equalizer presets.  
+Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp](https://github.com/yt-dlp/yt-dlp).
 
 ---
 
 ## Features
 
-- YouTube-Links, Playlists und Suchbegriffe abspielen
-- Steuerbuttons direkt in Discord: ⏸️ ▶️ ⏭️ 🔁
-- Autoplay: sucht automatisch den nächsten Song wenn die Queue leer läuft
-- Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
-- Audioformat: `webm` (Standard, verlustfrei) oder `mp3`
-- Internet-Radio via direktem Stream
-- Queue-Verwaltung mit Speichern/Laden, Shuffle, Loop-Modus
-- Kurze Songs werden gecacht, lange Songs (>20 min) und unbekannte Songs starten sofort per Stream
+- Play YouTube links, playlists and search terms
+- Control buttons directly in Discord: ⏸️ ▶️ ⏭️ 🔁
+- Autoplay: finds the next song automatically when queue runs out
+- Equalizer presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
+- Audio format: `webm` (default, lossless) or `mp3`
+- Internet radio via direct stream
+- Queue management with save/load, shuffle and loop mode
+- Short songs are cached; long songs (>20 min) start instantly via stream
 
 ---
 
-## Befehle (Prefix: `!`)
+## Commands (prefix: `!`)
 
-**Wiedergabe**
+**Playback**
 
-| Befehl | Funktion |
+| Command | Description |
 |---|---|
-| `!p <url/suche>` | Musik abspielen — YouTube-URL, Playlist oder Suchbegriff |
-| `!next <url/suche>` | Song als nächsten in die Queue legen |
-| `!s` | Überspringen |
+| `!p <url/search>` | Play music — YouTube URL, playlist or titel search  |
+| `!next <url/search>` | Queue a song as next |
+| `!s` | Skip |
 | `!x` | Pause |
-| `!resume` | Fortsetzen |
-| `!now` | Aktuellen Song anzeigen |
-| `!seek <zeit>` | Position springen — z.B. `1:23` oder `83` |
-| `!replay` | Letzten Song nochmal in die Queue |
+| `!resume` | Resume |
+| `!now` | Show current song |
+| `!seek <time>` | Jump to position — e.g. `1:23` or `83` |
+| `!replay` | Re-queue last song |
 
 **Queue**
 
-| Befehl | Funktion |
+| Command | Description |
 |---|---|
-| `!q` | Queue anzeigen (paginiert) |
-| `!shuffle` | Queue mischen |
-| `!clear` | Stopp + Queue leeren |
-| `!remove <n>` | Song an Position `n` entfernen |
-| `!move <n>` | Ab Position `n` abspielen |
-| `!loop` | Loop-Modus: aus → Song → Queue → aus |
-| `!saveq <name>` | Aktuelle Queue speichern |
-| `!loadq <name>` | Gespeicherte Queue laden |
-| `!lists` | Gespeicherte Queues auflisten |
+| `!q` | Show queue (paginated) |
+| `!shuffle` | Shuffle queue |
+| `!clear` | Stop + clear queue |
+| `!remove <n>` | Remove song at position `n` |
+| `!move <n\|title>` | Move song to front — by position or title search |
+| `!loop` | Loop mode: off → song → queue → off |
+| `!saveq <name>` | Save current queue |
+| `!loadq <name>` | Load saved queue |
+| `!lists` | List all saved queues |
 
 **Audio & Radio**
 
-| Befehl | Funktion |
+| Command | Description |
 |---|---|
-| `!eq <preset>` | Equalizer-Preset setzen (ohne Argument: Liste) |
-| `!format <typ>` | Audioformat wechseln: `mp3` oder `webm` |
-| `!radio` | Senderliste anzeigen |
-| `!radio <nr/name>` | Sender abspielen |
-| `!radio <url> [Name]` | Stream abspielen & speichern |
-| `!radio delete <nr/name>` | Sender löschen |
-| `!radio rename <nr/name> <neuer name>` | Sender umbenennen |
-| `!stop` | Radio stoppen |
+| `!eq <preset>` | Set EQ preset (no argument: list all) |
+| `!format <type>` | Switch audio format: `mp3` or `webm` |
+| `!radio` | Show station list |
+| `!radio <nr/name>` | Play station |
+| `!radio <url> [name]` | Play & save stream |
+| `!radio delete <nr/name>` | Delete station |
+| `!radio rename <nr/name> <new name>` | Rename station |
+| `!stop` | Stop radio |
 
-**Sonstiges**
+**Misc**
 
-| Befehl | Funktion |
+| Command | Description |
 |---|---|
-| `!text` | Songtext abrufen |
-| `!stats` | Bot-Statistiken (RAM, CPU, Cache) |
-| `!j` / `!l` | Voice-Channel beitreten / verlassen |
+| `!score` | Top 10 most played songs |
+| `!baba` | Play Baba playlist |
+| `!text` | Fetch song lyrics |
+| `!stats` | Bot stats (RAM, CPU, cache) |
+| `!j` / `!l` | Join / leave voice channel |
+| `!reloadcookies` | Reload `cookies.txt` without restarting |
 
 ---
 
-## Projektstruktur
+## Project Structure
 
 ```
-├── main.py                    # Einstiegspunkt
-├── config.py                  # Env-Variablen laden
+├── main.py                    # Entry point
+├── config.py                  # Load environment variables
 ├── cogs/
-│   ├── music.py               # Musik-Logik, Queue, Autoplay, Radio
-│   ├── downloader.py          # yt_dlp-Instanzen, Download-Cache, Streaming
-│   ├── presets.py             # EQ-Filterketten
+│   ├── music.py               # Music logic, queue, autoplay, radio
+│   ├── downloader.py          # yt_dlp instances, download cache, streaming
+│   ├── presets.py             # EQ filter chains
 │   └── basic.py               # !j, !l, !ping, !echo, !help
 ├── views/
-│   └── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
+│   └── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay)
 ├── utils/
-│   └── logger.py              # Logging (Konsole + bot.log)
-├── downloads/                 # Audio-Cache
-└── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
+│   ├── logger.py              # Logging (console + bot.log)
+│   └── i18n.py                # Localization helper (t() function)
+├── locales/
+│   ├── en.json                # English strings
+│   └── de.json                # German strings
+├── downloads/                 # Audio cache
+└── playlists/                 # Saved queues (!saveq / !loadq)
+```
+
+---
+
+## Language
+
+Set via `LANGUAGE` in `.env`:
+
+```env
+LANGUAGE=en   # English (default)
+LANGUAGE=de   # German
 ```
 
 ---
 
 ## Setup
 
-→ Siehe [`SETUP.md`](SETUP.md)
+→ See [`SETUP.md`](SETUP.md)

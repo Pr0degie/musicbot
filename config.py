@@ -10,3 +10,4 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 # cookiefile hat Vorrang. Beide leer → keine Cookie-Auth.
 YDL_COOKIES_FILE = os.getenv("YDL_COOKIES_FILE", "")
 YDL_BROWSER = os.getenv("YDL_BROWSER", "firefox")
+LANGUAGE = os.getenv("LANGUAGE", "en")

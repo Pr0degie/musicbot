@@ -1,6 +1,8 @@
 import discord
 from discord.ui import Button, View
 
+from utils.i18n import t
+
 
 class QueueView(View):
     PER_PAGE = 15
@@ -27,22 +29,27 @@ class QueueView(View):
         slice_ = self.items[start: start + self.PER_PAGE]
 
         embed = discord.Embed(
-            title=f"📋 Queue — Seite {self.page + 1}/{pages}",
+            title=t("embed.queue_title", page=self.page + 1, pages=pages),
             color=0x3498db,
         )
 
         if self.current_track:
             _, title, *_ = self.current_track
-            embed.add_field(name="▶ Jetzt", value=title, inline=False)
+            embed.add_field(name=t("embed.queue_now"), value=title, inline=False)
 
         if slice_:
             lines = [f"`{start + i + 1}.` {title}" for i, (_, title) in enumerate(slice_)]
-            embed.add_field(name="Warteschlange", value="\n".join(lines), inline=False)
+            embed.add_field(name=t("embed.queue_list"), value="\n".join(lines), inline=False)
         else:
-            embed.add_field(name="Warteschlange", value="*(leer)*", inline=False)
+            embed.add_field(name=t("embed.queue_list"), value=t("embed.queue_empty"), inline=False)
 
-        loop_text = {"song": "🔂 Song", "queue": "🔁 Queue"}.get(self.loop_mode, "aus")
-        embed.set_footer(text=f"{total} Songs gesamt • Loop: {loop_text}")
+        if self.loop_mode == "song":
+            loop_text = t("embed.loop_song")
+        elif self.loop_mode == "queue":
+            loop_text = t("embed.loop_queue")
+        else:
+            loop_text = t("embed.loop_off")
+        embed.set_footer(text=t("embed.queue_footer", total=total, loop=loop_text))
         return embed
 
     @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)

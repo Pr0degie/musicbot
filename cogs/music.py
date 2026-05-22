@@ -16,6 +16,7 @@ import aiohttp
 import discord
 import psutil
 from utils.logger import logger
+from utils.i18n import t
 from discord.ext import commands
 from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
@@ -144,7 +145,7 @@ class MusicCommands(commands.Cog):
             source = f"Browser ({YDL_BROWSER})"
         else:
             source = "keine Cookie-Quelle konfiguriert"
-        await ctx.send(f"Cookies neu geladen. Quelle: {source}")
+        await ctx.send(t("misc.cookies_reloaded", source=source))
 
     @commands.command()
     async def format(self, ctx, typ: str):
@@ -154,10 +155,10 @@ class MusicCommands(commands.Cog):
             self.update_ydl()
             # Kleiner Hinweis, falls gerade etwas läuft – der aktuelle Track
             # wird nicht neu gestartet, das wäre nervig.
-            note = " (wirkt ab dem nächsten Titel)" if self.is_playing else ""
-            await ctx.send(f"🔄 Audioformat auf **{self.audio_format}** gesetzt{note}.")
+            note = t("status.format_note") if self.is_playing else ""
+            await ctx.send(t("status.format_set", format=self.audio_format, note=note))
         else:
-            await ctx.send("❌ Ungültiges Format. Verfügbare Optionen: mp3, webm")
+            await ctx.send(t("error.invalid_format"))
 
     async def autoplay(self, ctx):
         """Sucht einen zum letzten Song passenden Track und spielt ihn einmalig.
@@ -232,27 +233,27 @@ class MusicCommands(commands.Cog):
                 candidates = [e for e in entries if is_video(e)]
 
             if not candidates:
-                await ctx.send("❌ Autoplay: Keine verwandten Songs gefunden.")
+                await ctx.send(t("error.autoplay_no_results"))
                 logger.warning("[Autoplay] Keine nutzbaren Einträge im Mix")
                 return
 
             # Erstes Element aus dem Mix nehmen (YouTube sortiert nach Relevanz)
             chosen = candidates[0]
             url = entry_url(chosen)
-            title = chosen.get("title", "Unbekannt")
+            title = chosen.get("title", t("misc.unknown"))
 
             self.queue.appendleft((url, title))
             self._autoplay_queued_url = url
             logger.info(f"[Autoplay] Hinzugefügt: {title} ({url})")
-            await ctx.send(f"🔁 Autoplay: **{title}**", delete_after=20)
+            await ctx.send(t("status.autoplay_added", title=title), delete_after=20)
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
         except asyncio.TimeoutError:
-            await ctx.send("❌ Autoplay-Suche hat zu lange gedauert.")
+            await ctx.send(t("error.autoplay_timeout"))
             logger.warning("[Autoplay] Timeout bei extract_info")
         except Exception:
-            await ctx.send("❌ Fehler bei Autoplay.")
+            await ctx.send(t("error.autoplay_error"))
             logger.exception("[Autoplay Fehler]")
 
     async def _prefetch_next(self, idx: int = 0):
@@ -282,7 +283,7 @@ class MusicCommands(commands.Cog):
                 voice_client.stop()
             await voice_client.disconnect()
             if self.text_channel:
-                await self.text_channel.send("👋 Alle weg – ich geh dann auch. Bis zum nächsten Mal!")
+                await self.text_channel.send(t("misc.auto_leave"))
             logger.info("[Auto-Leave] Channel verlassen – keine User mehr.")
 
     @commands.Cog.listener()
@@ -317,7 +318,7 @@ class MusicCommands(commands.Cog):
     async def _play_radio_stream(self, ctx, url: str, name: str) -> None:
         """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp)."""
         if not ctx.voice_client or not ctx.voice_client.is_connected():
-            await ctx.send("❌ Kein Voice-Channel verbunden.")
+            await ctx.send(t("error.no_voice_connected"))
             return
 
         # Sicherheitsnetz: falls FFmpeg noch nicht terminiert ist, kurz warten.
@@ -325,7 +326,7 @@ class MusicCommands(commands.Cog):
             try:
                 await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
             except asyncio.TimeoutError:
-                await ctx.send("❌ Stream konnte nicht gestartet werden (Voice-Client noch belegt).")
+                await ctx.send(t("error.stream_busy"))
                 self._stop_radio()
                 return
             self._playback_done.clear()
@@ -347,7 +348,7 @@ class MusicCommands(commands.Cog):
             )
         except Exception:
             logger.exception(f"[Radio] Fehler beim Erstellen der FFmpeg-Quelle für {url}")
-            await ctx.send("❌ Fehler beim Verbinden mit dem Stream.")
+            await ctx.send(t("error.stream_connect_error"))
             self._stop_radio()
             return
 
@@ -368,7 +369,7 @@ class MusicCommands(commands.Cog):
                 self.is_radio = False
                 self.is_playing = False
                 asyncio.run_coroutine_threadsafe(
-                    ctx.send("📻 Stream-Verbindung dauerhaft unterbrochen. Radio beendet.", delete_after=30),
+                    ctx.send(t("radio.stream_interrupted"), delete_after=30),
                     self.bot.loop,
                 )
 
@@ -384,8 +385,8 @@ class MusicCommands(commands.Cog):
         self._radio_reconnect_count = 0
 
         embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
-        embed.add_field(name="Status", value="🔴 Live", inline=True)
-        embed.add_field(name="EQ", value=self.equalizer, inline=True)
+        embed.add_field(name=t("embed.status"), value=t("embed.radio_live"), inline=True)
+        embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
         self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
         self.text_channel = ctx.channel
         logger.info(f"[Radio] Stream gestartet: {name} ({url})")
@@ -399,7 +400,7 @@ class MusicCommands(commands.Cog):
         await asyncio.sleep(2)
         try:
             await ctx.send(
-                f"📻 Reconnect {self._radio_reconnect_count}/3 für **{self.radio_station_name}**...",
+                t("radio.reconnecting", count=self._radio_reconnect_count, name=self.radio_station_name),
                 delete_after=10,
             )
         except Exception:
@@ -562,7 +563,7 @@ class MusicCommands(commands.Cog):
                     await self.now_playing_msg.edit(content=prev_text, embed=None, view=None)
                 except Exception:
                     pass
-            duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else "Unbekannt"
+            duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
             if " - " in title:
                 _artist, _song = title.split(" - ", 1)
                 embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
@@ -572,9 +573,9 @@ class MusicCommands(commands.Cog):
                 embed_title = f"🎵 {title}"
             embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
             embed.set_thumbnail(url=info.get("thumbnail"))
-            embed.add_field(name="Dauer", value=duration_str, inline=True)
-            embed.add_field(name="EQ", value=self.equalizer, inline=True)
-            embed.add_field(name="Format", value=self.audio_format, inline=True)
+            embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
+            embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
+            embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
             if info.get("uploader"):
                 embed.set_footer(text=info.get("uploader"))
             self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
@@ -623,7 +624,7 @@ class MusicCommands(commands.Cog):
             self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
-                    await ctx.send(f"⚠️ Timeout beim Laden von **{title}**. Überspringe...")
+                    await ctx.send(t("error.track_timeout", title=title))
                 except Exception:
                     pass
                 asyncio.create_task(self.play_next(ctx))
@@ -637,7 +638,7 @@ class MusicCommands(commands.Cog):
             self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
                 try:
-                    await ctx.send(f"⚠️ Fehler beim Laden von **{title}**. Überspringe...")
+                    await ctx.send(t("error.track_error", title=title))
                 except Exception:
                     pass
                 # Fehlerhaften Track überspringen – create_task statt direkter Rekursion,
@@ -657,13 +658,13 @@ class MusicCommands(commands.Cog):
         if ctx.voice_client is not None:
             return True
         if not ctx.author.voice:
-            await ctx.send("❌ Du bist in keinem Voice-Channel.")
+            await ctx.send(t("error.no_voice"))
             return False
         try:
             await ctx.author.voice.channel.connect()
             logger.info(f"[Auto-Join] Verbunden mit: {ctx.author.voice.channel.name}")
         except Exception as e:
-            await ctx.send(f"❌ Verbindung fehlgeschlagen: {type(e).__name__}: {str(e)[:100]}")
+            await ctx.send(t("error.connect_failed", err=f"{type(e).__name__}: {str(e)[:100]}"))
             return False
         return True
 
@@ -695,7 +696,7 @@ class MusicCommands(commands.Cog):
     async def p(self, ctx, *, eingabe: str = None):
         """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
         if not eingabe:
-            await ctx.send("❓ Verwendung: `!p <Suchbegriff oder URL>`")
+            await ctx.send(t("error.p_usage"))
             return
         logger.info(f"[p] Eingabe erhalten: {eingabe}")
 
@@ -716,22 +717,22 @@ class MusicCommands(commands.Cog):
         # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
         if not eingabe.startswith("http"):
             try:
-                await ctx.send("🔎 Suche läuft...")
+                await ctx.send(t("status.searching"))
                 results = await asyncio.wait_for(
                     asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
                     timeout=30.0,
                 )
             except asyncio.TimeoutError:
-                await ctx.send("❌ Suche hat zu lange gedauert. Bitte versuche es erneut.")
+                await ctx.send(t("error.search_timeout"))
                 return
             except Exception:
                 logger.exception("[p] Fehler bei Suche")
-                await ctx.send("❌ Fehler bei der Suche.")
+                await ctx.send(t("error.search_error"))
                 return
 
             entries = (results.get("entries") or [])[:3]
             if not entries:
-                await ctx.send("❌ Keine Ergebnisse gefunden.")
+                await ctx.send(t("error.no_results"))
                 return
 
             # Ersten Treffer direkt in die Queue legen.
@@ -739,7 +740,7 @@ class MusicCommands(commands.Cog):
             # Wunsch hat Vorrang und soll als nächstes spielen.
             first = entries[0]
             url = first.get("webpage_url") or first.get("url")
-            title = first.get("title", "Unbekannter Titel")
+            title = first.get("title", t("misc.unknown_title"))
             asyncio.create_task(self.dl._start_resolve(url))
             evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
             if evicted:
@@ -754,16 +755,16 @@ class MusicCommands(commands.Cog):
                 view = SearchAutoplayView(first, alternatives, self, ctx)
                 letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                 alt_lines = "\n".join(
-                    f"**Option {letters[i]}:** {e.get('title', 'Unbekannter Titel')}"
+                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
                     for i, e in enumerate(alternatives)
                 )
                 msg = await ctx.send(
-                    f"🎶 Spiele: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*\n{alt_lines}",
+                    t("status.playing_with_alts", title=title, alts=alt_lines),
                     view=view,
                 )
                 view.message = msg
             else:
-                await ctx.send(f"🎶 Hinzugefügt: **{title}**")
+                await ctx.send(t("status.added", title=title))
 
             if not self.is_playing:
                 self.is_playing = True
@@ -778,51 +779,49 @@ class MusicCommands(commands.Cog):
         ydl_instance = self.dl.playlist_ydl if is_playlist else self.dl.url_ydl
 
         try:
-            await ctx.send("🔎 Verarbeite Eingabe... bitte warten.")
+            await ctx.send(t("status.processing"))
             info = await asyncio.wait_for(
                 asyncio.to_thread(ydl_instance.extract_info, eingabe, download=False),
                 timeout=30.0,
             )
         except asyncio.TimeoutError:
-            await ctx.send("❌ Anfrage hat zu lange gedauert. Bitte überprüfe die URL und versuche es erneut.")
+            await ctx.send(t("error.processing_timeout"))
             return
         except Exception:
             logger.exception("[p] Fehler beim Abrufen von yt_dlp-Infos")
-            await ctx.send("❌ Fehler beim Abrufen der Informationen. Bitte überprüfe die URL.")
+            await ctx.send(t("error.url_error"))
             return
 
         if "entries" in info:
             entries = info["entries"]
-            await ctx.send(
-                f"📃 Playlist erkannt: **{info.get('title', 'Unbenannte Playlist')}** – {len(entries)} Einträge gefunden. Füge zur Queue hinzu..."
-            )
+            await ctx.send(t("status.playlist_detected", title=info.get("title", t("misc.unnamed_playlist")), count=len(entries)))
             added_count = 0
             for entry in entries:
                 if added_count >= self.HARD_PLAYLIST_LIMIT:
-                    await ctx.send(f"⚠️ Limit von {self.HARD_PLAYLIST_LIMIT} Titeln erreicht.")
+                    await ctx.send(t("error.playlist_limit", limit=self.HARD_PLAYLIST_LIMIT))
                     break
                 # webpage_url ist immer die echte YouTube-URL.
                 # url kann bei Suchergebnissen eine direkte Stream-URL sein → zuletzt prüfen.
                 url = entry.get("webpage_url") or entry.get("url")
-                title = entry.get("title", "Unbekannter Titel")
+                title = entry.get("title", t("misc.unknown_title"))
                 if url:
                     self.queue.append((url, title))
                     added_count += 1
-            await ctx.send(f"✅ {added_count} Titel zur Warteschlange hinzugefügt.")
+            await ctx.send(t("status.playlist_added", count=added_count))
         else:
             url = info.get("webpage_url")
-            title = info.get("title", "Unbekannter Titel")
+            title = info.get("title", t("misc.unknown_title"))
             # Warnen wenn der Titel schon in der Queue ist – könnte ein Versehen sein
-            dup_pos = next((i + 1 for i, (_, t) in enumerate(self.queue) if t == title), None)
+            dup_pos = next((i + 1 for i, (_, qt) in enumerate(self.queue) if qt == title), None)
             if dup_pos:
-                await ctx.send(f"⚠️ **{title}** ist bereits in der Queue (Position {dup_pos}). Trotzdem hinzugefügt.")
+                await ctx.send(t("status.duplicate_warning", title=title, pos=dup_pos))
             evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
             if evicted:
                 logger.info(f"[p] Autoplay-Song verdrängt: {evicted}")
                 self.queue.appendleft((url, title))
             else:
                 self.queue.append((url, title))
-            await ctx.send(f"🎶 Hinzugefügt: **{title}**")
+            await ctx.send(t("status.added", title=title))
 
         if not self.is_playing:
             self.is_playing = True
@@ -853,13 +852,13 @@ class MusicCommands(commands.Cog):
 
         if not eingabe:
             if not stations:
-                await ctx.send("❌ Keine Senderliste gefunden (`radio_stations.json`).")
+                await ctx.send(t("error.no_stations"))
                 return
             lines = [
                 f"**{i + 1}.** {v['name']}"
                 for i, (k, v) in enumerate(stations.items())
             ]
-            await ctx.send("📻 **Bekannte Sender** (Tipp: `!radio <Nummer>`):\n" + "\n".join(lines))
+            await ctx.send(t("radio.station_list", lines="\n".join(lines)))
             return
 
         eingabe = eingabe.strip()
@@ -870,26 +869,26 @@ class MusicCommands(commands.Cog):
         if tokens[0] in ("delete", "rename"):
             subcmd = tokens[0]
             if len(tokens) < 2:
-                await ctx.send(f"❌ Verwendung: `!radio {subcmd} <Nummer oder Name>`")
+                await ctx.send(t("error.radio_usage", subcmd=subcmd))
                 return
             key, entry = self._resolve_station_entry(tokens[1], items)
             if entry is None:
-                await ctx.send(f"❌ Sender `{tokens[1]}` nicht gefunden.")
+                await ctx.send(t("error.station_not_found", name=tokens[1]))
                 return
             if subcmd == "delete":
                 del stations[key]
                 with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
                     json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(f"🗑️ Sender **{entry['name']}** gelöscht.")
+                await ctx.send(t("radio.station_deleted", name=entry["name"]))
             else:  # rename
                 if len(tokens) < 3:
-                    await ctx.send("❌ Verwendung: `!radio rename <Nr/Name> <Neuer Name>`")
+                    await ctx.send(t("error.radio_rename_usage"))
                     return
                 old_name = entry["name"]
                 stations[key]["name"] = tokens[2]
                 with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
                     json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(f"✏️ **{old_name}** → **{tokens[2]}**")
+                await ctx.send(t("radio.station_renamed", old=old_name, new=tokens[2]))
             return
 
         if not await self._ensure_voice(ctx):
@@ -916,14 +915,14 @@ class MusicCommands(commands.Cog):
                 stations[key] = {"name": name, "url": url}
                 with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
                     json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(f"📻 Neuer Sender **{name}** gespeichert (Nr. {len(stations)}).")
+                await ctx.send(t("radio.station_saved", name=name, num=len(stations)))
         else:
             _, entry = self._resolve_station_entry(eingabe, items)
             if entry is None:
                 if eingabe.isdigit():
-                    await ctx.send(f"❌ Nummer `{eingabe}` existiert nicht (1–{len(items)}).")
+                    await ctx.send(t("error.station_number_invalid", num=eingabe, count=len(items)))
                 else:
-                    await ctx.send(f"❌ Sender `{eingabe}` nicht gefunden. `!radio` zeigt die Liste.")
+                    await ctx.send(t("error.station_name_not_found", name=eingabe))
                 return
             url = entry["url"]
             name = entry["name"]
@@ -952,13 +951,13 @@ class MusicCommands(commands.Cog):
             self._stop_radio()
             if ctx.voice_client and ctx.voice_client.is_playing():
                 ctx.voice_client.stop()
-            await ctx.send("⏹️ Radio beendet.")
+            await ctx.send(t("status.radio_stopped"))
         elif ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             self.is_playing = False
             ctx.voice_client.stop()
-            await ctx.send("⏹️ Wiedergabe gestoppt.")
+            await ctx.send(t("status.playback_stopped"))
         else:
-            await ctx.send("⚠️ Es läuft gerade nichts.")
+            await ctx.send(t("error.nothing_playing"))
 
     @commands.command(name="next")
     async def next_song(self, ctx, *, eingabe):
@@ -983,7 +982,7 @@ class MusicCommands(commands.Cog):
             url = parts[0].strip()
             title = parts[1].strip()
             self.queue.appendleft((url, title))
-            await ctx.send(f"⏭️ Als nächstes: **{title}**")
+            await ctx.send(t("status.next_added", title=title))
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -992,45 +991,45 @@ class MusicCommands(commands.Cog):
         # Suchbegriff → ersten Treffer an erste Stelle, Alternativen als Buttons
         if not eingabe.startswith("http"):
             try:
-                await ctx.send("🔎 Suche läuft...")
+                await ctx.send(t("status.searching"))
                 results = await asyncio.wait_for(
                     asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
                     timeout=30.0,
                 )
             except asyncio.TimeoutError:
-                await ctx.send("❌ Suche hat zu lange gedauert.")
+                await ctx.send(t("error.search_timeout_short"))
                 return
             except Exception:
                 logger.exception("[next] Fehler bei Suche")
-                await ctx.send("❌ Fehler bei der Suche.")
+                await ctx.send(t("error.search_error"))
                 return
             entries = (results.get("entries") or [])[:3]
             if not entries:
-                await ctx.send("❌ Keine Ergebnisse gefunden.")
+                await ctx.send(t("error.no_results"))
                 return
             first = entries[0]
             url = first.get("webpage_url") or first.get("url")
-            title = first.get("title", "Unbekannter Titel")
+            title = first.get("title", t("misc.unknown_title"))
             asyncio.create_task(self.dl._start_resolve(url))
             self.queue.appendleft((url, title))
             alternatives = entries[1:]
             if alternatives:
                 view = SearchAutoplayView(
                     first, alternatives, self, ctx,
-                    base_content=f"⏭️ Als nächstes: **{title}**",
+                    base_content=t("status.next_added", title=title),
                 )
                 letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                 alt_lines = "\n".join(
-                    f"**Option {letters[i]}:** {e.get('title', 'Unbekannter Titel')}"
+                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
                     for i, e in enumerate(alternatives)
                 )
                 msg = await ctx.send(
-                    f"⏭️ Als nächstes: **{title}**\n*Nicht das Richtige? Wähle eine Alternative:*\n{alt_lines}",
+                    t("status.next_with_alts", title=title, alts=alt_lines),
                     view=view,
                 )
                 view.message = msg
             else:
-                await ctx.send(f"⏭️ Als nächstes: **{title}**")
+                await ctx.send(t("status.next_added", title=title))
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -1038,27 +1037,27 @@ class MusicCommands(commands.Cog):
 
         # Direkte URL → yt_dlp-Lookup
         try:
-            await ctx.send("🔎 Verarbeite URL...")
+            await ctx.send(t("status.processing_url"))
             info = await asyncio.wait_for(
                 asyncio.to_thread(self.dl.url_ydl.extract_info, eingabe, download=False),
                 timeout=30.0,
             )
         except asyncio.TimeoutError:
-            await ctx.send("❌ Anfrage hat zu lange gedauert.")
+            await ctx.send(t("error.timeout"))
             return
         except Exception:
             logger.exception("[next] Fehler beim Abrufen von yt_dlp-Infos")
-            await ctx.send("❌ Fehler beim Abrufen der Informationen.")
+            await ctx.send(t("error.fetch_error"))
             return
 
         if "entries" in info:
-            await ctx.send("⚠️ Playlists werden von `!next` nicht unterstützt. Bitte eine einzelne URL angeben.")
+            await ctx.send(t("error.next_no_playlist"))
             return
 
         url = info.get("webpage_url") or eingabe
-        title = info.get("title", "Unbekannter Titel")
+        title = info.get("title", t("misc.unknown_title"))
         self.queue.appendleft((url, title))
-        await ctx.send(f"⏭️ Als nächstes: **{title}**")
+        await ctx.send(t("status.next_added", title=title))
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
@@ -1070,35 +1069,35 @@ class MusicCommands(commands.Cog):
             self._stop_radio()
             if ctx.voice_client and ctx.voice_client.is_playing():
                 ctx.voice_client.stop()
-            await ctx.send("⏹️ Radio beendet.", delete_after=20)
+            await ctx.send(t("status.radio_stopped"), delete_after=20)
             if self.queue:
                 self.is_playing = True
                 await self.play_next(ctx)
             return
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-            await ctx.send("⏭️ Song übersprungen. Spiele den nächsten Titel ...", delete_after=20)
+            await ctx.send(t("status.skipped"), delete_after=20)
         else:
-            await ctx.send("⚠️ Es läuft gerade kein Song.")
+            await ctx.send(t("error.no_song_playing"))
 
     @commands.command(name="x")
     async def pause(self, ctx):
         """Pausiert die Wiedergabe und aktualisiert is_playing."""
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
-            await ctx.send("⏸️ Song pausiert.")
+            await ctx.send(t("status.paused"))
             # is_playing muss hier auf False, damit !resume und !p
             # erkennen, dass gerade nichts aktiv abgespielt wird.
             self.is_playing = False
         else:
-            await ctx.send("⚠️ Es läuft gerade kein Song.")
+            await ctx.send(t("error.no_song_playing"))
 
     @commands.command()
     async def resume(self, ctx):
         """Setzt die Wiedergabe fort. Startet auch, wenn is_playing False aber Queue voll ist."""
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
-            await ctx.send("▶️ Song fortgesetzt.")
+            await ctx.send(t("status.resumed"))
             self.is_playing = True
         elif not self.is_playing and self.queue:
             # Edge-Case: Bot im Kanal, Queue nicht leer, aber nichts läuft.
@@ -1106,30 +1105,30 @@ class MusicCommands(commands.Cog):
             logger.info("[Auto-Start] Queue nicht leer, starte nächsten Song.")
             await self.play_next(ctx)
         else:
-            await ctx.send("⚠️ Kein Song zum Fortsetzen.")
+            await ctx.send(t("error.no_song_to_resume"))
 
     @commands.command(name="now")
     async def now_playing(self, ctx):
         """Zeigt den aktuell laufenden oder pausierten Song an."""
         if self.current_track:
             ct_url, ct_title, ct_duration, *_ = (*self.current_track, 0)  # 0 als Fallback für alte 2-Tuples
-            duration_str = f"{ct_duration // 60}:{ct_duration % 60:02d}" if ct_duration else "Unbekannt"
+            duration_str = f"{ct_duration // 60}:{ct_duration % 60:02d}" if ct_duration else t("misc.unknown")
             color = 0x1db954 if self.is_playing else 0x808080
             embed = discord.Embed(title=ct_title, url=ct_url, color=color)
-            embed.add_field(name="Dauer", value=duration_str, inline=True)
-            embed.add_field(name="EQ", value=self.equalizer, inline=True)
-            embed.add_field(name="Format", value=self.audio_format, inline=True)
-            status = "🎶 Läuft gerade" if self.is_playing else "⏸️ Pausiert"
+            embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
+            embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
+            embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
+            status = t("status.now_playing_label") if self.is_playing else t("status.paused_label")
             embed.set_author(name=status)
             await ctx.send(embed=embed)
         else:
-            await ctx.send("⚠️ Es läuft gerade kein Song.")
+            await ctx.send(t("error.no_song_playing"))
 
     @commands.command(name="text")
     async def lyrics_cmd(self, ctx):
         """Zeigt den Liedtext des aktuell laufenden Songs via lyrics.ovh an."""
         if not self.current_track:
-            await ctx.send("⚠️ Es läuft gerade kein Song.")
+            await ctx.send(t("error.no_song_playing"))
             return
 
         title_raw = self.current_track[1]
@@ -1144,27 +1143,27 @@ class MusicCommands(commands.Cog):
             song = re.sub(r'\s*\([^)]*\)', '', title_raw).strip()
 
         display = f"**{artist} – {song}**" if artist else f"**{song}**"
-        await ctx.send(f"🔎 Suche Liedtext für {display}...")
+        await ctx.send(t("status.searching_lyrics", display=display))
 
         try:
             url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
-                        await ctx.send("❌ Liedtext nicht gefunden.")
+                        await ctx.send(t("error.lyrics_not_found"))
                         return
                     data = await resp.json(content_type=None)
                     lyrics = data.get("lyrics", "").strip()
         except asyncio.TimeoutError:
-            await ctx.send("❌ Anfrage hat zu lange gedauert.")
+            await ctx.send(t("error.timeout"))
             return
         except Exception:
             logger.exception("[text] Fehler beim Abrufen des Liedtexts")
-            await ctx.send("❌ Fehler beim Abrufen des Liedtexts.")
+            await ctx.send(t("error.lyrics_error"))
             return
 
         if not lyrics:
-            await ctx.send("❌ Liedtext nicht gefunden.")
+            await ctx.send(t("error.lyrics_not_found"))
             return
 
         # Discord-Limit: 2000 Zeichen pro Nachricht → bei Bedarf aufteilen
@@ -1178,12 +1177,8 @@ class MusicCommands(commands.Cog):
         """Schaltet den Loop-Modus durch: aus → Song wiederholen → Queue loopen → aus."""
         modes = [None, "song", "queue"]
         self.loop_mode = modes[(modes.index(self.loop_mode) + 1) % len(modes)]
-        messages = {
-            None: "➡️ Loop **aus**.",
-            "song": "🔂 Loop: **aktueller Song** wird wiederholt.",
-            "queue": "🔁 Loop: **gesamte Queue** wird wiederholt.",
-        }
-        await ctx.send(messages[self.loop_mode])
+        loop_keys = {None: "status.loop_off", "song": "status.loop_song", "queue": "status.loop_queue"}
+        await ctx.send(t(loop_keys[self.loop_mode]))
 
     @commands.command(name="q")
     async def queue_list(self, ctx):
@@ -1196,11 +1191,11 @@ class MusicCommands(commands.Cog):
     async def score(self, ctx):
         """Zeigt die Top-10 der am häufigsten gespielten Songs."""
         if not self._play_counts:
-            await ctx.send("📊 Noch keine Wiedergaben aufgezeichnet.")
+            await ctx.send(t("status.no_plays"))
             return
 
         top = sorted(self._play_counts.items(), key=lambda x: x[1]["count"], reverse=True)[:10]
-        embed = discord.Embed(title="🏆 Most Played", color=discord.Color.gold())
+        embed = discord.Embed(title=t("embed.most_played"), color=discord.Color.gold())
         lines = []
         medals = ["🥇", "🥈", "🥉"]
         for i, (_, entry) in enumerate(top):
@@ -1222,17 +1217,17 @@ class MusicCommands(commands.Cog):
             self.prefetch_task.cancel()
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
-        await ctx.send("🧹 Die Warteschlange wurde geleert und die Wiedergabe gestoppt.")
+        await ctx.send(t("status.cleared"))
 
     @commands.command(name="saveq")
     async def saveq(self, ctx, *, name: str):
         """Speichert die aktuelle Queue unter einem Namen. Verwendung: !saveq <name>"""
         if not self.queue and not self.current_track:
-            await ctx.send("⚠️ Nichts zu speichern – Queue und aktueller Track sind leer.")
+            await ctx.send(t("error.nothing_to_save"))
             return
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
         if not safe_name:
-            await ctx.send("❌ Ungültiger Name.")
+            await ctx.send(t("error.invalid_name"))
             return
         tracks = []
         if self.current_track:
@@ -1242,7 +1237,7 @@ class MusicCommands(commands.Cog):
         path = PLAYLISTS_DIR / f"{safe_name}.json"
         with open(path, "w", encoding="utf-8") as f:
             json.dump(tracks, f, ensure_ascii=False, indent=2)
-        await ctx.send(f"💾 Queue als **{safe_name}** gespeichert ({len(tracks)} Titel).")
+        await ctx.send(t("status.queue_saved", name=safe_name, count=len(tracks)))
 
     @commands.command(name="loadq")
     async def loadq(self, ctx, *, name: str):
@@ -1250,13 +1245,13 @@ class MusicCommands(commands.Cog):
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
         path = PLAYLISTS_DIR / f"{safe_name}.json"
         if not path.exists():
-            await ctx.send(f"❌ Keine gespeicherte Queue mit dem Namen **{safe_name}** gefunden.")
+            await ctx.send(t("error.queue_not_found", name=safe_name))
             return
         with open(path, encoding="utf-8") as f:
             tracks = json.load(f)
         for url, title in tracks:
             self.queue.append((url, title))
-        await ctx.send(f"📂 **{safe_name}** geladen – {len(tracks)} Titel zur Queue hinzugefügt.")
+        await ctx.send(t("status.queue_loaded", name=safe_name, count=len(tracks)))
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
@@ -1266,7 +1261,7 @@ class MusicCommands(commands.Cog):
         """Zeigt alle gespeicherten Queues."""
         files = sorted(PLAYLISTS_DIR.glob("*.json"))
         if not files:
-            await ctx.send("📭 Keine gespeicherten Queues vorhanden.")
+            await ctx.send(t("status.no_saved_queues"))
             return
         lines = []
         for p in files:
@@ -1276,7 +1271,7 @@ class MusicCommands(commands.Cog):
                 lines.append(f"• **{p.stem}** ({count} Titel)")
             except Exception:
                 lines.append(f"• **{p.stem}**")
-        await ctx.send("📋 Gespeicherte Queues:\n" + "\n".join(lines))
+        await ctx.send(t("status.saved_queues", lines="\n".join(lines)))
 
     @commands.command()
     async def remove(self, ctx, index: int):
@@ -1286,9 +1281,9 @@ class MusicCommands(commands.Cog):
             queue_list = list(self.queue)
             removed = queue_list.pop(index - 1)
             self.queue = deque(queue_list)
-            await ctx.send(f"❌ Entfernt: **{removed[1]}**")
+            await ctx.send(t("status.removed", title=removed[1]))
         else:
-            await ctx.send("❌ Ungültiger Index. Bitte eine gültige Zahl angeben.")
+            await ctx.send(t("error.invalid_index"))
 
     @commands.command()
     async def move(self, ctx, *, term: str):
@@ -1298,7 +1293,7 @@ class MusicCommands(commands.Cog):
         !move songtitel  → ersten Treffer per Titelsuche nach vorne schieben
         """
         if not self.queue:
-            await ctx.send("⚠️ Die Warteschlange ist leer.")
+            await ctx.send(t("error.queue_empty"))
             return
 
         queue_list = list(self.queue)
@@ -1310,39 +1305,39 @@ class MusicCommands(commands.Cog):
             if 1 <= n <= len(queue_list):
                 idx = n - 1
             else:
-                await ctx.send(f"❌ Ungültiger Index. Bitte eine Zahl zwischen 1 und {len(queue_list)} angeben.")
+                await ctx.send(t("error.invalid_index_range", count=len(queue_list)))
                 return
         except ValueError:
             # Kein Integer → Titelsuche (case-insensitive, Teilstring)
             term_lower = term.lower()
-            for i, (_, t) in enumerate(queue_list):
-                if term_lower in t.lower():
+            for i, (_, qt) in enumerate(queue_list):
+                if term_lower in qt.lower():
                     idx = i
                     break
             if idx is None:
-                await ctx.send(f"❌ Kein Song mit **{term}** in der Warteschlange gefunden.")
+                await ctx.send(t("error.song_not_found_in_queue", term=term))
                 return
 
         if idx == 0:
-            await ctx.send(f"✅ **{queue_list[0][1]}** ist bereits an Position 1.")
+            await ctx.send(t("status.already_first", title=queue_list[0][1]))
             return
 
         entry = queue_list.pop(idx)
         queue_list.insert(0, entry)
         self.queue = deque(queue_list)
-        await ctx.send(f"⏫ **{entry[1]}** nach vorne verschoben.")
+        await ctx.send(t("status.moved_to_front", title=entry[1]))
 
     @commands.command()
     async def shuffle(self, ctx):
         """Mischt die Queue zufällig durch."""
         # random.shuffle() arbeitet auf Listen, nicht auf deques – also kurz umwandeln.
         if len(self.queue) < 2:
-            await ctx.send("⚠️ Nicht genug Songs zum Mischen.")
+            await ctx.send(t("error.not_enough_to_shuffle"))
         else:
             queue_list = list(self.queue)
             random.shuffle(queue_list)
             self.queue = deque(queue_list)
-            await ctx.send("🔀 Warteschlange wurde gemischt.")
+            await ctx.send(t("status.shuffled"))
 
     @commands.command()
     async def replay(self, ctx):
@@ -1350,33 +1345,33 @@ class MusicCommands(commands.Cog):
         if self.last_played:
             lp_url, lp_title, *_ = self.last_played
             self.queue.appendleft((lp_url, lp_title))
-            await ctx.send(f"🔁 Wiederhole: **{lp_title}**")
+            await ctx.send(t("status.replaying", title=lp_title))
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
         else:
-            await ctx.send("❌ Kein letzter Song vorhanden.")
+            await ctx.send(t("error.no_last_song"))
 
     @commands.command()
     async def eq(self, ctx, preset: str = None):
         """Setzt einen EQ-Preset oder listet verfügbare Presets auf."""
         if not preset:
             presets = ", ".join(self.eq_presets.keys())
-            await ctx.send(f"🎚️ Verfügbare Presets: {presets}")
+            await ctx.send(t("status.eq_presets", presets=presets))
             return
         if preset.lower() in self.eq_presets:
             self.equalizer = preset.lower()
-            msg = f"🎚️ Equalizer auf `{preset}` gesetzt."
+            msg = t("status.eq_set", preset=preset)
             if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()) and self.current_track:
                 tr_url, tr_title, *_ = self.current_track
                 self.current_track = None  # verhindert Doppel-Insert durch loop-Branch in after_playing
                 self.queue.appendleft((tr_url, tr_title))
                 ctx.voice_client.stop()
-                msg += " – Song wird mit neuem EQ neu gestartet."
+                msg += t("status.eq_restart")
             await ctx.send(msg)
         else:
             presets = ", ".join(self.eq_presets.keys())
-            await ctx.send(f"❌ Unbekanntes Profil. Verfügbare Presets: {presets}")
+            await ctx.send(t("error.eq_unknown", presets=presets))
 
     @staticmethod
     def _parse_time(s: str):
@@ -1397,20 +1392,20 @@ class MusicCommands(commands.Cog):
     async def seek(self, ctx, zeit: str = None):
         """Springt an eine Position im aktuellen Track. !seek 1:23 oder !seek 83"""
         if not zeit:
-            await ctx.send("❌ Verwendung: `!seek 1:23` oder `!seek 83` (Sekunden)")
+            await ctx.send(t("error.seek_usage"))
             return
         offset = self._parse_time(zeit)
         if offset is None or offset < 0:
-            await ctx.send("❌ Ungültige Zeit. Beispiel: `!seek 1:23` oder `!seek 90`")
+            await ctx.send(t("error.seek_invalid"))
             return
         if self.is_radio:
-            await ctx.send("❌ Seek ist im Radio-Modus nicht möglich.")
+            await ctx.send(t("error.seek_radio"))
             return
         if not self.current_track:
-            await ctx.send("❌ Kein Track aktiv.")
+            await ctx.send(t("error.no_track"))
             return
         if not ctx.voice_client or not (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-            await ctx.send("❌ Kein Track aktiv.")
+            await ctx.send(t("error.no_track"))
             return
 
         url, title, duration = self.current_track
@@ -1419,7 +1414,7 @@ class MusicCommands(commands.Cog):
         self.current_track = None
         self.queue.appendleft((url, title))
         ctx.voice_client.stop()
-        await ctx.send(f"⏩ Springe zu **{mins}:{secs:02d}** in *{title}*")
+        await ctx.send(t("status.seeking", mins=mins, secs=f"{secs:02d}", title=title))
 
     @commands.command(name="stats")
     async def stats(self, ctx):
@@ -1458,16 +1453,16 @@ class MusicCommands(commands.Cog):
         # Queue
         queue_len = len(self.queue)
 
-        embed = discord.Embed(title="📊 Bot Stats", color=0x5865f2)
-        embed.add_field(name="⏱️ Uptime", value=uptime_str, inline=True)
-        embed.add_field(name="🎵 Songs gespielt", value=str(self._songs_played), inline=True)
-        embed.add_field(name="📋 Queue", value=f"{queue_len} Songs", inline=True)
-        embed.add_field(name="🧠 RAM (RSS)", value=f"{rss_mb:.1f} MB", inline=True)
-        embed.add_field(name="🧠 RAM (VMS)", value=f"{vms_mb:.1f} MB", inline=True)
-        embed.add_field(name="⚡ CPU", value=f"{cpu_pct:.1f}%", inline=True)
-        embed.add_field(name="⚙️ asyncio Tasks", value=str(running_tasks), inline=True)
-        embed.add_field(name="💾 Cache-Dateien", value=f"{dl_count} Dateien", inline=True)
-        embed.add_field(name="💾 Cache-Größe", value=f"{dl_size_mb:.0f} MB", inline=True)
+        embed = discord.Embed(title=t("embed.stats"), color=0x5865f2)
+        embed.add_field(name=t("embed.uptime"), value=uptime_str, inline=True)
+        embed.add_field(name=t("embed.songs_played"), value=str(self._songs_played), inline=True)
+        embed.add_field(name=t("embed.queue_field"), value=t("misc.songs_count", count=queue_len), inline=True)
+        embed.add_field(name=t("embed.ram_rss"), value=f"{rss_mb:.1f} MB", inline=True)
+        embed.add_field(name=t("embed.ram_vms"), value=f"{vms_mb:.1f} MB", inline=True)
+        embed.add_field(name=t("embed.cpu"), value=f"{cpu_pct:.1f}%", inline=True)
+        embed.add_field(name=t("embed.tasks"), value=str(running_tasks), inline=True)
+        embed.add_field(name=t("embed.cache_files"), value=t("misc.files_count", count=dl_count), inline=True)
+        embed.add_field(name=t("embed.cache_size"), value=f"{dl_size_mb:.0f} MB", inline=True)
         await ctx.send(embed=embed)
 
     @commands.command(name="baba")
