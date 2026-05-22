@@ -43,16 +43,29 @@ class BasicCommands(commands.Cog):
                 except discord.errors.ConnectionClosed as e:
                     # Verbindung wurde vom Server abgelehnt oder unterbrochen.
                     # Häufigste Ursache: fehlende Berechtigungen auf dem Server.
-                    await ctx.send(t("error.join_failed_code", channel=channel.name, code=e.code))
+                    await ctx.send(
+                        t("error.join_failed_code", channel=channel.name, code=e.code)
+                    )
                 except Exception as e:
-                    await ctx.send(t("error.join_failed", err=f"{type(e).__name__}: {str(e)[:100]}"))
+                    await ctx.send(
+                        t(
+                            "error.join_failed",
+                            err=f"{type(e).__name__}: {str(e)[:100]}",
+                        )
+                    )
             else:
                 # Bot ist bereits irgendwo verbunden → in den neuen Kanal wechseln
                 try:
                     await ctx.voice_client.move_to(channel)
                     await ctx.send(t("status.moved_to", channel=channel.name))
                 except Exception as e:
-                    await ctx.send(t("error.move_failed", channel=channel.name, err=type(e).__name__))
+                    await ctx.send(
+                        t(
+                            "error.move_failed",
+                            channel=channel.name,
+                            err=type(e).__name__,
+                        )
+                    )
         else:
             # User ist in keinem Voice-Channel – da kann der Bot auch nicht hin.
             await ctx.send(t("error.no_voice"))
@@ -66,8 +79,14 @@ class BasicCommands(commands.Cog):
         try:
             # WSL2: neues Windows Terminal Tab öffnen, altes schließt sich durch os._exit
             subprocess.Popen(
-                ["wt.exe", "wsl", "--", "bash", "-c",
-                 f'cd "{cwd}" && python main.py; exec bash'],
+                [
+                    "wt.exe",
+                    "wsl",
+                    "--",
+                    "bash",
+                    "-c",
+                    f'cd "{cwd}" && python main.py; exec bash',
+                ],
                 start_new_session=True,
             )
         except FileNotFoundError:
@@ -104,5 +123,6 @@ class BasicCommands(commands.Cog):
             return
         # Unerwarteter Fehler → kurze Meldung + ins Log
         from utils.logger import logger
+
         logger.error(f"[on_command_error] {ctx.command}: {error}")
         await ctx.send(f"❌ Error: {type(error).__name__}")
