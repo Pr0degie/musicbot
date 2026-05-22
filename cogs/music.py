@@ -54,6 +54,7 @@ class MusicCommands(commands.Cog):
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
         self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
+        self._skip_resolving = False  # Gesetzt von SearchAutoplayView wenn Alternative gewählt wird während resolve läuft
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -97,6 +98,9 @@ class MusicCommands(commands.Cog):
         # Downloader hält alle yt_dlp-Instanzen und den Metadaten-Cache.
         self.dl = Downloader(self.audio_format)
         logger.info("[INIT] MusicCommands erfolgreich initialisiert.")
+
+    async def cog_load(self):
+        asyncio.create_task(self.dl.warmup())
 
     def update_ydl(self):
         """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
@@ -458,6 +462,11 @@ class MusicCommands(commands.Cog):
         try:
             info, filename, title, duration = await self._resolve_track(url, title)
 
+            if self._skip_resolving:
+                self._skip_resolving = False
+                await self.play_next(ctx)
+                return
+
             eq_filter = self.eq_presets.get(self.equalizer, "")
             seek_offset, self._seek_offset = self._seek_offset, 0
             is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
@@ -731,6 +740,7 @@ class MusicCommands(commands.Cog):
             first = entries[0]
             url = first.get("webpage_url") or first.get("url")
             title = first.get("title", "Unbekannter Titel")
+            asyncio.create_task(self.dl._start_resolve(url))
             evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
             if evicted:
                 logger.info(f"[p] Autoplay-Song verdrängt: {evicted}")
@@ -1001,6 +1011,7 @@ class MusicCommands(commands.Cog):
             first = entries[0]
             url = first.get("webpage_url") or first.get("url")
             title = first.get("title", "Unbekannter Titel")
+            asyncio.create_task(self.dl._start_resolve(url))
             self.queue.appendleft((url, title))
             alternatives = entries[1:]
             if alternatives:

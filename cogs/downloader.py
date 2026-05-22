@@ -1,7 +1,9 @@
 """yt_dlp-Instanzen, Metadaten-Cache und Download-Logik für den MusicBot."""
 
 import asyncio
+import json
 import re
+import time
 from pathlib import Path
 
 import yt_dlp
@@ -12,6 +14,9 @@ DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 STREAM_THRESHOLD_SECONDS = 20 * 60  # Videos > 20 min werden gestreamt statt heruntergeladen
+
+METADATA_CACHE_FILE = Path("metadata_cache.json")
+CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
 
 def yt_video_id(url: str) -> str | None:
     """Extrahiert die YouTube-Video-ID aus einer URL (v=..., youtu.be/...). Gibt None zurück wenn keine ID gefunden."""
@@ -42,6 +47,9 @@ class Downloader:
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
         self._url_cache: dict = {}
+        self._cache_timestamps: dict[str, float] = {}
+        self._pending_resolves: dict[str, asyncio.Task] = {}
+        self._load_cache()
         self._init_ydl()
 
     # ------------------------------------------------------------------
@@ -54,15 +62,100 @@ class Downloader:
         keep_urls: Cache-Einträge für diese URLs behalten (z.B. Queue-Songs).
         None = Cache komplett leeren.
         """
+        self._save_cache()
         self.audio_format = audio_format
         if keep_urls is not None:
             self._url_cache = {k: v for k, v in self._url_cache.items() if k in keep_urls}
+            self._cache_timestamps = {k: v for k, v in self._cache_timestamps.items() if k in keep_urls}
         else:
             self._url_cache.clear()
+            self._cache_timestamps.clear()
+        self._pending_resolves.clear()
         self._init_ydl()
 
     def clear_cache(self):
         self._url_cache.clear()
+        self._cache_timestamps.clear()
+
+    def _load_cache(self):
+        """Lädt persistierten Metadaten-Cache vom letzten Bot-Lauf (TTL: 2h)."""
+        if not METADATA_CACHE_FILE.exists():
+            return
+        try:
+            data = json.loads(METADATA_CACHE_FILE.read_text(encoding="utf-8"))
+            now = time.time()
+            loaded = 0
+            for url, entry in data.items():
+                ts = entry.pop("_ts", 0.0)
+                if now - ts < CACHE_TTL:
+                    self._url_cache[url] = entry
+                    self._cache_timestamps[url] = ts
+                    loaded += 1
+            if loaded:
+                logger.info(f"[Cache] {loaded} Einträge aus {METADATA_CACHE_FILE.name} geladen")
+        except Exception as e:
+            logger.debug(f"[Cache] Laden fehlgeschlagen: {e}")
+
+    def _save_cache(self):
+        """Schreibt aktuellen Metadaten-Cache auf Disk (nur TTL-gültige Einträge)."""
+        try:
+            now = time.time()
+            data = {}
+            for url, info in list(self._url_cache.items()):
+                ts = self._cache_timestamps.get(url, now)
+                if now - ts < CACHE_TTL:
+                    data[url] = {**info, "_ts": ts}
+            METADATA_CACHE_FILE.write_text(
+                json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8"
+            )
+        except Exception as e:
+            logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+
+    async def _start_resolve(self, url: str):
+        """Startet extract_info als Hintergrund-Task damit resolve_track() einen Cache-Hit findet."""
+        if url in self._url_cache or url in self._pending_resolves:
+            return
+
+        async def _fetch():
+            try:
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                    timeout=30.0,
+                )
+                if "entries" in info:
+                    info = info["entries"][0]
+                self._url_cache[url] = info
+                self._cache_timestamps[url] = time.time()
+                await asyncio.to_thread(self._save_cache)
+            except Exception:
+                pass
+            finally:
+                self._pending_resolves.pop(url, None)
+
+        task = asyncio.create_task(_fetch())
+        self._pending_resolves[url] = task
+
+    async def warmup(self):
+        """Wärmt yt_dlp's Node.js/JS-Player-Cache vor, damit der erste echte Song schneller startet."""
+        warmup_url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # "Me at the zoo" – erstes YT-Video, wird nie gelöscht
+        if warmup_url in self._url_cache:
+            logger.info("[Warmup] JS-Player-Cache bereits warm (aus persistentem Cache).")
+            return
+        try:
+            logger.info("[Warmup] Starte yt_dlp JS-Player-Vorwärmung im Hintergrund ...")
+            info = await asyncio.wait_for(
+                asyncio.to_thread(self.ydl.extract_info, warmup_url, download=False),
+                timeout=25.0,
+            )
+            if info:
+                if "entries" in info:
+                    info = info["entries"][0]
+                self._url_cache[warmup_url] = info
+                self._cache_timestamps[warmup_url] = time.time()
+                await asyncio.to_thread(self._save_cache)
+            logger.info("[Warmup] yt_dlp JS-Player-Cache bereit.")
+        except Exception as e:
+            logger.debug(f"[Warmup] Fehlgeschlagen (ignoriert): {e}")
 
     def _init_ydl(self):
         if YDL_COOKIES_FILE:
@@ -153,13 +246,25 @@ class Downloader:
             info = self._url_cache[url]
             logger.info(f"[Resolve] Metadaten aus Cache: {title}")
         else:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=False),
-                timeout=30.0,
-            )
-            if "entries" in info:
-                info = info["entries"][0]
-            self._url_cache[url] = info
+            if url in self._pending_resolves:
+                logger.info(f"[Resolve] Warte auf laufenden Prefetch-Task: {title}")
+                try:
+                    await self._pending_resolves[url]
+                except Exception:
+                    pass
+            if url in self._url_cache:
+                info = self._url_cache[url]
+                logger.info(f"[Resolve] Metadaten aus Prefetch-Task: {title}")
+            else:
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(self.ydl.extract_info, url, download=False),
+                    timeout=30.0,
+                )
+                if "entries" in info:
+                    info = info["entries"][0]
+                self._url_cache[url] = info
+                self._cache_timestamps[url] = time.time()
+                asyncio.create_task(asyncio.to_thread(self._save_cache))
 
         title = info.get("title", "Unbekannter Titel")
         duration = info.get("duration", 0)
@@ -210,6 +315,8 @@ class Downloader:
                 if "entries" in info:
                     info = info["entries"][0]
                 self._url_cache[url] = info
+                self._cache_timestamps[url] = time.time()
+                asyncio.create_task(asyncio.to_thread(self._save_cache))
             if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
                 logger.info(f"[Prefetch] Übersprungen – {info.get('title', title)} wird gestreamt")
                 return
@@ -302,6 +409,8 @@ class Downloader:
                 if "entries" in full_info:
                     full_info = full_info["entries"][0]
                 self._url_cache[url] = full_info
+                self._cache_timestamps[url] = time.time()
+                asyncio.create_task(asyncio.to_thread(self._save_cache))
             logger.info(f"[Autoplay Prefetch] Fertig: {title}")
             return url, title
 

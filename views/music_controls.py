@@ -132,10 +132,18 @@ class SearchAutoplayView(View):
                         break
                 self.music_cog.queue = deque(queue_list)
                 if not replaced:
-                    # Zur Sicherheit vorne einreihen falls der Song nicht mehr in der Queue ist
+                    # Song wurde bereits aus der Queue gepoppt – play_next löst ihn gerade auf.
+                    # Flag setzen damit play_next den resolvedn Track überspringt und stattdessen
+                    # die Alternative (jetzt vorne in der Queue) spielt.
+                    self.music_cog._skip_resolving = True
                     self.music_cog.queue.appendleft((url, title))
+                    # Falls play() bereits gestartet hat bevor current_track gesetzt wurde
+                    if self.ctx.voice_client and (
+                        self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
+                    ):
+                        self.ctx.voice_client.stop()
                 await interaction.response.edit_message(
-                    content=f"🔀 Ersetzt durch: **{title}**", view=None
+                    content=f"🔀 Wechsle zu: **{title}**", view=None
                 )
                 if not self.music_cog.is_playing:
                     self.music_cog.is_playing = True
