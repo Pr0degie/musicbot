@@ -9,7 +9,7 @@
 ## 2. Installation
 
 ```bash
-git clone https://github.com/PabloTestobar/Musicbot.git
+git clone https://github.com/Pr0degie/musicbot.git
 cd Musicbot
 python -m venv venv
 
