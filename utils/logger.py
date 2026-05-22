@@ -25,7 +25,7 @@ class _ColorFormatter(logging.Formatter):
 
     _LEVELS = {
         logging.DEBUG:    ("\033[90m",   "DEBUG"),
-        logging.INFO:     ("\033[0m",    "INFO "),
+        logging.INFO:     ("\033[0m",    ""),
         logging.WARNING:  ("\033[33m",   "WARN "),
         logging.ERROR:    ("\033[31m",   "ERROR"),
         logging.CRITICAL: ("\033[1;31m", "CRIT "),
@@ -68,7 +68,8 @@ class _ColorFormatter(logging.Formatter):
         if record.exc_info:
             msg += "\n" + self.formatException(record.exc_info)
 
-        return f"{self._GRAY}{ts}{self._RST}  {lc}{label}{self._RST}  {msg}"
+        prefix = f"{lc}{label}{self._RST}  " if label else ""
+        return f"{self._GRAY}{ts}{self._RST}  {prefix}{msg}"
 
 
 # ---------------------------------------------------------------------------
