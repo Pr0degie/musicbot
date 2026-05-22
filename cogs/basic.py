@@ -87,3 +87,22 @@ class BasicCommands(commands.Cog):
                 await ctx.send(t("error.leave_failed", err=type(e).__name__))
         else:
             await ctx.send(t("error.bot_not_in_voice"))
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandNotFound):
+            return  # Tippfehler still ignorieren
+        if isinstance(error, commands.NotOwner):
+            await ctx.send("❌ Owner only.")
+            return
+        if isinstance(error, (commands.MissingRequiredArgument, commands.BadArgument)):
+            # Usage-Hinweis aus dem Docstring des Commands holen
+            usage = ctx.command.usage or f"!{ctx.command.qualified_name}"
+            await ctx.send(f"❌ Usage: `{usage}`")
+            return
+        if isinstance(error, commands.CheckFailure):
+            return
+        # Unerwarteter Fehler → kurze Meldung + ins Log
+        from utils.logger import logger
+        logger.error(f"[on_command_error] {ctx.command}: {error}")
+        await ctx.send(f"❌ Error: {type(error).__name__}")

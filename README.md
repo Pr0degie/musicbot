@@ -70,6 +70,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!stats` | Bot stats (RAM, CPU, cache) |
 | `!j` / `!l` | Join / leave voice channel |
 | `!reloadcookies` | Reload `cookies.txt` without restarting |
+| `!restart` | Restart bot in new terminal (owner only) |
 
 ---
 

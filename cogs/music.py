@@ -147,7 +147,7 @@ class MusicCommands(commands.Cog):
             source = "keine Cookie-Quelle konfiguriert"
         await ctx.send(t("misc.cookies_reloaded", source=source))
 
-    @commands.command()
+    @commands.command(usage="!format <mp3|webm>")
     async def format(self, ctx, typ: str):
         """Wechselt das Audioformat (mp3 oder webm). Wirkt ab dem nächsten Track."""
         if typ.lower() in ["mp3", "webm"]:
@@ -1299,7 +1299,7 @@ class MusicCommands(commands.Cog):
             ctx.voice_client.stop()
         await ctx.send(t("status.cleared"))
 
-    @commands.command(name="saveq")
+    @commands.command(name="saveq", usage="!saveq <name>")
     async def saveq(self, ctx, *, name: str):
         """Speichert die aktuelle Queue unter einem Namen. Verwendung: !saveq <name>"""
         if not self.queue and not self.current_track:
@@ -1319,7 +1319,7 @@ class MusicCommands(commands.Cog):
             json.dump(tracks, f, ensure_ascii=False, indent=2)
         await ctx.send(t("status.queue_saved", name=safe_name, count=len(tracks)))
 
-    @commands.command(name="loadq")
+    @commands.command(name="loadq", usage="!loadq <name>")
     async def loadq(self, ctx, *, name: str):
         """Lädt eine gespeicherte Queue und hängt sie an die aktuelle an. Verwendung: !loadq <name>"""
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
@@ -1353,7 +1353,7 @@ class MusicCommands(commands.Cog):
                 lines.append(f"• **{p.stem}**")
         await ctx.send(t("status.saved_queues", lines="\n".join(lines)))
 
-    @commands.command()
+    @commands.command(usage="!remove <position>")
     async def remove(self, ctx, index: int):
         """Entfernt einen Track an Position n aus der Queue."""
         # deque unterstützt kein pop(index) – kurzer Umweg über eine Liste.

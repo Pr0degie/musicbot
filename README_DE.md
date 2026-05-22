@@ -70,6 +70,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!stats` | Bot-Statistiken (RAM, CPU, Cache) |
 | `!j` / `!l` | Voice-Channel beitreten / verlassen |
 | `!reloadcookies` | `cookies.txt` neu laden ohne Bot-Neustart |
+| `!restart` | Bot in neuem Terminal neu starten (nur Owner) |
 
 ---
 
