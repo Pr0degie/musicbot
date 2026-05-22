@@ -14,10 +14,11 @@ class MusicControlView(View):
     der Bot läuft (die View-Instanz ist dann allerdings weg).
     """
 
-    def __init__(self, music_cog, ctx):
+    def __init__(self, music_cog, ctx, song=None):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
+        self.song = song  # (url, title) des Songs zu dem diese View gehört
 
     @discord.ui.button(label=t("button.pause"), style=discord.ButtonStyle.primary)
     async def pause(self, interaction: discord.Interaction, button: Button):
@@ -37,6 +38,13 @@ class MusicControlView(View):
             await interaction.response.send_message(t("status.resumed_eph"), ephemeral=True)
         elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:
             # Queue vorhanden, aber nichts läuft → starten
+            self.music_cog.is_playing = True
+            await interaction.response.send_message(t("status.playback_started"), ephemeral=True)
+            await self.music_cog.play_next(self.ctx)
+        elif not self.music_cog.is_playing and not self.music_cog.queue and not self.music_cog.is_radio and self.song:
+            # Queue leer, aber dieser Button kennt den Song → vorne einreihen und starten
+            url, title = self.song
+            self.music_cog.queue.appendleft((url, title))
             self.music_cog.is_playing = True
             await interaction.response.send_message(t("status.playback_started"), ephemeral=True)
             await self.music_cog.play_next(self.ctx)

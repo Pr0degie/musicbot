@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import discord
 from discord.ext import commands
 
@@ -52,6 +56,25 @@ class BasicCommands(commands.Cog):
         else:
             # User ist in keinem Voice-Channel – da kann der Bot auch nicht hin.
             await ctx.send(t("error.no_voice"))
+
+    @commands.command(name="restart")
+    @commands.is_owner()
+    async def restart(self, ctx):
+        """Startet den Bot-Prozess in einem neuen Terminal neu (nur Bot-Owner)."""
+        await ctx.send("🔄 Restarting...")
+        cwd = os.getcwd()
+        try:
+            # WSL2: neues Windows Terminal Tab öffnen, altes schließt sich durch os._exit
+            subprocess.Popen(
+                ["wt.exe", "wsl", "--", "bash", "-c",
+                 f'cd "{cwd}" && python main.py; exec bash'],
+                start_new_session=True,
+            )
+        except FileNotFoundError:
+            # Kein Windows Terminal → in-place restart als Fallback
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+            return
+        os._exit(0)
 
     @commands.command(name="l")
     async def leave(self, ctx):

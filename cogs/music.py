@@ -578,7 +578,7 @@ class MusicCommands(commands.Cog):
             embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
             if info.get("uploader"):
                 embed.set_footer(text=info.get("uploader"))
-            self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
+            self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
             self.is_playing = True
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title, duration)
@@ -1108,21 +1108,97 @@ class MusicCommands(commands.Cog):
             await ctx.send(t("error.no_song_to_resume"))
 
     @commands.command(name="now")
-    async def now_playing(self, ctx):
-        """Zeigt den aktuell laufenden oder pausierten Song an."""
-        if self.current_track:
-            ct_url, ct_title, ct_duration, *_ = (*self.current_track, 0)  # 0 als Fallback für alte 2-Tuples
-            duration_str = f"{ct_duration // 60}:{ct_duration % 60:02d}" if ct_duration else t("misc.unknown")
-            color = 0x1db954 if self.is_playing else 0x808080
-            embed = discord.Embed(title=ct_title, url=ct_url, color=color)
-            embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
-            embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-            embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
-            status = t("status.now_playing_label") if self.is_playing else t("status.paused_label")
-            embed.set_author(name=status)
-            await ctx.send(embed=embed)
+    async def now_playing(self, ctx, *, eingabe: str = None):
+        """Spielt einen Song sofort ab (stoppt den aktuellen). !now <Suche oder URL>"""
+        if not eingabe:
+            await ctx.send(t("error.now_usage"))
+            return
+
+        if not await self._ensure_voice(ctx):
+            return
+
+        if self.is_radio:
+            self._stop_radio()
+            if ctx.voice_client and ctx.voice_client.is_playing():
+                ctx.voice_client.stop()
+                try:
+                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    pass
+                self._playback_done.clear()
+
+        if not eingabe.startswith("http"):
+            try:
+                await ctx.send(t("status.searching"))
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                await ctx.send(t("error.search_timeout"))
+                return
+            except Exception:
+                logger.exception("[now] Fehler bei Suche")
+                await ctx.send(t("error.search_error"))
+                return
+
+            entries = (results.get("entries") or [])[:3]
+            if not entries:
+                await ctx.send(t("error.no_results"))
+                return
+
+            first = entries[0]
+            url = first.get("webpage_url") or first.get("url")
+            title = first.get("title", t("misc.unknown_title"))
+            asyncio.create_task(self.dl._start_resolve(url))
+            self._evict_autoplay_song()
+            self.queue.appendleft((url, title))
+
+            alternatives = entries[1:]
+            if alternatives:
+                view = SearchAutoplayView(first, alternatives, self, ctx)
+                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                alt_lines = "\n".join(
+                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
+                    for i, e in enumerate(alternatives)
+                )
+                msg = await ctx.send(
+                    t("status.playing_with_alts", title=title, alts=alt_lines),
+                    view=view,
+                )
+                view.message = msg
+            else:
+                await ctx.send(t("status.playing", title=title))
         else:
-            await ctx.send(t("error.no_song_playing"))
+            try:
+                await ctx.send(t("status.processing_url"))
+                info = await asyncio.wait_for(
+                    asyncio.to_thread(self.dl.url_ydl.extract_info, eingabe, download=False),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                await ctx.send(t("error.timeout"))
+                return
+            except Exception:
+                logger.exception("[now] Fehler beim Abrufen von yt_dlp-Infos")
+                await ctx.send(t("error.fetch_error"))
+                return
+
+            if "entries" in info:
+                await ctx.send(t("error.next_no_playlist"))
+                return
+
+            url = info.get("webpage_url") or eingabe
+            title = info.get("title", t("misc.unknown_title"))
+            self._evict_autoplay_song()
+            self.queue.appendleft((url, title))
+            await ctx.send(t("status.playing", title=title))
+
+        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+            ctx.voice_client.stop()  # after_playing-Callback startet den neuen Song
+        elif not self.is_playing:
+            self.is_playing = True
+            await self.play_next(ctx)
 
     @commands.command(name="text")
     async def lyrics_cmd(self, ctx):

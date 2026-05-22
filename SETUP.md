@@ -1,10 +1,10 @@
-# Setup & Betrieb
+# Setup & Operation
 
-## 1. Voraussetzungen
+## 1. Requirements
 
 - Python 3.10+
-- FFmpeg im PATH
-- Node.js im PATH (für YouTube-Signatur-Solver)
+- FFmpeg in PATH
+- Node.js in PATH (for YouTube signature solver)
 
 ## 2. Installation
 
@@ -21,64 +21,71 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 3. Konfiguration (`.env`)
+## 3. Configuration (`.env`)
 
-`.env`-Datei im Projektordner anlegen:
-
-```
-DISCORD_TOKEN=dein_token_hier
-```
-
-Optionale Cookie-Variablen für YouTube-Authentifizierung (→ Abschnitt 4):
+Create a `.env` file in the project folder:
 
 ```
-YDL_COOKIES_FILE=/pfad/zur/cookies.txt
+DISCORD_TOKEN=your_token_here
+```
+
+Optional cookie variables for YouTube authentication (→ section 4):
+
+```
+YDL_COOKIES_FILE=/path/to/cookies.txt
 YDL_BROWSER=firefox
 ```
 
-| Variable | Zweck |
+Optional language setting:
+
+```
+LANGUAGE=en
+```
+
+| Variable | Purpose |
 |---|---|
-| `DISCORD_TOKEN` | Discord-Bot-Token (erforderlich) |
-| `YDL_COOKIES_FILE` | Pfad zu einer exportierten `cookies.txt` — hat Vorrang vor Browser-Extraktion |
-| `YDL_BROWSER` | Browser für Live-Cookie-Extraktion (`firefox`, `chrome`, …) — nur lokal, nicht auf Servern ohne GUI |
+| `DISCORD_TOKEN` | Discord bot token (required) |
+| `YDL_COOKIES_FILE` | Path to an exported `cookies.txt` — takes priority over browser extraction |
+| `YDL_BROWSER` | Browser for live cookie extraction (`firefox`, `chrome`, …) — local only, not on headless servers |
+| `LANGUAGE` | Bot language: `en` (default) or `de` |
 
-## 4. YouTube-Authentifizierung (Cookies)
+## 4. YouTube Authentication (Cookies)
 
-YouTube blockiert unauthentifizierte Bot-Anfragen. Cookie-Auth ist notwendig.
+YouTube blocks unauthenticated bot requests. Cookie auth is required.
 
-### Server-Setup (empfohlen)
+### Server setup (recommended)
 
-Cookies aus einem eingeloggten Browser exportieren und hochladen:
+Export cookies from a logged-in browser and upload them:
 
 ```bash
-yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <beliebige-youtube-url>
-scp cookies.txt user@server:/pfad/zu/MusicBot/cookies.txt
+yt-dlp --cookies-from-browser firefox --cookies cookies.txt --skip-download <any-youtube-url>
+scp cookies.txt user@server:/path/to/MusicBot/cookies.txt
 ```
 
-In `.env` setzen:
+Set in `.env`:
 ```
-YDL_COOKIES_FILE=/pfad/zu/MusicBot/cookies.txt
+YDL_COOKIES_FILE=/path/to/MusicBot/cookies.txt
 ```
 
-### Cookie-Erneuerung
+### Cookie renewal
 
-Cookies halten ca. 1–3 Monate. Wenn YouTube wieder blockiert:
+Cookies last roughly 1–3 months. When YouTube starts blocking again:
 
-1. Cookies erneut exportieren (Befehl oben)
-2. Hochladen via SCP
-3. `!reloadcookies` in Discord — lädt ohne Bot-Neustart neu
+1. Re-export cookies (command above)
+2. Upload via SCP
+3. Run `!reloadcookies` in Discord — reloads without restarting the bot
 
 ### EJS Signature Solver
 
-yt-dlp benötigt Node.js im PATH sowie `yt-dlp[default]` für YouTube-Signatur-Challenges:
+yt-dlp requires Node.js in PATH and `yt-dlp[default]` for YouTube signature challenges:
 
 ```bash
 pip install "yt-dlp[default]"
 ```
 
-`js_runtimes: {node: {}}` ist bereits in allen ydl-Instanzen in `update_ydl()` konfiguriert.
+`js_runtimes: {node: {}}` is already configured in all ydl instances in `update_ydl()`.
 
-## 5. Starten
+## 5. Start
 
 ```bash
 python main.py

@@ -10,6 +10,7 @@
   "error.autoplay_error": "❌ Fehler bei Autoplay.",
   "error.autoplay_radio": "📻 Autoplay nicht verfügbar im Radio-Modus.",
   "error.p_usage": "❓ Verwendung: `!p <Suchbegriff oder URL>`",
+  "error.now_usage": "❓ Verwendung: `!now <Suchbegriff oder URL>` — spielt sofort ab",
   "error.search_timeout": "❌ Suche hat zu lange gedauert. Bitte versuche es erneut.",
   "error.search_timeout_short": "❌ Suche hat zu lange gedauert.",
   "error.search_error": "❌ Fehler bei der Suche.",
