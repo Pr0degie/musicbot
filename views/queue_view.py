@@ -38,7 +38,7 @@ class QueueView(View):
             embed.add_field(name=t("embed.queue_now"), value=title, inline=False)
 
         if slice_:
-            lines = [f"`{start + i + 1}.` {title}" for i, (_, title) in enumerate(slice_)]
+            lines = [f"`{start + i + 1}.` {item[1]}" for i, item in enumerate(slice_)]
             embed.add_field(name=t("embed.queue_list"), value="\n".join(lines), inline=False)
         else:
             embed.add_field(name=t("embed.queue_list"), value=t("embed.queue_empty"), inline=False)
@@ -49,7 +49,29 @@ class QueueView(View):
             loop_text = t("embed.loop_queue")
         else:
             loop_text = t("embed.loop_off")
-        embed.set_footer(text=t("embed.queue_footer", total=total, loop=loop_text))
+
+        known_secs = 0
+        known_count = 0
+        total_items = total + (1 if self.current_track else 0)
+        if self.current_track and len(self.current_track) >= 3 and self.current_track[2]:
+            known_secs += self.current_track[2]
+            known_count += 1
+        for item in self.items:
+            dur = item[2] if len(item) >= 3 else None
+            if dur:
+                known_secs += dur
+                known_count += 1
+
+        if known_count > 0:
+            m, s = divmod(int(known_secs), 60)
+            h, m = divmod(m, 60)
+            dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+            if known_count < total_items:
+                dur_str = "~" + dur_str
+            footer = t("embed.queue_footer_duration", total=total, duration=dur_str, loop=loop_text)
+        else:
+            footer = t("embed.queue_footer", total=total, loop=loop_text)
+        embed.set_footer(text=footer)
         return embed
 
     @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)

@@ -29,7 +29,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!s` | Skip |
 | `!x` | Pause |
 | `!resume` | Resume |
-| `!now` | Show current song |
+| `!now <url/search>` | Play immediately, skip current song |
 | `!seek <time>` | Jump to position — e.g. `1:23` or `83` |
 | `!replay` | Re-queue last song |
 

@@ -1260,7 +1260,11 @@ class MusicCommands(commands.Cog):
     async def queue_list(self, ctx):
         """Zeigt die aktuelle Queue als Embed mit Blätter-Buttons (15 Tracks pro Seite)."""
         from views.queue_view import QueueView
-        view = QueueView(list(self.queue), self.current_track, self.loop_mode)
+        queue_snapshot = [
+            (url, title, self.dl._url_cache[url].get("duration") if url in self.dl._url_cache else None)
+            for url, title in self.queue
+        ]
+        view = QueueView(queue_snapshot, self.current_track, self.loop_mode)
         await ctx.send(embed=view.build_embed(), view=view)
 
     @commands.command(name="score")

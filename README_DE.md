@@ -29,7 +29,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!s` | Überspringen |
 | `!x` | Pause |
 | `!resume` | Fortsetzen |
-| `!now` | Aktuellen Song anzeigen |
+| `!now <url/suche>` | Song sofort abspielen, aktuellen überspringen |
 | `!seek <zeit>` | Position springen — z.B. `1:23` oder `83` |
 | `!replay` | Letzten Song nochmal in die Queue |
 
