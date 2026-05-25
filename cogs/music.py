@@ -237,8 +237,8 @@ class MusicCommands(commands.Cog):
                 logger.warning("[Autoplay] Keine nutzbaren Einträge im Mix")
                 return
 
-            # Erstes Element aus dem Mix nehmen (YouTube sortiert nach Relevanz)
-            chosen = candidates[0]
+            pool = candidates[1:] if len(candidates) > 1 else candidates
+            chosen = random.choice(pool)
             url = entry_url(chosen)
             title = chosen.get("title", t("misc.unknown"))
 

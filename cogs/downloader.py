@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import random
 import re
 import time
 from pathlib import Path
@@ -233,7 +234,7 @@ class Downloader:
             "extract_flat": True,
             "skip_download": True,
             "noplaylist": False,
-            "playlistend": 6,
+            "playlistend": 10,
             "socket_timeout": 15,
             **_cookies,
             **_js,
@@ -400,7 +401,8 @@ class Downloader:
                 logger.warning("[Autoplay Prefetch] Keine nutzbaren Einträge")
                 return None
 
-            chosen = candidates[0]
+            pool = candidates[1:] if len(candidates) > 1 else candidates
+            chosen = random.choice(pool)
             url = entry_url(chosen)
             title = chosen.get("title", "Unbekannt")
 
