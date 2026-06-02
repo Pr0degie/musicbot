@@ -1109,10 +1109,36 @@ class MusicCommands(commands.Cog):
 
     @commands.command(name="now")
     async def now_playing(self, ctx, *, eingabe: str = None):
-        """Spielt einen Song sofort ab (stoppt den aktuellen). !now <Suche oder URL>"""
+        """Spielt einen Song sofort ab (stoppt den aktuellen). !now <Suche, URL oder Queue-Position>"""
         if not eingabe:
             await ctx.send(t("error.now_usage"))
             return
+
+        # Zahl → Song an dieser Queue-Position sofort abspielen
+        try:
+            n = int(eingabe)
+            if not self.queue:
+                await ctx.send(t("error.queue_empty"))
+                return
+            if not (1 <= n <= len(self.queue)):
+                await ctx.send(t("error.invalid_index_range", count=len(self.queue)))
+                return
+            if not await self._ensure_voice(ctx):
+                return
+            queue_list = list(self.queue)
+            entry = queue_list.pop(n - 1)
+            queue_list.insert(0, entry)
+            self.queue = deque(queue_list)
+            self._evict_autoplay_song()
+            await ctx.send(t("status.playing", title=entry[1]))
+            if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
+                ctx.voice_client.stop()
+            elif not self.is_playing:
+                self.is_playing = True
+                await self.play_next(ctx)
+            return
+        except ValueError:
+            pass  # Kein Integer → weiter mit Suche/URL
 
         if not await self._ensure_voice(ctx):
             return

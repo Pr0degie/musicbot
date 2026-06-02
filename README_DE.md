@@ -29,7 +29,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!s` | Überspringen |
 | `!x` | Pause |
 | `!resume` | Fortsetzen |
-| `!now <url/suche>` | Song sofort abspielen, aktuellen überspringen |
+| `!now <url/suche/n>` | Song sofort abspielen, aktuellen überspringen — auch Queue-Position `n` |
 | `!seek <zeit>` | Position springen — z.B. `1:23` oder `83` |
 | `!replay` | Letzten Song nochmal in die Queue |
 
@@ -58,7 +58,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!radio <url> [Name]` | Stream abspielen & speichern |
 | `!radio delete <nr/name>` | Sender löschen |
 | `!radio rename <nr/name> <neuer name>` | Sender umbenennen |
-| `!stop` | Radio stoppen |
+| `!stop` | Wiedergabe/Radio stoppen (Queue bleibt erhalten) |
 
 **Sonstiges**
 
