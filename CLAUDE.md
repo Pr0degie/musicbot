@@ -4,12 +4,13 @@ Setup → see `README.md`. No test suite or linter configured.
 
 ## Architecture
 
-Two cogs loaded at startup, all responses in German:
+Three cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
 - **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`, `playlist_ydl`, `autoplay_ydl` — all via `self.dl.*`), `_url_cache`, `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`.
 - **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`, (3) autoplay on → `autoplay()`. `SearchAutoplayView`: first search result plays immediately, alternatives as buttons (30 s timeout).
+- **`views/queue_view.py`** — `QueueView`: paginated queue embed with Prev/Next buttons; receives `queue_snapshot`, `current_track`, `loop_mode` at construction.
 
 ### Music Playback Flow
 
@@ -66,10 +67,11 @@ Reference track: `current_track` → `last_played`. Autoplay stays on until butt
 State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
 `_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error.
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
-`!stop` beendet Radio. Radio-Modus und Song-Modus schließen sich gegenseitig aus.
+`!stop` beendet Radio oder aktuelle Wiedergabe (Queue bleibt erhalten). Radio-Modus und Song-Modus schließen sich gegenseitig aus.
 
 ### Key Bot Commands
 
 Full list via `!help`. Non-obvious:
 - **`!loop`** — cycles `loop_mode`: `None` → `"song"` → `"queue"` → `None`; handled in `after_playing`
+- **`!now <n>`** — integer argument moves queue entry at position `n` to front and skips current song; non-integer falls through to search/URL logic
 - **`!text`** — lyrics via lyrics.ovh, parses "Artist - Title" from YouTube title
