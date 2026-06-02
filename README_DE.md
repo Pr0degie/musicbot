@@ -85,7 +85,8 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── presets.py             # EQ-Filterketten
 │   └── basic.py               # !j, !l, !ping, !echo, !help
 ├── views/
-│   └── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
+│   ├── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
+│   └── queue_view.py          # Paginierte Queue-Ansicht
 ├── utils/
 │   ├── logger.py              # Logging (Konsole + bot.log)
 │   └── i18n.py                # Lokalisierungs-Helfer (t()-Funktion)
