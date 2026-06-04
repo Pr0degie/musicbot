@@ -4,11 +4,12 @@ Setup → see `README.md`. No test suite or linter configured.
 
 ## Architecture
 
-Three cogs loaded at startup, all responses in German:
+Four cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
 - **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`, `playlist_ydl`, `autoplay_ydl` — all via `self.dl.*`), `_url_cache`, `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`.
+- **`cogs/dm_bridge.py`** — `DMBridge`: localhost-only aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT` in `config.py`) so a separate "Bot B" (AI dungeon master) can make this bot speak. `GET /health`, `POST /speak {"path", "guild_id"?}` plays a WAV via `FFmpegOpusAudio` (same pattern as `_play_radio_stream`). `/speak` is **blocking** — the HTTP response is the only done-signal; `_speak_lock` serializes calls, stops running music first. `!dm` shows status. No callback back to Bot B by design — feedback-loop protection lives entirely in Bot B.
 - **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`, (3) autoplay on → `autoplay()`. `SearchAutoplayView`: first search result plays immediately, alternatives as buttons (30 s timeout).
 - **`views/queue_view.py`** — `QueueView`: paginated queue embed with Prev/Next buttons; receives `queue_snapshot`, `current_track`, `loop_mode` at construction.
 

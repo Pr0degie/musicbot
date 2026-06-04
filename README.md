@@ -69,6 +69,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!text` | Fetch song lyrics |
 | `!stats` | Bot stats (RAM, CPU, cache) |
 | `!j` / `!l` | Join / leave voice channel |
+| `!dm` | Show DM-bridge status (AI dungeon master audio output) |
 | `!reloadcookies` | Reload `cookies.txt` without restarting |
 | `!restart` | Restart bot in new terminal (owner only) |
 
@@ -83,7 +84,8 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── music.py               # Music logic, queue, autoplay, radio
 │   ├── downloader.py          # yt_dlp instances, download cache, streaming
 │   ├── presets.py             # EQ filter chains
-│   └── basic.py               # !j, !l, !ping, !echo, !help
+│   ├── basic.py               # !j, !l, !ping, !echo, !help
+│   └── dm_bridge.py           # HTTP audio-output bridge for AI dungeon master
 ├── views/
 │   ├── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay)
 │   └── queue_view.py          # Paginated queue view
