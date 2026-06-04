@@ -80,7 +80,10 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ├── main.py                    # Einstiegspunkt
 ├── config.py                  # Env-Variablen laden
 ├── cogs/
-│   ├── music.py               # Musik-Logik, Queue, Autoplay, Radio
+│   ├── music.py               # Kern: Queue, FFmpeg-Wiedergabe, EQ, Autoplay
+│   ├── music_radio.py         # RadioMixin: Internet-Radio (!radio)
+│   ├── music_stats.py         # StatsMixin: !score, !stats
+│   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
 │   ├── downloader.py          # yt_dlp-Instanzen, Download-Cache, Streaming
 │   ├── presets.py             # EQ-Filterketten
 │   └── basic.py               # !j, !l, !ping, !echo, !help
@@ -89,12 +92,14 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   └── queue_view.py          # Paginierte Queue-Ansicht
 ├── utils/
 │   ├── logger.py              # Logging (Konsole + bot.log)
+│   ├── text.py                # normalize_title (abhängigkeitsfrei, getestet)
 │   └── i18n.py                # Lokalisierungs-Helfer (t()-Funktion)
 ├── locales/
 │   ├── en.json                # Englische Texte
 │   └── de.json                # Deutsche Texte
 ├── downloads/                 # Audio-Cache
-└── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
+├── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
+└── tests/                     # pytest-Suite (test_text.py, test_presets.py)
 ```
 
 ---
