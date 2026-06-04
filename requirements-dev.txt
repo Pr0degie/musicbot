@@ -1,0 +1,4 @@
+# Entwicklungs-/Testabhängigkeiten (nicht für den Bot-Betrieb nötig).
+# Installation: pip install -r requirements-dev.txt
+# Tests ausführen: pytest
+pytest>=8.0

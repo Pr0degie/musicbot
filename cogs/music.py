@@ -2,7 +2,6 @@
 # Kurz gesagt: die wichtigste Datei im ganzen Bot. Treat her well.
 
 import asyncio
-import itertools
 import json
 import random
 import re
@@ -21,15 +20,20 @@ from discord.ext import commands
 from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
+from cogs.music_radio import RadioMixin
+from cogs.music_stats import StatsMixin
+from cogs.music_queue_io import QueuePersistenceMixin
 
-PLAYLISTS_DIR = Path("playlists")
-PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 SCORE_FILE = Path("play_counts.json")
-RADIO_STATIONS_FILE = Path("radio_stations.json")
 
 
-class MusicCommands(commands.Cog):
-    """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay."""
+class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog):
+    """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay.
+
+    Radio-, Statistik- und Queue-Persistenz-Befehle sind in Mixins ausgelagert
+    (cogs/music_radio.py, music_stats.py, music_queue_io.py) – sie teilen sich
+    denselben Instanz-State und werden über die MRO als Cog-Commands registriert.
+    """
 
     # Maximale Anzahl an Titeln die aus einer Playlist eingelesen werden.
     HARD_PLAYLIST_LIMIT = 150
@@ -109,17 +113,6 @@ class MusicCommands(commands.Cog):
         if self.current_track:
             keep.add(self.current_track[0])
         self.dl.rebuild(self.audio_format, keep_urls=keep)
-
-    def _stop_radio(self):
-        """Beendet Radio-Modus und setzt alle Flags zurück. Stoppt den Voice-Client NICHT."""
-        self.is_radio = False
-        self.radio_station_name = None
-        self.radio_stream_url = None
-        self._radio_reconnect_count = 0
-        self.is_playing = False
-        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-            self._autoplay_prefetch_task.cancel()
-            self._autoplay_prefetch_task = None
 
     def _record_play(self, url: str, title: str):
         entry = self._play_counts.get(url)
@@ -314,98 +307,6 @@ class MusicCommands(commands.Cog):
         Returns: (info, filename, title, duration)
         """
         return await self.dl.resolve_track(url, title, self.prefetch_task)
-
-    async def _play_radio_stream(self, ctx, url: str, name: str) -> None:
-        """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp)."""
-        if not ctx.voice_client or not ctx.voice_client.is_connected():
-            await ctx.send(t("error.no_voice_connected"))
-            return
-
-        # Sicherheitsnetz: falls FFmpeg noch nicht terminiert ist, kurz warten.
-        if ctx.voice_client.is_playing():
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                await ctx.send(t("error.stream_busy"))
-                self._stop_radio()
-                return
-            self._playback_done.clear()
-
-        if self.prefetch_task and not self.prefetch_task.done():
-            self.prefetch_task.cancel()
-
-        self.radio_stream_url = url
-        self.radio_station_name = name
-        self.is_radio = True
-        self.is_playing = True
-        self.current_track = (url, name, 0)
-
-        try:
-            source = discord.FFmpegOpusAudio(
-                url,
-                before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn",
-            )
-        except Exception:
-            logger.exception(f"[Radio] Fehler beim Erstellen der FFmpeg-Quelle für {url}")
-            await ctx.send(t("error.stream_connect_error"))
-            self._stop_radio()
-            return
-
-        def after_radio(error):
-            self.bot.loop.call_soon_threadsafe(self._playback_done.set)
-            if error:
-                logger.warning(f"[Radio] Stream-Fehler: {error}")
-            else:
-                logger.info(f"[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
-            if not self.is_radio:
-                return
-            if self._radio_reconnect_count < 3:
-                self._radio_reconnect_count += 1
-                logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/3 für {name}")
-                asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx), self.bot.loop)
-            else:
-                logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
-                self.is_radio = False
-                self.is_playing = False
-                asyncio.run_coroutine_threadsafe(
-                    ctx.send(t("radio.stream_interrupted"), delete_after=30),
-                    self.bot.loop,
-                )
-
-        if self.now_playing_msg:
-            try:
-                await self.now_playing_msg.edit(content=None, embed=None, view=None)
-            except Exception:
-                pass
-
-        self._playback_done.clear()
-        self.track_start_time = time.monotonic()
-        ctx.voice_client.play(source, after=after_radio)
-        self._radio_reconnect_count = 0
-
-        embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
-        embed.add_field(name=t("embed.status"), value=t("embed.radio_live"), inline=True)
-        embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-        self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
-        self.text_channel = ctx.channel
-        logger.info(f"[Radio] Stream gestartet: {name} ({url})")
-
-    async def _reconnect_radio(self, ctx) -> None:
-        """Versucht einen abgebrochenen Radio-Stream neu zu verbinden."""
-        if not ctx.voice_client or not ctx.voice_client.is_connected():
-            logger.warning("[Radio] Kein Voice-Client mehr – Reconnect abgebrochen.")
-            self._stop_radio()
-            return
-        await asyncio.sleep(2)
-        try:
-            await ctx.send(
-                t("radio.reconnecting", count=self._radio_reconnect_count, name=self.radio_station_name),
-                delete_after=10,
-            )
-        except Exception:
-            pass
-        await self._play_radio_stream(ctx, self.radio_stream_url, self.radio_station_name)
 
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
@@ -827,123 +728,6 @@ class MusicCommands(commands.Cog):
             self.is_playing = True
             await self.play_next(ctx)
 
-    @staticmethod
-    def _resolve_station_entry(query: str, items: list):
-        """Gibt (key, entry) für Nr. oder Name zurück, oder (None, None) wenn nicht gefunden."""
-        if query.isdigit():
-            idx = int(query) - 1
-            if 0 <= idx < len(items):
-                return items[idx]
-            return None, None
-        normalized = query.lower().replace(" ", "").replace("-", "")
-        for k, v in items:
-            if k.lower().replace(" ", "").replace("-", "") == normalized:
-                return k, v
-        return None, None
-
-    @commands.command(name="radio")
-    async def radio_play(self, ctx, *, eingabe: str = None):
-        """Spielt einen Internet-Radio-Stream. !radio <Nummer, Sendername oder URL>"""
-        try:
-            with open(RADIO_STATIONS_FILE, encoding="utf-8") as f:
-                stations = json.load(f)
-        except FileNotFoundError:
-            stations = {}
-
-        if not eingabe:
-            if not stations:
-                await ctx.send(t("error.no_stations"))
-                return
-            lines = [
-                f"**{i + 1}.** {v['name']}"
-                for i, (k, v) in enumerate(stations.items())
-            ]
-            await ctx.send(t("radio.station_list", lines="\n".join(lines)))
-            return
-
-        eingabe = eingabe.strip()
-        items = list(stations.items())
-
-        # Subcommands: !radio delete <nr|name>  /  !radio rename <nr|name> <neuer name>
-        tokens = eingabe.split(None, 2)
-        if tokens[0] in ("delete", "rename"):
-            subcmd = tokens[0]
-            if len(tokens) < 2:
-                await ctx.send(t("error.radio_usage", subcmd=subcmd))
-                return
-            key, entry = self._resolve_station_entry(tokens[1], items)
-            if entry is None:
-                await ctx.send(t("error.station_not_found", name=tokens[1]))
-                return
-            if subcmd == "delete":
-                del stations[key]
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(t("radio.station_deleted", name=entry["name"]))
-            else:  # rename
-                if len(tokens) < 3:
-                    await ctx.send(t("error.radio_rename_usage"))
-                    return
-                old_name = entry["name"]
-                stations[key]["name"] = tokens[2]
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(t("radio.station_renamed", old=old_name, new=tokens[2]))
-            return
-
-        if not await self._ensure_voice(ctx):
-            return
-
-        if eingabe.startswith("http"):
-            parts = eingabe.split(None, 1)
-            url = parts[0]
-            if len(parts) > 1:
-                name = parts[1].strip()
-            else:
-                from urllib.parse import urlparse
-                name = urlparse(url).hostname or url
-
-            # Sender speichern falls noch nicht vorhanden
-            existing = next((v for v in stations.values() if v["url"] == url), None)
-            if existing is None:
-                key = name.lower().replace(" ", "").replace("-", "")
-                # Eindeutigen Key sicherstellen
-                base_key, n = key, 2
-                while key in stations:
-                    key = f"{base_key}{n}"
-                    n += 1
-                stations[key] = {"name": name, "url": url}
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(t("radio.station_saved", name=name, num=len(stations)))
-        else:
-            _, entry = self._resolve_station_entry(eingabe, items)
-            if entry is None:
-                if eingabe.isdigit():
-                    await ctx.send(t("error.station_number_invalid", num=eingabe, count=len(items)))
-                else:
-                    await ctx.send(t("error.station_name_not_found", name=eingabe))
-                return
-            url = entry["url"]
-            name = entry["name"]
-
-        if self.is_radio:
-            self._stop_radio()
-        else:
-            self.is_playing = False
-
-        # Immer warten bis FFmpeg wirklich fertig ist – egal ob Radio oder Song lief.
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
-            self._playback_done.clear()
-
-        self._radio_reconnect_count = 0
-        await self._play_radio_stream(ctx, url, name)
-
     @commands.command(name="stop")
     async def stop(self, ctx):
         """Beendet Radio-Modus oder aktuelle Wiedergabe (Queue bleibt erhalten)."""
@@ -1293,23 +1077,6 @@ class MusicCommands(commands.Cog):
         view = QueueView(queue_snapshot, self.current_track, self.loop_mode)
         await ctx.send(embed=view.build_embed(), view=view)
 
-    @commands.command(name="score")
-    async def score(self, ctx):
-        """Zeigt die Top-10 der am häufigsten gespielten Songs."""
-        if not self._play_counts:
-            await ctx.send(t("status.no_plays"))
-            return
-
-        top = sorted(self._play_counts.items(), key=lambda x: x[1]["count"], reverse=True)[:10]
-        embed = discord.Embed(title=t("embed.most_played"), color=discord.Color.gold())
-        lines = []
-        medals = ["🥇", "🥈", "🥉"]
-        for i, (_, entry) in enumerate(top):
-            prefix = medals[i] if i < 3 else f"`{i + 1}.`"
-            lines.append(f"{prefix} **{entry['title']}** — {entry['count']}x")
-        embed.description = "\n".join(lines)
-        await ctx.send(embed=embed)
-
     @commands.command()
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
@@ -1324,60 +1091,6 @@ class MusicCommands(commands.Cog):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
         await ctx.send(t("status.cleared"))
-
-    @commands.command(name="saveq", usage="!saveq <name>")
-    async def saveq(self, ctx, *, name: str):
-        """Speichert die aktuelle Queue unter einem Namen. Verwendung: !saveq <name>"""
-        if not self.queue and not self.current_track:
-            await ctx.send(t("error.nothing_to_save"))
-            return
-        safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-        if not safe_name:
-            await ctx.send(t("error.invalid_name"))
-            return
-        tracks = []
-        if self.current_track:
-            ct_url, ct_title, *_ = self.current_track
-            tracks.append([ct_url, ct_title])
-        tracks.extend([url, title] for url, title in self.queue)
-        path = PLAYLISTS_DIR / f"{safe_name}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(tracks, f, ensure_ascii=False, indent=2)
-        await ctx.send(t("status.queue_saved", name=safe_name, count=len(tracks)))
-
-    @commands.command(name="loadq", usage="!loadq <name>")
-    async def loadq(self, ctx, *, name: str):
-        """Lädt eine gespeicherte Queue und hängt sie an die aktuelle an. Verwendung: !loadq <name>"""
-        safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-        path = PLAYLISTS_DIR / f"{safe_name}.json"
-        if not path.exists():
-            await ctx.send(t("error.queue_not_found", name=safe_name))
-            return
-        with open(path, encoding="utf-8") as f:
-            tracks = json.load(f)
-        for url, title in tracks:
-            self.queue.append((url, title))
-        await ctx.send(t("status.queue_loaded", name=safe_name, count=len(tracks)))
-        if not self.is_playing:
-            self.is_playing = True
-            await self.play_next(ctx)
-
-    @commands.command(name="lists")
-    async def lists(self, ctx):
-        """Zeigt alle gespeicherten Queues."""
-        files = sorted(PLAYLISTS_DIR.glob("*.json"))
-        if not files:
-            await ctx.send(t("status.no_saved_queues"))
-            return
-        lines = []
-        for p in files:
-            try:
-                with open(p, encoding="utf-8") as f:
-                    count = len(json.load(f))
-                lines.append(f"• **{p.stem}** ({count} Titel)")
-            except Exception:
-                lines.append(f"• **{p.stem}**")
-        await ctx.send(t("status.saved_queues", lines="\n".join(lines)))
 
     @commands.command(usage="!remove <position>")
     async def remove(self, ctx, index: int):
@@ -1521,55 +1234,6 @@ class MusicCommands(commands.Cog):
         self.queue.appendleft((url, title))
         ctx.voice_client.stop()
         await ctx.send(t("status.seeking", mins=mins, secs=f"{secs:02d}", title=title))
-
-    @commands.command(name="stats")
-    async def stats(self, ctx):
-        """Zeigt Live-Metriken zum Bot-Prozess: RAM, CPU, Uptime, Queue, Cache."""
-        proc = self._process
-
-        # RAM
-        mem = proc.memory_info()
-        rss_mb = mem.rss / 1024 / 1024
-        vms_mb = mem.vms / 1024 / 1024
-
-        # CPU (non-blocking: 0.1s Interval im Thread)
-        cpu_pct = await asyncio.to_thread(proc.cpu_percent, 0.1)
-
-        # Uptime
-        uptime_s = int(time.monotonic() - self._start_time)
-        h, rem = divmod(uptime_s, 3600)
-        m, s = divmod(rem, 60)
-        uptime_str = f"{h}h {m}m {s}s"
-
-        # asyncio Tasks
-        all_tasks = asyncio.all_tasks()
-        running_tasks = sum(1 for t in all_tasks if not t.done())
-
-        # Downloads-Ordner – auf 500 Dateien begrenzen damit stat() nicht ewig läuft
-        _SCAN_LIMIT = 500
-        dl_files = list(itertools.islice(DOWNLOAD_DIR.glob("*"), _SCAN_LIMIT + 1))
-        capped = len(dl_files) > _SCAN_LIMIT
-        if capped:
-            dl_files = dl_files[:_SCAN_LIMIT]
-        dl_count = f"{len(dl_files)}+" if capped else str(len(dl_files))
-        dl_size_mb = await asyncio.to_thread(
-            lambda: sum(f.stat().st_size for f in dl_files if f.is_file()) / 1024 / 1024
-        )
-
-        # Queue
-        queue_len = len(self.queue)
-
-        embed = discord.Embed(title=t("embed.stats"), color=0x5865f2)
-        embed.add_field(name=t("embed.uptime"), value=uptime_str, inline=True)
-        embed.add_field(name=t("embed.songs_played"), value=str(self._songs_played), inline=True)
-        embed.add_field(name=t("embed.queue_field"), value=t("misc.songs_count", count=queue_len), inline=True)
-        embed.add_field(name=t("embed.ram_rss"), value=f"{rss_mb:.1f} MB", inline=True)
-        embed.add_field(name=t("embed.ram_vms"), value=f"{vms_mb:.1f} MB", inline=True)
-        embed.add_field(name=t("embed.cpu"), value=f"{cpu_pct:.1f}%", inline=True)
-        embed.add_field(name=t("embed.tasks"), value=str(running_tasks), inline=True)
-        embed.add_field(name=t("embed.cache_files"), value=t("misc.files_count", count=dl_count), inline=True)
-        embed.add_field(name=t("embed.cache_size"), value=f"{dl_size_mb:.0f} MB", inline=True)
-        await ctx.send(embed=embed)
 
     @commands.command(name="baba")
     async def baba(self, ctx):
