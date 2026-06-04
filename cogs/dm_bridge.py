@@ -1,13 +1,12 @@
 import asyncio
 from pathlib import Path
 
-import aiohttp
 from aiohttp import web
 import discord
 from discord.ext import commands
 
 from utils.logger import logger
-from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT, DM_BOT_B_URL
+from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT
 
 
 class DMBridge(commands.Cog):
@@ -25,13 +24,11 @@ class DMBridge(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._runner = None
-        self._http = None              # ClientSession für Rückmeldungen an Bot B
         # serialisiert mehrere /speak-Aufrufe – der DM sagt immer nur einen
         # Satz nach dem anderen, nie zwei Quellen gleichzeitig.
         self._speak_lock = asyncio.Lock()
 
     async def cog_load(self):
-        self._http = aiohttp.ClientSession()
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
         app.router.add_post("/speak", self._handle_speak)
@@ -44,8 +41,6 @@ class DMBridge(commands.Cog):
     async def cog_unload(self):
         if self._runner:
             await self._runner.cleanup()
-        if self._http:
-            await self._http.close()
         logger.info("[DMBridge] HTTP-Server gestoppt.")
 
     # ------------------------------------------------------------------ HTTP
@@ -56,7 +51,7 @@ class DMBridge(commands.Cog):
     async def _handle_speak(self, request):
         """Spielt eine von Bot B gelieferte Audiodatei im Voice-Channel ab.
 
-        Erwartet JSON ``{"path": "/tmp/dm_xxx.wav", "guild_id": <optional>}``.
+        Erwartet JSON ``{"path": "<os-temp>/dm_xxx.wav", "guild_id": <optional>}``.
         Antwortet erst, wenn die Wiedergabe abgeschlossen ist.
         """
         try:
@@ -111,27 +106,8 @@ class DMBridge(commands.Cog):
             loop.call_soon_threadsafe(done.set)
 
         source = discord.FFmpegOpusAudio(path, options="-vn")
-        # Bot B Bescheid geben, dass jetzt gesprochen wird → es ignoriert in
-        # diesem Zeitfenster eingehendes Audio (Feedback-Loop-Schutz).
-        await self._notify_b(True)
-        try:
-            vc.play(source, after=after)
-            await done.wait()
-        finally:
-            await self._notify_b(False)
-
-    async def _notify_b(self, speaking: bool):
-        """Meldet Bot B, ob der DM gerade spricht. Best-effort, niemals hart fehlschlagen."""
-        if not DM_BOT_B_URL:
-            return
-        try:
-            await self._http.post(
-                f"{DM_BOT_B_URL.rstrip('/')}/speaking",
-                json={"speaking": speaking},
-                timeout=aiohttp.ClientTimeout(total=2),
-            )
-        except Exception:
-            pass  # Bot B evtl. (noch) nicht erreichbar – kein harter Fehler
+        vc.play(source, after=after)
+        await done.wait()
 
     # -------------------------------------------------------------- Befehle
 
@@ -143,6 +119,5 @@ class DMBridge(commands.Cog):
         await ctx.send(
             "🎲 **DM-Bridge**\n"
             f"Server: `{DM_BRIDGE_HOST}:{DM_BRIDGE_PORT}`\n"
-            f"Voice: {connected}\n"
-            f"Bot B: `{DM_BOT_B_URL or 'nicht gesetzt'}`"
+            f"Voice: {connected}"
         )

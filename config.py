@@ -14,7 +14,6 @@ LANGUAGE = os.getenv("LANGUAGE", "en")
 
 # DM-Bridge: kleiner HTTP-Server, über den Bot B (das "Ohr+Hirn") diesem Bot
 # fertige Audiodateien zum Abspielen schickt. Nur localhost – keine externe
-# Erreichbarkeit. DM_BOT_B_URL ist optional (Feedback-Loop-Rückmeldung an Bot B).
+# Erreichbarkeit.
 DM_BRIDGE_HOST = os.getenv("DM_BRIDGE_HOST", "127.0.0.1")
 DM_BRIDGE_PORT = int(os.getenv("DM_BRIDGE_PORT", "8765"))
-DM_BOT_B_URL = os.getenv("DM_BOT_B_URL", "")
