@@ -11,3 +11,10 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 YDL_COOKIES_FILE = os.getenv("YDL_COOKIES_FILE", "")
 YDL_BROWSER = os.getenv("YDL_BROWSER", "firefox")
 LANGUAGE = os.getenv("LANGUAGE", "en")
+
+# DM-Bridge: kleiner HTTP-Server, über den Bot B (das "Ohr+Hirn") diesem Bot
+# fertige Audiodateien zum Abspielen schickt. Nur localhost – keine externe
+# Erreichbarkeit. DM_BOT_B_URL ist optional (Feedback-Loop-Rückmeldung an Bot B).
+DM_BRIDGE_HOST = os.getenv("DM_BRIDGE_HOST", "127.0.0.1")
+DM_BRIDGE_PORT = int(os.getenv("DM_BRIDGE_PORT", "8765"))
+DM_BOT_B_URL = os.getenv("DM_BOT_B_URL", "")

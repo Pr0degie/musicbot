@@ -1,6 +1,7 @@
 import discord
 from cogs.basic import BasicCommands
 from cogs.music import MusicCommands
+from cogs.dm_bridge import DMBridge
 from config import TOKEN
 from discord.ext import commands
 
@@ -17,9 +18,11 @@ class MusicBot(commands.Bot):
 
     async def setup_hook(self):
         # Cogs werden hier registriert – BasicCommands für Voice-Management,
-        # MusicCommands für alles rund um Wiedergabe und Queue.
+        # MusicCommands für alles rund um Wiedergabe und Queue,
+        # DMBridge für die HTTP-Bridge zum KI-Dungeon-Master (Bot B).
         await self.add_cog(BasicCommands(self))
         await self.add_cog(MusicCommands(self))
+        await self.add_cog(DMBridge(self))
 
     async def on_message(self, message):
         if message.author.bot:
