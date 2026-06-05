@@ -15,6 +15,8 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 - Internet-Radio via direktem Stream
 - Queue-Verwaltung mit Speichern/Laden, Shuffle, Loop-Modus
 - Kurze Songs werden gecacht, lange Songs (>20 min) und unbekannte Songs starten sofort per Stream
+- Auto-Leave: Bot verlässt den Voice-Channel wenn alle User weg sind oder nach 2 h Inaktivität
+- Voice-Stabilität: Reconnect-Watchdog setzt die Wiedergabe nach Discord-Abbrüchen (Code 1006) fort
 
 ---
 
@@ -69,6 +71,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!text` | Songtext abrufen |
 | `!stats` | Bot-Statistiken (RAM, CPU, Cache) |
 | `!j` / `!l` | Voice-Channel beitreten / verlassen |
+| `!dm` | DM-Bridge-Status anzeigen (KI-Dungeon-Master-Audioausgabe) |
 | `!reloadcookies` | `cookies.txt` neu laden ohne Bot-Neustart |
 | `!restart` | Bot in neuem Terminal neu starten (nur Owner) |
 
@@ -83,7 +86,8 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── music.py               # Musik-Logik, Queue, Autoplay, Radio
 │   ├── downloader.py          # yt_dlp-Instanzen, Download-Cache, Streaming
 │   ├── presets.py             # EQ-Filterketten
-│   └── basic.py               # !j, !l, !ping, !echo, !help
+│   ├── basic.py               # !j, !l, !ping, !echo, !help
+│   └── dm_bridge.py           # HTTP-Audio-Ausgabe-Bridge für KI-Dungeon-Master (localhost-Pfad + Remote-Byte-Modus)
 ├── views/
 │   ├── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
 │   └── queue_view.py          # Paginierte Queue-Ansicht

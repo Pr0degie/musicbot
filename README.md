@@ -15,6 +15,8 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 - Internet radio via direct stream
 - Queue management with save/load, shuffle and loop mode
 - Short songs are cached; long songs (>20 min) start instantly via stream
+- Auto-leave: bot leaves voice when all users go, or after 2 h of inactivity
+- Voice stability: reconnect watchdog recovers playback after Discord drops (code 1006)
 
 ---
 
@@ -85,7 +87,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── downloader.py          # yt_dlp instances, download cache, streaming
 │   ├── presets.py             # EQ filter chains
 │   ├── basic.py               # !j, !l, !ping, !echo, !help
-│   └── dm_bridge.py           # HTTP audio-output bridge for AI dungeon master
+│   └── dm_bridge.py           # HTTP audio-output bridge for AI dungeon master (localhost path + remote byte mode)
 ├── views/
 │   ├── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay)
 │   └── queue_view.py          # Paginated queue view

@@ -42,12 +42,23 @@ Optional language setting:
 LANGUAGE=en
 ```
 
+Optional DM-Bridge variables (only for the AI dungeon master setup — leave default for normal use):
+
+```
+DM_BRIDGE_HOST=127.0.0.1
+DM_BRIDGE_PORT=8765
+DM_BRIDGE_SECRET=
+```
+
 | Variable | Purpose |
 |---|---|
 | `DISCORD_TOKEN` | Discord bot token (required) |
 | `YDL_COOKIES_FILE` | Path to an exported `cookies.txt` — takes priority over browser extraction |
 | `YDL_BROWSER` | Browser for live cookie extraction (`firefox`, `chrome`, …) — local only, not on headless servers |
 | `LANGUAGE` | Bot language: `en` (default) or `de` |
+| `DM_BRIDGE_HOST` | DM-Bridge HTTP host. `127.0.0.1` (default) = localhost path mode; LAN/Tailscale IP or `0.0.0.0` = remote byte mode |
+| `DM_BRIDGE_PORT` | DM-Bridge HTTP port (default `8765`) |
+| `DM_BRIDGE_SECRET` | Shared secret for DM-Bridge auth. Empty + `127.0.0.1` = no secret; **required** for any non-loopback host |
 
 ## 4. YouTube Authentication (Cookies)
 
@@ -135,3 +146,17 @@ pip install "yt-dlp[default]"
 ```bash
 python main.py
 ```
+
+## 6. Voice & Auto-Disconnect Behavior
+
+The bot leaves the voice channel automatically in two cases:
+
+- **No users left in the channel** → after 5 min (`AUTO_LEAVE_SECONDS = 300`).
+- **No playback for a long time** → after 2 h of silence (`IDLE_LEAVE_SECONDS = 7200`).
+  Discord drops idle (silent) voice connections with error **1006** after roughly
+  80 min anyway; leaving on purpose avoids sitting on a dead connection.
+
+If a 1006 drop happens *during* playback, discord.py auto-reconnects and a built-in
+**reconnect watchdog** restarts the next track if playback got stuck — transparent,
+no configuration needed. These reconnects are logged as a quiet INFO line instead of
+a red traceback, so seeing one occasionally in `bot.log` is normal.
