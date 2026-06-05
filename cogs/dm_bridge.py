@@ -1,4 +1,8 @@
 import asyncio
+import hmac
+import ipaddress
+import os
+import tempfile
 from pathlib import Path
 
 from aiohttp import web
@@ -6,7 +10,21 @@ import discord
 from discord.ext import commands
 
 from utils.logger import logger
-from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT
+from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT, DM_BRIDGE_SECRET
+
+# Cap on an uploaded WAV (bytes mode). A spoken sentence is well under this; it's just a guard.
+_MAX_WAV_BYTES = 25 * 1024 * 1024
+
+
+def _peer_is_loopback(request) -> bool:
+    """True if the request originates from this machine (lets the secret check be skipped)."""
+    peer = request.remote
+    if not peer:
+        return True
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
 
 
 class DMBridge(commands.Cog):
@@ -51,9 +69,28 @@ class DMBridge(commands.Cog):
     async def _handle_speak(self, request):
         """Spielt eine von Bot B gelieferte Audiodatei im Voice-Channel ab.
 
-        Erwartet JSON ``{"path": "<os-temp>/dm_xxx.wav", "guild_id": <optional>}``.
-        Antwortet erst, wenn die Wiedergabe abgeschlossen ist.
+        Zwei Transporte (ADR 010):
+        - JSON ``{"path","guild_id?"}`` → **Pfad-Modus** (gemeinsame Platte, localhost).
+        - Body mit ``Content-Type: audio/wav`` → **Byte-Modus**: die WAV-Bytes werden hier in
+          den eigenen Temp-Ordner geschrieben, abgespielt und gelöscht (getrennte Maschinen).
+        Antwortet erst, wenn die Wiedergabe abgeschlossen ist (Blocking = "fertig"-Signal, D15).
         """
+        # Secret nur prüfen, wenn eines gesetzt ist UND der Aufruf nicht von localhost kommt –
+        # so bleibt der klassische localhost-Pfad-Modus ohne jede Konfiguration nutzbar.
+        if DM_BRIDGE_SECRET and not _peer_is_loopback(request):
+            sent = request.headers.get("X-DM-Secret", "")
+            if not hmac.compare_digest(sent, DM_BRIDGE_SECRET):
+                return web.json_response({"error": "unauthorized"}, status=401)
+
+        ctype = (request.headers.get("Content-Type") or "").lower()
+        if ctype.startswith("application/json"):
+            return await self._speak_path(request)
+        if ctype.startswith("audio/wav") or ctype.startswith("application/octet-stream"):
+            return await self._speak_bytes(request)
+        return web.json_response({"error": "unsupported content-type"}, status=400)
+
+    async def _speak_path(self, request):
+        """Pfad-Modus (localhost): Bot B besitzt die Datei, wir spielen sie nur ab."""
         try:
             data = await request.json()
         except Exception:
@@ -76,6 +113,42 @@ class DMBridge(commands.Cog):
                 logger.exception(f"[DMBridge] Fehler beim Abspielen von {path}")
                 return web.json_response({"error": "playback failed"}, status=500)
         return web.json_response({"status": "played", "path": path})
+
+    async def _speak_bytes(self, request):
+        """Byte-Modus (getrennte Maschinen): WAV-Bytes empfangen, lokal abspielen, löschen."""
+        body = await request.read()
+        if not body:
+            return web.json_response({"error": "empty body"}, status=400)
+        if len(body) > _MAX_WAV_BYTES:
+            return web.json_response({"error": "file too large"}, status=413)
+
+        # Voice zuerst prüfen – spart das Schreiben auf Platte, wenn Bot A gar nicht im Voice ist.
+        vc = self._resolve_voice_client(request.headers.get("X-DM-Guild-Id"))
+        if vc is None or not vc.is_connected():
+            return web.json_response({"error": "not connected to voice"}, status=409)
+
+        fd, tmp = tempfile.mkstemp(prefix="dm_recv_", suffix=".wav", dir=tempfile.gettempdir())
+        os.close(fd)
+        try:
+            try:
+                with open(tmp, "wb") as fh:
+                    fh.write(body)
+            except OSError:
+                logger.exception("[DMBridge] Konnte empfangene WAV nicht schreiben")
+                return web.json_response({"error": "write failed"}, status=500)
+
+            async with self._speak_lock:
+                try:
+                    await self._play_file(vc, tmp)
+                except Exception:
+                    logger.exception("[DMBridge] Fehler beim Abspielen der empfangenen WAV")
+                    return web.json_response({"error": "playback failed"}, status=500)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return web.json_response({"status": "played"})
 
     # -------------------------------------------------------------- Internals
 
