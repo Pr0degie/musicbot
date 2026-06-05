@@ -52,6 +52,9 @@ class RadioMixin:
         if self.prefetch_task and not self.prefetch_task.done():
             self.prefetch_task.cancel()
 
+        self._cancel_idle_timer()  # Falls ein Song gerade endete und der Idle-Timer lief
+        self._stopped_by_user = False
+
         self.radio_stream_url = url
         self.radio_station_name = name
         self.is_radio = True

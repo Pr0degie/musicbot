@@ -49,6 +49,7 @@ class _ColorFormatter(logging.Formatter):
         "play_next":         "\033[2m",
         "Auto-Leave":        "\033[2m",
         "Score":             "\033[2m",
+        "Voice":             "\033[2m",  # dim – Reconnect/Watchdog-Hinweise unaufdringlich
     }
 
     _GRAY = "\033[90m"
@@ -132,6 +133,29 @@ logging.getLogger("discord").setLevel(logging.WARNING)
 logging.getLogger("discord.http").setLevel(logging.WARNING)
 # logging.getLogger("discord").setLevel(logging.DEBUG)
 # logging.getLogger("discord.http").setLevel(logging.DEBUG)
+# ---------------------------------------------------------------------------
+
+# Voice-Reconnect-Dämpfung: Discord wirft stille Voice-Verbindungen mit Code
+# 1006 weg; discord.py reconnectet automatisch, loggt das aber als ERROR samt
+# vollem Traceback. Das ist erwartetes Verhalten – wir reduzieren es auf eine
+# ruhige INFO-Zeile ohne Traceback, statt jedes Mal einen roten Stacktrace.
+
+
+class _VoiceReconnectFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        if "Reconnecting" in msg or "1006" in msg or "ConnectionClosed" in msg:
+            record.exc_info = None
+            record.exc_text = None
+            if record.levelno >= logging.ERROR:
+                record.levelno = logging.INFO
+                record.levelname = "INFO"
+                record.msg = "[Voice] Verbindung kurz unterbrochen (idle) – reconnecte automatisch."
+                record.args = ()
+        return True
+
+
+logging.getLogger("discord.voice_state").addFilter(_VoiceReconnectFilter())
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger("DiscordMusicBot")

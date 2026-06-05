@@ -16,7 +16,7 @@ import discord
 import psutil
 from utils.logger import logger
 from utils.i18n import t
-from discord.ext import commands
+from discord.ext import commands, tasks
 from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
@@ -39,6 +39,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
     HARD_PLAYLIST_LIMIT = 150
     # Sekunden ohne User im Channel bevor der Bot den Channel verlässt.
     AUTO_LEAVE_SECONDS = 300
+    # Sekunden ohne Wiedergabe (Queue leer, kein Autoplay) bevor der Bot den
+    # Channel verlässt. 2 Stunden – der Bot bleibt lange verfügbar und räumt
+    # sich erst danach selbst auf.
+    IDLE_LEAVE_SECONDS = 7200
 
     def __init__(self, bot):
         self.bot = bot
@@ -56,6 +60,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self._recently_played: deque = deque(maxlen=15)       # URLs der zuletzt gespielten Songs
         self._recently_played_titles: deque = deque(maxlen=15)  # normalisierte Titel (Subset-Duplikat-Check)
         self.auto_leave_task = None # Timer: verlässt Channel wenn alle User weg sind
+        self.idle_leave_task = None # Timer: verlässt Channel nach langer Stille (gegen 1006)
+        self._last_ctx = None       # Letzter Wiedergabe-Kontext – für Reconnect-Watchdog
+        self._stuck_ticks = 0       # Aufeinanderfolgende Watchdog-Ticks im Hänge-Zustand
+        self._stopped_by_user = False  # True nach !stop/!x – unterdrückt den Watchdog-Restart
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
         self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
@@ -106,6 +114,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
     async def cog_load(self):
         asyncio.create_task(self.dl.warmup())
+        self._voice_watchdog.start()
+
+    async def cog_unload(self):
+        self._voice_watchdog.cancel()
+        if self.idle_leave_task and not self.idle_leave_task.done():
+            self.idle_leave_task.cancel()
 
     def update_ydl(self):
         """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
@@ -279,6 +293,76 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 await self.text_channel.send(t("misc.auto_leave"))
             logger.info("[Auto-Leave] Channel verlassen – keine User mehr.")
 
+    def _cancel_idle_timer(self):
+        """Stoppt den Idle-Timer – aufgerufen sobald wieder Audio läuft."""
+        if self.idle_leave_task and not self.idle_leave_task.done():
+            self.idle_leave_task.cancel()
+        self.idle_leave_task = None
+
+    def _start_idle_timer(self, voice_client):
+        """(Re)startet den Idle-Timer. Bei anhaltender Stille verlässt der Bot
+        später den Channel, damit Discord die Verbindung nicht mit 1006 dropt."""
+        self._cancel_idle_timer()
+        self.idle_leave_task = asyncio.create_task(self._idle_leave(voice_client))
+
+    async def _idle_leave(self, voice_client):
+        """Verlässt den Channel nach IDLE_LEAVE_SECONDS ohne Wiedergabe."""
+        await asyncio.sleep(self.IDLE_LEAVE_SECONDS)
+        # Nur gehen wenn wirklich noch nichts läuft (Autoplay/neuer Song hätte
+        # den Timer längst via _cancel_idle_timer abgeräumt – doppelte Sicherung).
+        if (
+            voice_client.is_connected()
+            and not self.is_radio
+            and not voice_client.is_playing()
+            and not voice_client.is_paused()
+        ):
+            self.queue.clear()
+            self.is_playing = False
+            self.current_track = None
+            await voice_client.disconnect()
+            if self.text_channel:
+                await self.text_channel.send(t("misc.idle_leave"))
+            logger.info("[Auto-Leave] Channel verlassen – zu lange inaktiv (Idle).")
+
+    @tasks.loop(seconds=30)
+    async def _voice_watchdog(self):
+        """Sicherheitsnetz gegen den 1006-Reconnect-Bug.
+
+        Wenn Discord die Voice-Verbindung während eines Songs dropt (Code 1006),
+        reconnectet discord.py automatisch – aber die Wiedergabe bleibt manchmal
+        stehen (Queue voll, doch is_playing False). Hängt dieser Zustand über
+        zwei Ticks (~60 s) an, wird der nächste Song neu gestartet. Zwei Ticks,
+        damit normale Track-Übergänge (Sekundenbereich) nicht fälschlich greifen.
+        """
+        ctx = self._last_ctx
+        vc = ctx.voice_client if ctx else None
+        stuck = (
+            vc is not None
+            and vc.is_connected()
+            and not self.is_radio
+            and bool(self.queue)
+            and not self.is_playing
+            and not vc.is_playing()
+            and not vc.is_paused()
+            and not self._stopped_by_user
+            and self._playback_done.is_set()
+        )
+        if not stuck:
+            self._stuck_ticks = 0
+            return
+        self._stuck_ticks += 1
+        if self._stuck_ticks >= 2:
+            self._stuck_ticks = 0
+            logger.info("[Voice] Wiedergabe nach Reconnect hängen geblieben – setze fort.")
+            try:
+                await self.play_next(ctx)
+            except Exception as e:
+                logger.warning(f"[Voice] Watchdog-Restart fehlgeschlagen: {e}")
+
+    @_voice_watchdog.before_loop
+    async def _before_voice_watchdog(self):
+        await self.bot.wait_until_ready()
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         """Startet den Auto-Leave-Timer wenn alle User den Channel verlassen haben."""
@@ -321,6 +405,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if self.current_track:
                 self.last_played = self.current_track
             self.current_track = None
+            # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
+            # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
+            # die stille Verbindung mit Code 1006 wegwirft. Startet ein neuer
+            # Song (auch via Autoplay), räumt _cancel_idle_timer den Timer ab.
+            if ctx.voice_client:
+                self._start_idle_timer(ctx.voice_client)
             # Autoplay rettet die Stille – aber nur wenn gewünscht.
             if self.autoplay_enabled:
                 # Wenn der Prefetch-Task noch läuft, kurz warten – er hat den Song
@@ -454,6 +544,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 return
 
             self._playback_done.clear()
+            self._cancel_idle_timer()   # Audio läuft wieder → Idle-Timer weg
+            self._last_ctx = ctx        # Kontext für den Reconnect-Watchdog merken
+            self._stuck_ticks = 0
+            self._stopped_by_user = False
             self.track_start_time = time.monotonic()
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
@@ -738,6 +832,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await ctx.send(t("status.radio_stopped"))
         elif ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             self.is_playing = False
+            self._stopped_by_user = True   # Watchdog soll hier nicht von selbst neu starten
             ctx.voice_client.stop()
             await ctx.send(t("status.playback_stopped"))
         else:
@@ -873,6 +968,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             # is_playing muss hier auf False, damit !resume und !p
             # erkennen, dass gerade nichts aktiv abgespielt wird.
             self.is_playing = False
+            self._stopped_by_user = True   # Pause ist gewollt – Watchdog nicht eingreifen
         else:
             await ctx.send(t("error.no_song_playing"))
 
