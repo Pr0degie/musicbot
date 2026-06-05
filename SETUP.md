@@ -75,6 +75,51 @@ Cookies last roughly 1–3 months. When YouTube starts blocking again:
 2. Upload via SCP
 3. Run `!reloadcookies` in Discord — reloads without restarting the bot
 
+### Troubleshooting: Browser cookie extraction (`YDL_BROWSER`)
+
+`cookiesfrombrowser` reads the cookie DB directly from a locally installed
+browser. It's convenient for local dev but fragile — recommended only as a
+fallback. If it fails, prefer the **`cookies.txt` route** below.
+
+**`ERROR: Could not copy Chrome cookie database` (yt-dlp [#7271](https://github.com/yt-dlp/yt-dlp/issues/7271))**
+
+Two causes:
+
+1. **Chrome is still running** → the cookie DB is locked. Close Chrome
+   *completely*, including background processes (system tray / `taskkill /F /IM
+   chrome.exe` on Windows), then restart the bot.
+2. **Chrome ≥ 127 (Windows): app-bound encryption** → cookies are encrypted so
+   yt-dlp can't read them *even with Chrome closed*. There is no reliable fix
+   for direct extraction — use the `cookies.txt` route below.
+
+**Firefox extraction also fails (`could not find ... cookies database` / empty cookies)**
+
+Usually one of:
+
+- Not actually logged into YouTube in that Firefox profile.
+- Multiple profiles — yt-dlp picks the default, which may not be the logged-in
+  one. Target a specific profile: `YDL_BROWSER=firefox:<ProfileName>` (find it
+  via `about:profiles`), e.g. `firefox:default-release`.
+- Snap/Flatpak Firefox (Linux) stores the profile in a non-standard path
+  yt-dlp can't locate → use the `cookies.txt` route.
+
+### Recommended fallback: export `cookies.txt` (browser-independent)
+
+Bypasses browser extraction entirely — works regardless of Chrome/Firefox
+update breakage, and even while the browser is open:
+
+1. Install the browser extension **"Get cookies.txt LOCALLY"**, open
+   `youtube.com` while logged in, export `cookies.txt`.
+2. In `.env` (this takes priority over `YDL_BROWSER`, so the browser is never
+   touched):
+   ```
+   YDL_COOKIES_FILE=C:\path\to\cookies.txt
+   ```
+3. Run `!reloadcookies` in Discord — no restart needed.
+
+> Mind a security note: `cookies.txt` contains your YouTube login session.
+> Don't commit it or share it — keep it local / out of git (`.gitignore`).
+
 ### EJS Signature Solver
 
 yt-dlp requires Node.js in PATH and `yt-dlp[default]` for YouTube signature challenges:
