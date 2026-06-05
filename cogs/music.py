@@ -397,6 +397,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if self.is_radio:
             logger.info("[play_next] Radio aktiv – play_next übersprungen.")
             return
+        # DM-Bridge spricht gerade → den Voice-Client NICHT mit dem nächsten Track besetzen.
+        # Sonst kollidiert unser vc.play() mit dem der Bridge ("Already playing audio."): ein
+        # Track-Ende (natürlich oder durch das vc.stop() der Bridge) würde hier sofort den
+        # nächsten Song starten. Das Flag setzt/löscht dm_bridge.py um die /speak-Wiedergabe.
+        if getattr(self.bot, "dm_speaking", False):
+            logger.info("[play_next] DM spricht – Auto-Advance unterdrückt.")
+            return
         if not self.queue:
             logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
             self.is_playing = False
@@ -539,6 +546,15 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
             if not ctx.voice_client or not ctx.voice_client.is_connected():
                 logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
+                self.is_playing = False
+                self.queue.appendleft((url, title))
+                return
+
+            # Zweite dm_speaking-Prüfung: Das Auflösen oben (await _resolve_track) kann ein
+            # Netzwerk-Call sein – in diesem Fenster könnte die DM-Bridge den Voice-Client
+            # übernommen haben. Track zurück an den Anfang der Queue, nicht überspielen.
+            if getattr(self.bot, "dm_speaking", False):
+                logger.info("[play_next] DM spricht – Track zurückgestellt statt überspielt.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
                 return

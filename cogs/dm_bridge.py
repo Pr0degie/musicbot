@@ -164,23 +164,32 @@ class DMBridge(commands.Cog):
 
     async def _play_file(self, vc, path):
         """Spielt eine Datei ab und wartet bis zum Ende (Muster wie _play_radio_stream)."""
-        # Im DM-Modus soll keine Musik parallel laufen. Falls doch etwas spielt
-        # oder pausiert ist, wird es gestoppt (DM-Session läuft mit leerer Queue).
-        if vc.is_playing() or vc.is_paused():
-            vc.stop()
-            await asyncio.sleep(0.2)
+        # dm_speaking signalisiert dem Music-Cog, dass wir gerade den Voice-Client besitzen:
+        # sein after_playing-Callback ruft sonst bei JEDEM Track-Ende (auch dem durch vc.stop()
+        # unten ausgelösten) play_next → vc.play(nächster Track) auf und besetzt den Client wieder
+        # bevor wir unsere WAV starten → "Already playing audio.". Das Flag lässt play_next bei
+        # Aktivierung sofort aussteigen. finally: nie hängen lassen, sonst läuft nie wieder Musik.
+        self.bot.dm_speaking = True
+        try:
+            # Im DM-Modus soll keine Musik parallel laufen. Falls doch etwas spielt
+            # oder pausiert ist, wird es gestoppt (DM-Session läuft mit leerer Queue).
+            if vc.is_playing() or vc.is_paused():
+                vc.stop()
+                await asyncio.sleep(0.2)  # Event-Loop-Fenster: das unterdrückte play_next läuft hier
 
-        done = asyncio.Event()
-        loop = self.bot.loop
+            done = asyncio.Event()
+            loop = self.bot.loop
 
-        def after(error):
-            if error:
-                logger.warning(f"[DMBridge] Wiedergabefehler: {error}")
-            loop.call_soon_threadsafe(done.set)
+            def after(error):
+                if error:
+                    logger.warning(f"[DMBridge] Wiedergabefehler: {error}")
+                loop.call_soon_threadsafe(done.set)
 
-        source = discord.FFmpegOpusAudio(path, options="-vn")
-        vc.play(source, after=after)
-        await done.wait()
+            source = discord.FFmpegOpusAudio(path, options="-vn")
+            vc.play(source, after=after)
+            await done.wait()
+        finally:
+            self.bot.dm_speaking = False
 
     # -------------------------------------------------------------- Befehle
 
