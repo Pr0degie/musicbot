@@ -24,6 +24,7 @@ class MusicControlView(View):
     async def pause(self, interaction: discord.Interaction, button: Button):
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.pause()
+            self.music_cog._mark_paused()   # Fortschrittsbalken einfrieren
             # is_playing syncen, damit !resume und !p den richtigen Zustand sehen.
             self.music_cog.is_playing = False
             await interaction.response.send_message(t("status.paused_eph"), ephemeral=True)
@@ -34,6 +35,7 @@ class MusicControlView(View):
     async def resume(self, interaction: discord.Interaction, button: Button):
         if self.ctx.voice_client and self.ctx.voice_client.is_paused():
             self.ctx.voice_client.resume()
+            self.music_cog._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
             self.music_cog.is_playing = True
             await interaction.response.send_message(t("status.resumed_eph"), ephemeral=True)
         elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:

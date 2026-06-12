@@ -66,7 +66,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self._stopped_by_user = False  # True nach !stop/!x – unterdrückt den Watchdog-Restart
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
+        self.now_playing_embed = None  # Embed-Referenz für Live-Edit des Fortschrittsbalkens
         self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
+        self._np_paused_total = 0.0   # aufsummierte Pausensekunden des aktuellen Songs
+        self._np_paused_at = None     # monotonic-Zeitstempel seit Pause-Beginn (None = läuft)
+        self._np_last_desc = None     # zuletzt gesetzte Balken-Zeile – spart redundante Edits
         self._skip_resolving = False  # Gesetzt von SearchAutoplayView wenn Alternative gewählt wird während resolve läuft
 
         # Standard-EQ und -Format beim Start
@@ -115,9 +119,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
     async def cog_load(self):
         asyncio.create_task(self.dl.warmup())
         self._voice_watchdog.start()
+        self._progress_loop.start()
 
     async def cog_unload(self):
         self._voice_watchdog.cancel()
+        self._progress_loop.cancel()
         if self.idle_leave_task and not self.idle_leave_task.done():
             self.idle_leave_task.cancel()
 
@@ -363,6 +369,66 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
     async def _before_voice_watchdog(self):
         await self.bot.wait_until_ready()
 
+    def _elapsed_seconds(self):
+        """Abgespielte Sekunden des aktuellen Songs, Pausen herausgerechnet."""
+        if self.track_start_time is None:
+            return None
+        now = time.monotonic()
+        paused = self._np_paused_total
+        if self._np_paused_at is not None:
+            paused += now - self._np_paused_at
+        return max(0.0, now - self.track_start_time - paused)
+
+    def _mark_paused(self):
+        """Pause-Beginn merken (idempotent), damit der Balken einfriert."""
+        if self._np_paused_at is None:
+            self._np_paused_at = time.monotonic()
+
+    def _mark_resumed(self):
+        """Pausendauer aufsummieren, damit der Balken nicht vorspringt."""
+        if self._np_paused_at is not None:
+            self._np_paused_total += time.monotonic() - self._np_paused_at
+            self._np_paused_at = None
+
+    @staticmethod
+    def _progress_bar(elapsed, total, length=11):
+        """'▬▬▬🔘▬▬▬▬ m:ss / m:ss' – None wenn Dauer unbekannt."""
+        if not total or total <= 0:
+            return None
+        frac = min(1.0, max(0.0, elapsed / total))
+        pos = int(frac * (length - 1))
+        bar = "▬" * pos + "🔘" + "▬" * (length - 1 - pos)
+        fmt = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"
+        return f"{bar} {fmt(elapsed)} / {fmt(total)}"
+
+    @tasks.loop(seconds=15)
+    async def _progress_loop(self):
+        """Aktualisiert den Fortschrittsbalken in der aktuellen Now-Playing-Nachricht."""
+        msg, embed = self.now_playing_msg, self.now_playing_embed
+        if not (msg and embed and self.current_track and self.is_radio is False):
+            return
+        duration = self.current_track[2]
+        elapsed = self._elapsed_seconds()
+        if elapsed is None:
+            return
+        bar = self._progress_bar(elapsed, duration)
+        if not bar:
+            return
+        if self._np_paused_at is not None:   # pausiert
+            bar = "⏸ " + bar
+        if bar == self._np_last_desc:        # nichts Neues → kein API-Call
+            return
+        embed.description = bar
+        try:
+            await msg.edit(embed=embed)      # view-Param weglassen → Buttons bleiben
+            self._np_last_desc = bar
+        except Exception:
+            pass
+
+    @_progress_loop.before_loop
+    async def _before_progress_loop(self):
+        await self.bot.wait_until_ready()
+
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
         """Startet den Auto-Leave-Timer wenn alle User den Channel verlassen haben."""
@@ -565,6 +631,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._stuck_ticks = 0
             self._stopped_by_user = False
             self.track_start_time = time.monotonic()
+            self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
+            self._np_paused_at = None
+            self._np_last_desc = None
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
             if self.now_playing_msg:
@@ -583,6 +652,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             else:
                 embed_title = f"🎵 {title}"
             embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
+            _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
+            if _bar:
+                embed.description = _bar
             embed.set_thumbnail(url=info.get("thumbnail"))
             embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
             embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
@@ -590,6 +662,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if info.get("uploader"):
                 embed.set_footer(text=info.get("uploader"))
             self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
+            self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
             self.is_playing = True
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title, duration)
@@ -980,6 +1053,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """Pausiert die Wiedergabe und aktualisiert is_playing."""
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
+            self._mark_paused()   # Fortschrittsbalken einfrieren
             await ctx.send(t("status.paused"))
             # is_playing muss hier auf False, damit !resume und !p
             # erkennen, dass gerade nichts aktiv abgespielt wird.
@@ -993,6 +1067,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """Setzt die Wiedergabe fort. Startet auch, wenn is_playing False aber Queue voll ist."""
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
+            self._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
             await ctx.send(t("status.resumed"))
             self.is_playing = True
         elif not self.is_playing and self.queue:
