@@ -484,8 +484,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             # Song (auch via Autoplay), räumt _cancel_idle_timer den Timer ab.
             if ctx.voice_client:
                 self._start_idle_timer(ctx.voice_client)
-            # Autoplay rettet die Stille – aber nur wenn gewünscht.
-            if self.autoplay_enabled:
+            # Autoplay rettet die Stille – aber nur wenn gewünscht und nicht
+            # gerade vom User gestoppt (!stop/!clear). Sonst würde der after_playing-
+            # Callback nach einem !clear sofort den nächsten Song starten.
+            if self.autoplay_enabled and not self._stopped_by_user:
                 # Wenn der Prefetch-Task noch läuft, kurz warten – er hat den Song
                 # bereits heruntergeladen und hängt ihn gleich in die Queue.
                 if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
@@ -1273,8 +1275,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self.is_playing = False
         self.current_track = None
         self.loop_mode = None
+        self._stopped_by_user = True   # unterdrückt Auto-Advance/Autoplay im after_playing-Callback
         if self.prefetch_task and not self.prefetch_task.done():
             self.prefetch_task.cancel()
+        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+            self._autoplay_prefetch_task.cancel()   # darf die geleerte Queue nicht neu befüllen
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
         await ctx.send(t("status.cleared"))
