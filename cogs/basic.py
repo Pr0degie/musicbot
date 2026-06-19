@@ -16,8 +16,11 @@ class BasicCommands(commands.Cog):
 
     @commands.command(name="help", aliases=["h"])
     async def help_command(self, ctx):
-        """Listet alle verfügbaren Befehle auf."""
-        await ctx.send("```\n" + t("help.text") + "\n```")
+        """Listet alle verfügbaren Befehle auf – blätterbar auf mehreren Seiten."""
+        from views.help_view import HelpView
+
+        view = HelpView(ctx, t("help.text"))
+        view.message = await ctx.send(embed=view.build_embed(), view=view)
 
     @commands.command()
     async def ping(self, ctx):
