@@ -117,6 +117,8 @@
   "embed.format": "Format",
   "embed.status": "Status",
   "embed.radio_live": "🔴 Live",
+  "embed.help_title": "📖 Commands — Page {page}/{pages}",
+  "select.help_placeholder": "Choose a command …",
   "embed.queue_title": "📋 Queue — Page {page}/{pages}",
   "embed.queue_now": "▶ Now",
   "embed.queue_list": "Queue",
@@ -142,6 +144,8 @@
   "button.resume": "▶️ Resume",
   "button.skip": "⏭️ Skip",
   "button.autoplay": "🔁 Autoplay",
+  "button.loop": "🔂 Loop",
+  "modal.cmd_input_label": "Input",
 
   "misc.unknown": "Unknown",
   "misc.unknown_title": "Unknown title",
@@ -157,5 +161,5 @@
   "misc.auto_leave": "👋 Everyone's gone — I'll head out too. See you next time!",
   "misc.idle_leave": "💤 Nothing played for a while — leaving the channel. Call me back with !j.",
 
-  "help.text": "🎵 Music\n  !p <url/search>   – Play a song, playlist or search term\n  !next <url/search>   – Play next\n  !baba            – Play Baba playlist\n  !s               – Skip current song\n  !stop            – Stop playback (queue is kept)\n  !x               – Pause\n  !resume          – Resume playback\n  !now <search/url/n> – Play immediately (also queue position n)\n  !seek <time>     – Jump to position (!seek 1:23 or !seek 83)\n  !loop            – Loop mode: off → song → queue → off\n  !replay          – Replay last song\n  !text            – Show lyrics of the current song\n\n📜 Queue\n  !q               – Show queue\n  !shuffle         – Shuffle queue\n  !clear           – Clear queue & stop playback\n  !remove <n>      – Remove song at position n\n  !move <n|title>  – Move song to front (by position or title search)\n  !saveq <name>    – Save current queue under a name\n  !loadq <name>    – Load a saved queue & append it\n  !lists           – Show all saved queues\n  !score           – Top 10 most played songs\n\n🎚️ Audio\n  !eq <preset>     – Set EQ preset (no argument: list)\n                     Presets: bassboost, flat, vocalboost, superbass,\n                              punchy, nightcore, karaoke, 8d\n                     EQ change restarts the current song.\n  !format <type>   – Switch audio format: mp3 or webm\n\n🔁 Autoplay\n  Autoplay button   – Automatically plays a related track after each song.\n                     Press the button again to stop.\n\n📻 Radio\n  !radio            – Show station list\n  !radio <nr/name>  – Play station\n  !radio <URL> [name] – Play & save stream\n  !radio delete <nr/name> – Delete station\n  !radio rename <nr/name> <new name> – Rename station\n\n🔊 Voice\n  !j               – Join voice channel\n  !l               – Leave voice channel\n\n  !stats           – RAM, CPU, uptime and cache info\n  !reloadcookies   – Reload cookies.txt (after manual upload to server)\n  !restart         – Restart bot in new terminal (owner only)\n  !help / !        – This overview"
+  "help.text": "🎵 Music\n  !p <url/search>   – Play a song, playlist or search term\n  !next <url/search>   – Play next\n  !baba            – Play Baba playlist\n  !s               – Skip current song\n  !stop            – Stop playback (queue is kept)\n  !x               – Pause\n  !resume          – Resume playback\n  !now <search/url/n> – Play immediately (also queue position n)\n  !seek <time>     – Jump to position (!seek 1:23 or !seek 83)\n  !loop            – Loop mode: off → song → queue → off\n  !replay          – Replay last song\n  !text            – Show lyrics of the current song\n\n📜 Queue\n  !q               – Show queue\n  !shuffle         – Shuffle queue\n  !clear           – Clear queue & stop playback\n  !remove <n>      – Remove song at position n\n  !move <n|title>  – Move song to front (by position or title search)\n  !saveq <name>    – Save current queue under a name\n  !loadq <name>    – Load a saved queue & append it\n  !lists           – Show all saved queues\n  !score           – Top 10 most played songs\n\n🎚️ Audio\n  !eq <preset>     – Set EQ preset (no argument: list)\n                     Presets: bassboost, flat, vocalboost, superbass, punchy, nightcore, karaoke, 8d\n                     EQ change restarts the current song.\n  !format <type>   – Switch audio format: mp3 or webm\n\n🔁 Autoplay\n  Autoplay button   – Automatically plays a related track after each song.\n                     Press the button again to stop.\n\n📻 Radio\n  !radio            – Show station list\n  !radio <nr/name>  – Play station\n  !radio <URL> [name] – Play & save stream\n  !radio delete <nr/name> – Delete station\n  !radio rename <nr/name> <new name> – Rename station\n\n🔊 Voice\n  !j               – Join voice channel\n  !l               – Leave voice channel\n\n  !stats           – RAM, CPU, uptime and cache info\n  !reloadcookies   – Reload cookies.txt (after manual upload to server)\n  !restart         – Restart bot in new terminal (owner only)\n  !help / !        – This overview"
 }

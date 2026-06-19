@@ -94,6 +94,14 @@ class MusicControlView(View):
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
             asyncio.create_task(self.music_cog.autoplay(self.ctx))
 
+    @discord.ui.button(label=t("button.loop"), style=discord.ButtonStyle.secondary)
+    async def loop_toggle(self, interaction: discord.Interaction, button: Button):
+        """Schaltet den Loop-Modus durch: aus → Song → Queue → aus (wie !loop)."""
+        modes = [None, "song", "queue"]
+        self.music_cog.loop_mode = modes[(modes.index(self.music_cog.loop_mode) + 1) % len(modes)]
+        loop_keys = {None: "status.loop_off", "song": "status.loop_song", "queue": "status.loop_queue"}
+        await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
+
 
 class SearchAutoplayView(View):
     """Zeigt Alternativen zum automatisch gestarteten ersten Suchergebnis.

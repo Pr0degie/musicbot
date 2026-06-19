@@ -1,13 +1,16 @@
 # CLAUDE.md
 
-Setup → see `README.md`. No test suite or linter configured.
+Setup → see `README.md`. Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). No linter configured.
 
 ## Architecture
 
 Four cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
-- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`
+- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`. Radio/stats/queue-persistence commands are split into mixins — same instance state, registered as cog commands via the MRO:
+  - **`cogs/music_radio.py`** — `RadioMixin`: internet-radio streaming (`_play_radio_stream`, reconnect, `!radio`), `RADIO_STATIONS_FILE`
+  - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
+  - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!lists`, `PLAYLISTS_DIR`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`, `playlist_ydl`, `autoplay_ydl` — all via `self.dl.*`), `_url_cache`, `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`.
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET` in `config.py`) so a separate "Bot B" (AI dungeon master) can make this bot speak. Default `127.0.0.1` + empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for remote mode. `GET /health`, `POST /speak` in **two transport modes**: (1) JSON `{"path", "guild_id"?}` → path mode (shared disk, localhost); (2) body with `Content-Type: audio/wav` (or `application/octet-stream`) + optional `X-DM-Guild-Id` header → byte mode (WAV bytes written to a `tempfile`, auto-deleted after playback). Non-loopback requests must pass the secret via HMAC (`hmac.compare_digest`). Both modes play via `FFmpegOpusAudio` (same pattern as `_play_radio_stream`). `/speak` is **blocking** — the HTTP response is the only done-signal; `_speak_lock` serializes calls, stops running music first. The `bot.dm_speaking` flag tells the music cog it doesn't own the voice client right now: `play_next()` checks it and exits early so the `after_playing` callback can't restart music mid-DM-speech. `!dm` shows status. No callback back to Bot B by design — feedback-loop protection lives entirely in Bot B.
 - **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`, (3) autoplay on → `autoplay()`. `SearchAutoplayView`: first search result plays immediately, alternatives as buttons (30 s timeout).
@@ -65,13 +68,13 @@ Reference track: `current_track` → `last_played`. Autoplay stays on until butt
 
 `_autoplay_queued_url`: URL last added by autoplay; cleared when popped by `play_next` or evicted by `_evict_autoplay_song()`.
 
-`_recently_played`: `deque(maxlen=15)` of URLs. `_recently_played_titles`: `deque(maxlen=15)` of normalized titles (via `normalize_title()` from `downloader.py` — strips suffixes like "(Official Video)", special chars, lowercase, sorts words alphabetically — so "AHA Take on Me" and "Take on Me AHA" map to the same key). Autoplay filters candidates against both; falls back to filtering only `ref_url` if all candidates are in history.
+`_recently_played`: `deque(maxlen=15)` of URLs. `_recently_played_titles`: `deque(maxlen=15)` of normalized titles (via `normalize_title()` — defined in `utils/text.py` (dependency-free, unit-tested), re-exported from `downloader.py` — strips suffixes like "(Official Video)", special chars, lowercase, sorts words alphabetically — so "AHA Take on Me" and "Take on Me AHA" map to the same key). Autoplay filters candidates against both; falls back to filtering only `ref_url` if all candidates are in history.
 
 **`!p` with autoplay active** — `_evict_autoplay_song()` cancels prefetch, removes autoplay URL from queue, inserts new song at front (`appendleft`). Playlist additions evict but append at end.
 
 ### Radio
 
-`RADIO_STATIONS_FILE` = `radio_stations.json` (key → `{name, url}`).
+Radio code lives in `cogs/music_radio.py` (`RadioMixin`). `RADIO_STATIONS_FILE` = `radio_stations.json` (key → `{name, url}`).
 State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
 `_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error.
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
