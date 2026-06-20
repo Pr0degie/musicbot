@@ -96,10 +96,9 @@ class MusicControlView(View):
 
     @discord.ui.button(label=t("button.loop"), style=discord.ButtonStyle.secondary)
     async def loop_toggle(self, interaction: discord.Interaction, button: Button):
-        """Schaltet den Loop-Modus durch: aus → Song → Queue → aus (wie !loop)."""
-        modes = [None, "song", "queue"]
-        self.music_cog.loop_mode = modes[(modes.index(self.music_cog.loop_mode) + 1) % len(modes)]
-        loop_keys = {None: "status.loop_off", "song": "status.loop_song", "queue": "status.loop_queue"}
+        """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
+        self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
+        loop_keys = {None: "status.loop_off", "song": "status.loop_song"}
         await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
 
 

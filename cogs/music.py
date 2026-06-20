@@ -662,33 +662,53 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._np_last_desc = None
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")
-            if self.now_playing_msg:
-                try:
-                    prev_title = self.current_track[1] if self.current_track else None
-                    prev_text = f"🎶 {prev_title}" if prev_title else None
-                    await self.now_playing_msg.edit(content=prev_text, embed=None, view=None)
-                except Exception:
-                    pass
-            duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
-            if " - " in title:
-                _artist, _song = title.split(" - ", 1)
-                embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
-            elif info.get("uploader"):
-                embed_title = f"🎵 {title} – {info.get('uploader')}"
+            # Loop-"Song": Derselbe Song läuft erneut → keine neue "Jetzt läuft"-Nachricht
+            # posten. Die bestehende Nachricht (samt Buttons) bleibt stehen, wir setzen nur
+            # den Fortschrittsbalken auf 0:00 zurück – der Song hat sich ja nicht geändert.
+            is_loop_repeat = (
+                self.loop_mode == "song"
+                and self.now_playing_msg is not None
+                and self.now_playing_embed is not None
+                and self.current_track is not None
+                and self.current_track[0] == url
+            )
+            if is_loop_repeat:
+                _bar = self._progress_bar(0, duration)
+                if _bar and _bar != self._np_last_desc:
+                    self.now_playing_embed.description = _bar
+                    self._np_last_desc = _bar
+                    try:
+                        await self.now_playing_msg.edit(embed=self.now_playing_embed)
+                    except Exception:
+                        pass
             else:
-                embed_title = f"🎵 {title}"
-            embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
-            _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
-            if _bar:
-                embed.description = _bar
-            embed.set_thumbnail(url=info.get("thumbnail"))
-            embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
-            embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-            embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
-            if info.get("uploader"):
-                embed.set_footer(text=info.get("uploader"))
-            self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
-            self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
+                if self.now_playing_msg:
+                    try:
+                        prev_title = self.current_track[1] if self.current_track else None
+                        prev_text = f"🎶 {prev_title}" if prev_title else None
+                        await self.now_playing_msg.edit(content=prev_text, embed=None, view=None)
+                    except Exception:
+                        pass
+                duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
+                if " - " in title:
+                    _artist, _song = title.split(" - ", 1)
+                    embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
+                elif info.get("uploader"):
+                    embed_title = f"🎵 {title} – {info.get('uploader')}"
+                else:
+                    embed_title = f"🎵 {title}"
+                embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
+                _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
+                if _bar:
+                    embed.description = _bar
+                embed.set_thumbnail(url=info.get("thumbnail"))
+                embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
+                embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
+                embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
+                if info.get("uploader"):
+                    embed.set_footer(text=info.get("uploader"))
+                self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
+                self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
             self.is_playing = True
             self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
             self.current_track = (url, title, duration)
