@@ -391,7 +391,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._np_paused_at = None
 
     @staticmethod
-    def _progress_bar(elapsed, total, length=11):
+    def _progress_bar(elapsed, total, length=21):
         """'▬▬▬🔘▬▬▬▬ m:ss / m:ss' – None wenn Dauer unbekannt."""
         if not total or total <= 0:
             return None
@@ -401,7 +401,27 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         fmt = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"
         return f"{bar} {fmt(elapsed)} / {fmt(total)}"
 
-    @tasks.loop(seconds=15)
+    async def _finalize_progress_bar(self):
+        """Setzt Balken + Dauer der aktuellen Nachricht ans Ende (100 %).
+
+        Wird beim natürlichen Songende aufgerufen, damit die Anzeige nicht bei
+        z. B. '3:43 / 3:45' einfriert, sondern auf '🔘 ganz rechts, 3:45 / 3:45' springt.
+        """
+        msg, embed = self.now_playing_msg, self.now_playing_embed
+        if not (msg and embed and self.current_track):
+            return
+        duration = self.current_track[2]
+        bar = self._progress_bar(duration, duration)   # elapsed == total → 🔘 ganz rechts
+        if not bar or bar == self._np_last_desc:
+            return
+        embed.description = bar
+        try:
+            await msg.edit(embed=embed)
+            self._np_last_desc = bar
+        except Exception:
+            pass
+
+    @tasks.loop(seconds=2)
     async def _progress_loop(self):
         """Aktualisiert den Fortschrittsbalken in der aktuellen Now-Playing-Nachricht."""
         msg, embed = self.now_playing_msg, self.now_playing_embed
@@ -477,6 +497,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             # damit autoplay() noch weiß was zuletzt lief.
             if self.current_track:
                 self.last_played = self.current_track
+                # Song lief natürlich zu Ende (kein !stop/!clear) → Fortschritt ans Ende setzen,
+                # damit Balken und Dauer nicht unvollständig einfrieren.
+                if not self._stopped_by_user:
+                    await self._finalize_progress_bar()
             self.current_track = None
             # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
             # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
