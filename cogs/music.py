@@ -5,6 +5,7 @@ import asyncio
 import json
 import random
 import re
+import shlex
 import tempfile
 import time
 import urllib.parse
@@ -518,6 +519,23 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         return await self.dl.resolve_track(url, title, self.prefetch_task)
 
     @staticmethod
+    def _ffmpeg_header_opts(info) -> str:
+        """-headers-Option für FFmpeg aus dem yt_dlp-Info-Dict.
+
+        yt_dlp hat die Stream-URL mit genau diesen Headern (User-Agent & Co.)
+        angefragt – ohne sie lehnen googlevideo-CDN-Server Anfragen sporadisch
+        mit 403 ab. shlex.quote reicht als Quoting, weil discord.py
+        before_options mit shlex.split zerlegt (kein Shell-Aufruf); die
+        \\r\\n-getrennte Header-Liste ist dasselbe Format, das yt_dlp selbst
+        an FFmpeg übergibt.
+        """
+        headers = (info.get("http_headers") or {}) if info else {}
+        if not headers:
+            return ""
+        blob = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
+        return f"-headers {shlex.quote(blob)}"
+
+    @staticmethod
     def _stderr_tail(buf, max_lines: int = 20) -> str:
         """Liest die letzten Zeilen aus dem FFmpeg-stderr-Puffer und schließt ihn."""
         if buf is None:
@@ -677,8 +695,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
 
             if is_stream:
-                _reconnect = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-                before_opts = f"{_reconnect} -ss {seek_offset}" if seek_offset else _reconnect
+                _parts = ["-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"]
+                _headers = self._ffmpeg_header_opts(info)
+                if _headers:
+                    _parts.append(_headers)
+                if seek_offset:
+                    _parts.append(f"-ss {seek_offset}")
+                before_opts = " ".join(_parts)
             else:
                 before_opts = f"-ss {seek_offset}" if seek_offset else None
 

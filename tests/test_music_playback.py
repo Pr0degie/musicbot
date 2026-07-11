@@ -93,12 +93,15 @@ class FakeDownloader:
         pass
 
 
-def make_fake_source(stderr_bytes=b""):
+def make_fake_source(stderr_bytes=b"", calls=None):
     """Ersatz für discord.FFmpegOpusAudio: startet keinen Prozess, schreibt
-    optional vorgegebene stderr-Zeilen in den übergebenen Puffer."""
+    optional vorgegebene stderr-Zeilen in den übergebenen Puffer und
+    protokolliert die Konstruktor-Argumente in `calls`."""
 
     class _FakeSource:
         def __init__(self, source, *args, **kwargs):
+            if calls is not None:
+                calls.append((source, kwargs))
             buf = kwargs.get("stderr")
             if buf is not None and stderr_bytes:
                 buf.write(stderr_bytes)
@@ -217,9 +220,11 @@ def test_race_track_dies_before_now_playing_send(monkeypatch, tmp_path):
 
 
 def test_normal_playback_sets_state_before_play(monkeypatch, tmp_path):
-    """Normalfall: Zustand steht schon beim vc.play(), Nachricht wird registriert."""
+    """Normalfall: Zustand steht schon beim vc.play(), Nachricht wird registriert,
+    Stream-Pfad reicht die yt_dlp-HTTP-Header an FFmpeg durch."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+    source_calls = []
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source(calls=source_calls))
 
     async def run():
         url = "https://www.youtube.com/watch?v=test"
@@ -237,9 +242,32 @@ def test_normal_playback_sets_state_before_play(monkeypatch, tmp_path):
         assert mc.now_playing_msg is ctx.messages[-1]
         assert mc._play_counts == {url: 1}
 
+        # Stream-Pfad: -headers mit den Headern aus dem Info-Dict
+        before = source_calls[0][1].get("before_options", "")
+        assert "-reconnect 1" in before
+        assert "-headers" in before
+        assert "UA-Test" in before
+
         _cleanup(mc)
 
     asyncio.run(run())
+
+
+def test_ffmpeg_header_opts_roundtrip():
+    """Das Quoting muss shlex.split (so zerlegt discord.py before_options) überleben."""
+    import shlex
+
+    opts = MusicCommands._ffmpeg_header_opts(
+        {"http_headers": {"User-Agent": "UA Test 1.0", "Accept": "*/*"}}
+    )
+    parts = shlex.split(opts)
+    assert parts[0] == "-headers"
+    assert "User-Agent: UA Test 1.0\r\n" in parts[1]
+    assert "Accept: */*\r\n" in parts[1]
+
+    assert MusicCommands._ffmpeg_header_opts({}) == ""
+    assert MusicCommands._ffmpeg_header_opts(None) == ""
+    assert MusicCommands._ffmpeg_header_opts({"http_headers": {}}) == ""
 
 
 def test_progress_bar_clamps_elapsed_beyond_total():
