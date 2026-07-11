@@ -16,6 +16,16 @@ PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _is_valid_playlist(tracks) -> bool:
+    """saveq-Format: Liste von [url, titel]-Paaren, beides Strings."""
+    return isinstance(tracks, list) and all(
+        isinstance(entry, list)
+        and len(entry) == 2
+        and all(isinstance(part, str) for part in entry)
+        for entry in tracks
+    )
+
+
 class QueuePersistenceMixin:
     @commands.command(name="saveq", usage="!saveq <name>")
     async def saveq(self, ctx, *, name: str):
@@ -45,8 +55,18 @@ class QueuePersistenceMixin:
         if not path.exists():
             await ctx.send(t("error.queue_not_found", name=safe_name))
             return
-        with open(path, encoding="utf-8") as f:
-            tracks = json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                tracks = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            await ctx.send(t("error.playlist_invalid", name=safe_name))
+            return
+        if not _is_valid_playlist(tracks):
+            await ctx.send(t("error.playlist_invalid", name=safe_name))
+            return
+        if len(tracks) > self.HARD_PLAYLIST_LIMIT:
+            await ctx.send(t("error.playlist_too_large", name=safe_name, limit=self.HARD_PLAYLIST_LIMIT))
+            return
         for url, title in tracks:
             self.queue.append((url, title))
         await ctx.send(t("status.queue_loaded", name=safe_name, count=len(tracks)))

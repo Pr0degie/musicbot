@@ -90,6 +90,7 @@ Alle einschränkenden Änderungen hängen an `.env`-Flags, deren **Default das a
 - **`REQUIRE_SAME_VOICE`** = `false` (Default) | `true` — Wiedergabe-steuernde Commands (`!s`, `!stop`, `!clear`, `!eq`, `!seek`, `!now`, `!remove`, `!move`, `!shuffle`) erfordern denselben Voice-Channel wie der Bot (`utils/checks.py` → `require_same_voice()`). Bot nicht in Voice → kein Check.
 - **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` (inline `check_admin()`), `!reloadcookies`, `!format` nur für diese Rolle oder den Owner.
 - **Owner-Garantie:** `is_owner()` gewinnt in beiden Checks immer — der Owner kann sich durch keine Flag-Kombination aussperren. Check-Fehlermeldungen kommen via i18n aus dem Check selbst; die `CheckFailure` schluckt `on_command_error` still. Checks greifen nicht in Tests, die Commands über `.callback` aufrufen.
+- **`!loadq`** validiert ohne Flag (nur Fehlerpfad geändert): Datei muss Liste von `[url, titel]`-String-Paaren sein (`_is_valid_playlist` in `music_queue_io.py`), max. `HARD_PLAYLIST_LIMIT` Einträge — sonst i18n-Fehlermeldung statt Traceback. Valide saveq-Dateien laden unverändert.
 
 ### Key Bot Commands
 
