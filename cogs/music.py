@@ -72,6 +72,15 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self._np_paused_at = None     # monotonic-Zeitstempel seit Pause-Beginn (None = läuft)
         self._np_last_desc = None     # zuletzt gesetzte Balken-Zeile – spart redundante Edits
         self._skip_resolving = False  # Gesetzt von SearchAutoplayView wenn Alternative gewählt wird während resolve läuft
+        # Generationszähler gegen Race-Zuweisungen: Stirbt ein Track schneller als die
+        # awaits im Post-Play-Teil von play_next, läuft der Leere-Queue-Cleanup zuerst –
+        # späte Zuweisungen des toten Durchlaufs würden ihn sonst überschreiben (der
+        # _progress_loop editiert dann endlos eine tote Nachricht → Discord-429).
+        self._track_generation = 0
+        # (msg, title) der letzten Now-Playing-Nachricht nach Queue-Ende: Referenzen für
+        # den _progress_loop werden im Cleanup gekappt, aber die Buttons der Nachricht
+        # sollen erst beim nächsten Track entfernt werden (Resume/Autoplay bleiben nutzbar).
+        self._ended_np = None
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -482,6 +491,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if self.is_radio:
             logger.info("[play_next] Radio aktiv – play_next übersprungen.")
+            # Radio hat die Musik gestoppt → ausstehende Post-Play-Zuweisungen des
+            # unterbrochenen Tracks entwerten (gleicher Race-Typ wie unten im Cleanup).
+            self._track_generation += 1
             return
         # DM-Bridge spricht gerade → den Voice-Client NICHT mit dem nächsten Track besetzen.
         # Sonst kollidiert unser vc.play() mit dem der Bridge ("Already playing audio."): ein
@@ -489,10 +501,16 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # nächsten Song starten. Das Flag setzt/löscht dm_bridge.py um die /speak-Wiedergabe.
         if getattr(self.bot, "dm_speaking", False):
             logger.info("[play_next] DM spricht – Auto-Advance unterdrückt.")
+            # Auch hier: Die Bridge hat die Musik gestoppt – hängende awaits des
+            # unterbrochenen Durchlaufs dürfen keinen Zustand mehr schreiben.
+            self._track_generation += 1
             return
         if not self.queue:
             logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
             self.is_playing = False
+            # Cleanup entwertet alle noch hängenden Post-Play-awaits des gerade
+            # gestorbenen Tracks – sonst überschreiben sie die Aufräumarbeit unten.
+            self._track_generation += 1
             # current_track als last_played sichern bevor es gecleant wird,
             # damit autoplay() noch weiß was zuletzt lief.
             if self.current_track:
@@ -502,6 +520,18 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 if not self._stopped_by_user:
                     await self._finalize_progress_bar()
             self.current_track = None
+            # Referenzen kappen, damit _progress_loop/_finalize_progress_bar die tote
+            # Nachricht nie wieder anfassen. Die Nachricht selbst wird gemerkt, damit
+            # der nächste Track ihre Buttons entfernen kann (nur der aktuelle Song
+            # behält Buttons) – bis dahin bleiben Resume/Autoplay darauf klickbar.
+            if self.now_playing_msg is not None:
+                self._ended_np = (
+                    self.now_playing_msg,
+                    self.last_played[1] if self.last_played else None,
+                )
+            self.now_playing_msg = None
+            self.now_playing_embed = None
+            self.track_start_time = None
             # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
             # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
             # die stille Verbindung mit Code 1006 wegwirft. Startet ein neuer
@@ -656,22 +686,41 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._last_ctx = ctx        # Kontext für den Reconnect-Watchdog merken
             self._stuck_ticks = 0
             self._stopped_by_user = False
-            self.track_start_time = time.monotonic()
-            self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
-            self._np_paused_at = None
-            self._np_last_desc = None
-            ctx.voice_client.play(source, after=after_playing)
-            logger.info(f"[Wiedergabe] Starte: {title}")
+
             # Loop-"Song": Derselbe Song läuft erneut → keine neue "Jetzt läuft"-Nachricht
             # posten. Die bestehende Nachricht (samt Buttons) bleibt stehen, wir setzen nur
             # den Fortschrittsbalken auf 0:00 zurück – der Song hat sich ja nicht geändert.
+            prev_track = self.current_track
             is_loop_repeat = (
                 self.loop_mode == "song"
                 and self.now_playing_msg is not None
                 and self.now_playing_embed is not None
-                and self.current_track is not None
-                and self.current_track[0] == url
+                and prev_track is not None
+                and prev_track[0] == url
             )
+
+            # Kompletten Track-Zustand VOR play() setzen – synchron, ohne await dazwischen.
+            # after_playing kann bei einem sofort sterbenden FFmpeg-Prozess feuern, bevor
+            # die awaits unten fertig sind; der Leere-Queue-Cleanup liefe dann zuerst und
+            # späte Zuweisungen hier würden ihn überschreiben (toter current_track →
+            # _progress_loop editiert die Nachricht endlos → Discord-429).
+            self._track_generation += 1
+            generation = self._track_generation
+            self.is_playing = True
+            self.last_played = prev_track  # vorherigen Song merken, bevor er überschrieben wird
+            self.current_track = (url, title, duration)
+            self.track_start_time = time.monotonic()
+            self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
+            self._np_paused_at = None
+            self._np_last_desc = None
+            self._recently_played.append(url)
+            self._recently_played_titles.append(normalize_title(title))
+            self._record_play(url, title)
+            self.text_channel = ctx.channel
+
+            ctx.voice_client.play(source, after=after_playing)
+            logger.info(f"[Wiedergabe] Starte: {title}")
+
             if is_loop_repeat:
                 _bar = self._progress_bar(0, duration)
                 if _bar and _bar != self._np_last_desc:
@@ -682,13 +731,26 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                     except Exception:
                         pass
             else:
+                # Alte Now-Playing-Nachricht auf reinen Text reduzieren – nur der aktuelle
+                # Song behält Buttons. Nach Queue-Ende liegt die Nachricht in _ended_np
+                # (der Cleanup hat now_playing_msg bereits gekappt).
+                old_msg, old_title = None, None
                 if self.now_playing_msg:
+                    old_msg = self.now_playing_msg
+                    old_title = prev_track[1] if prev_track else None
+                elif self._ended_np:
+                    old_msg, old_title = self._ended_np
+                self._ended_np = None
+                if old_msg:
                     try:
-                        prev_title = self.current_track[1] if self.current_track else None
-                        prev_text = f"🎶 {prev_title}" if prev_title else None
-                        await self.now_playing_msg.edit(content=prev_text, embed=None, view=None)
+                        prev_text = f"🎶 {old_title}" if old_title else None
+                        await old_msg.edit(content=prev_text, embed=None, view=None)
                     except Exception:
                         pass
+                    if generation != self._track_generation:
+                        # Track ist während des awaits gestorben, der Cleanup lief schon –
+                        # keinen Zustand des toten Durchlaufs mehr anfassen.
+                        return
                 duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
                 if " - " in title:
                     _artist, _song = title.split(" - ", 1)
@@ -707,15 +769,21 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
                 if info.get("uploader"):
                     embed.set_footer(text=info.get("uploader"))
-                self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
+                new_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
+                if generation != self._track_generation:
+                    # Track ist während des ctx.send gestorben und der Cleanup lief bereits:
+                    # Die frisch gesendete Nachricht NICHT als aktiv registrieren (sonst
+                    # editiert der _progress_loop sie endlos), nur ihre Buttons entfernen.
+                    try:
+                        await new_msg.edit(content=f"🎶 {title}", embed=None, view=None)
+                    except Exception:
+                        pass
+                    return
+                self.now_playing_msg = new_msg
                 self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
-            self.is_playing = True
-            self.last_played = self.current_track  # vorherigen Song merken, bevor er überschrieben wird
-            self.current_track = (url, title, duration)
-            self._recently_played.append(url)
-            self._recently_played_titles.append(normalize_title(title))
-            self._record_play(url, title)
-            self.text_channel = ctx.channel
+
+            if generation != self._track_generation:
+                return
 
             # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
             # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
