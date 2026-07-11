@@ -104,6 +104,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # genau EIN Neuversuch mit frischer URL). Verhindert Retry-Schleifen und
         # doppelte Play-Counts; wird bei normalem Track-Ende wieder gelöscht.
         self._stream_retry_url = None
+        # URL, die nach zwei toten Stream-Versuchen als letzter Anlauf lokal
+        # heruntergeladen wird (yt_dlp-eigener HTTP-Client statt FFmpeg – von
+        # CDN-403s gegen FFmpeg meist nicht betroffen). Lebenszyklus wie
+        # _stream_retry_url; beide zusammen begrenzen einen Track auf 3 Versuche.
+        self._force_download_url = None
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -560,12 +565,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 self.auto_leave_task.cancel()
                 self.auto_leave_task = None
 
-    async def _resolve_track(self, url: str, title: str):
+    async def _resolve_track(self, url: str, title: str, force_download: bool = False):
         """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
 
         Returns: (info, filename, title, duration)
         """
-        return await self.dl.resolve_track(url, title, self.prefetch_task)
+        return await self.dl.resolve_track(url, title, self.prefetch_task, force_download=force_download)
 
     @staticmethod
     def _ffmpeg_header_opts(info) -> str:
@@ -732,7 +737,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
         stderr_buf = None
         try:
-            info, filename, title, duration = await self._resolve_track(url, title)
+            # Dritter Anlauf nach zwei toten Stream-Versuchen → Download erzwingen.
+            force_download = url == self._force_download_url
+            info, filename, title, duration = await self._resolve_track(url, title, force_download=force_download)
 
             if self._skip_resolving:
                 self._skip_resolving = False
@@ -742,6 +749,20 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             eq_filter = self.eq_presets.get(self.equalizer, "")
             seek_offset, self._seek_offset = self._seek_offset, 0
             is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
+
+            if is_stream and force_download:
+                # Der Download-Fallback konnte keine lokale Datei liefern (>20-min-
+                # Tracks werden nie heruntergeladen) → aufgeben statt denselben
+                # Stream ein drittes Mal identisch scheitern zu lassen.
+                self._force_download_url = None
+                self._stream_retry_url = None
+                logger.warning(f"[Stream-Retry] Download-Fallback lieferte keine lokale Datei – gebe auf: {title}")
+                try:
+                    await ctx.send(t("error.stream_giveup", title=title))
+                except Exception:
+                    pass
+                asyncio.create_task(self.play_next(ctx))
+                return
 
             if is_stream:
                 _parts = ["-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"]
@@ -807,12 +828,14 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                             f"Aktives Preset: '{self.equalizer}'"
                         )
                 elif self._stream_retry_url == url:
-                    # Der Neuversuch lief normal durch → Retry-Sperre wieder aufheben.
+                    # Der Neuversuch lief normal durch → Retry-Sperren wieder aufheben.
                     self._stream_retry_url = None
+                    self._force_download_url = None
 
                 # Selbstheilung: Stream starb sofort an einem Input-Fehler (typisch:
                 # sporadisches 403 vom CDN) → genau EIN Neuversuch mit frisch
-                # extrahierter URL. Echte Filterfehler werden NICHT wiederholt.
+                # extrahierter URL, danach EIN letzter Anlauf als lokaler Download.
+                # Echte Filterfehler werden NICHT wiederholt.
                 retry_scheduled = False
                 if is_stream and elapsed < 1.0 and verdict == "input":
                     if self._stream_retry_url != url:
@@ -825,11 +848,26 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                             f"einmaliger Neuversuch mit frischer URL: {title}"
                         )
                     else:
-                        self._stream_retry_url = None
-                        logger.warning(f"[Stream-Retry] Auch der zweite Versuch schlug fehl – gebe auf: {title}")
+                        # Zweiter Stream-Versuch tot → letzter Anlauf: Download statt
+                        # Stream. yt_dlp lädt über den eigenen HTTP-Client – der ist
+                        # von CDN-403s gegen FFmpeg meist nicht betroffen.
+                        # _stream_retry_url bleibt gesetzt (kein doppelter Play-Count).
+                        self._force_download_url = url
+                        self.dl.invalidate(url)
+                        self.queue.appendleft((url, title))
+                        retry_scheduled = True
+                        logger.warning(f"[Stream-Retry] Auch der zweite Versuch schlug fehl – letzter Anlauf als Download: {title}")
                         asyncio.run_coroutine_threadsafe(
-                            ctx.send(t("error.stream_giveup", title=title)), self.bot.loop
+                            ctx.send(t("error.stream_download_fallback", title=title)), self.bot.loop
                         )
+                elif url == self._force_download_url and (error or elapsed < 2.0):
+                    # Auch die heruntergeladene Datei stirbt sofort → endgültig aufgeben.
+                    self._force_download_url = None
+                    self._stream_retry_url = None
+                    logger.warning(f"[Stream-Retry] Download-Fallback spielte ebenfalls nicht – gebe auf: {title}")
+                    asyncio.run_coroutine_threadsafe(
+                        ctx.send(t("error.stream_giveup", title=title)), self.bot.loop
+                    )
 
                 # Queue-Stand nach jedem Track in Datei sichern – nicht als
                 # Restore-Point gedacht, nur als Protokoll der letzten Session.
@@ -923,10 +961,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
             if url == self._stream_retry_url:
-                # Zweiter Anlauf desselben Tracks (Stream-Retry) → nicht doppelt zählen.
+                # Zweiter/dritter Anlauf desselben Tracks (Stream-Retry bzw.
+                # Download-Fallback) → nicht doppelt zählen.
                 pass
             else:
-                self._stream_retry_url = None   # anderer Track → Retry-Sperre aufheben
+                self._stream_retry_url = None   # anderer Track → Retry-Sperren aufheben
+                self._force_download_url = None
                 self._record_play(url, title)
             self.text_channel = ctx.channel
 
@@ -1130,9 +1170,14 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         Gibt das Info-Dict zurück (kann auch None sein, wenn yt_dlp nichts
         liefert – damit gehen die Aufrufer wie bisher selbst um), oder
         _YTDLP_FAILED wenn bereits eine Fehlermeldung gesendet wurde.
+
+        Die Status-Nachricht ("Suche läuft..." bzw. "Verarbeite...") wird nach
+        Abschluss wieder gelöscht – bei Erfolg wie im Fehlerfall (dann steht
+        die Fehlermeldung im Channel).
         """
+        status_msg = None
         try:
-            await ctx.send(t(status_key))
+            status_msg = await ctx.send(t(status_key))
             return await asyncio.wait_for(
                 asyncio.to_thread(ydl_instance.extract_info, query, download=False),
                 timeout=30.0,
@@ -1144,6 +1189,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             logger.exception(log_msg)
             await ctx.send(t(error_key))
             return _YTDLP_FAILED
+        finally:
+            if status_msg is not None:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass   # schon weg oder keine Berechtigung – egal
 
     async def _search_and_enqueue(self, ctx, eingabe, *, log_tag, timeout_key,
                                   insert, with_alts_key, no_alts_key,

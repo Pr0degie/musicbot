@@ -19,9 +19,13 @@ from cogs.presets import EQ_PRESETS
 class FakeMessage:
     def __init__(self):
         self.edits = []
+        self.deleted = False
 
     async def edit(self, **kwargs):
         self.edits.append(kwargs)
+
+    async def delete(self):
+        self.deleted = True
 
 
 class FakeVoiceClient:
@@ -80,13 +84,18 @@ class FakeDownloader:
 
     def __init__(self, result=None):
         self.result = result
+        self.force_result = None   # Rückgabe bei force_download=True (None → self.result)
         self.resolve_calls = []
+        self.force_calls = []
         self.invalidated = []
         self.cleared = 0
 
-    async def resolve_track(self, url, title, prefetch_task=None):
+    async def resolve_track(self, url, title, prefetch_task=None, force_download=False):
         self.resolve_calls.append(url)
+        self.force_calls.append(force_download)
         await asyncio.sleep(0)
+        if force_download and self.force_result is not None:
+            return self.force_result
         return self.result
 
     def invalidate(self, url):
@@ -136,6 +145,7 @@ def build_cog(dl=None):
     mc._track_generation = 0
     mc._ended_np = None
     mc._stream_retry_url = None
+    mc._force_download_url = None
     mc.equalizer = "punchy"
     mc.audio_format = "webm"
     mc.loop_mode = None

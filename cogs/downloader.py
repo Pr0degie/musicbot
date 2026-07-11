@@ -437,10 +437,14 @@ class Downloader:
     # Download-Logik
     # ------------------------------------------------------------------
 
-    async def resolve_track(self, url: str, title: str, prefetch_task=None):
+    async def resolve_track(self, url: str, title: str, prefetch_task=None, force_download=False):
         """Löst URL auf: extrahiert Metadaten und stellt sicher dass die Audiodatei lokal vorliegt.
 
         prefetch_task: läuft ggf. parallel – warten statt doppelt herunterladen.
+        force_download: Stream-Abkürzung deaktivieren und die Datei sofort lokal
+        herunterladen (letzter Anlauf nach zwei toten Stream-Versuchen; yt_dlp
+        nutzt den eigenen HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen).
+        Tracks über STREAM_THRESHOLD_SECONDS bleiben trotzdem Streams.
         Returns: (info, filename, title, duration)
         Raises asyncio.TimeoutError wenn extract_info > 30 s dauert.
         """
@@ -504,6 +508,14 @@ class Downloader:
                 except Exception:
                     logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
 
+            if not filename.exists() and force_download:
+                # Letzter Anlauf: kein Stream mehr, Datei jetzt blockierend laden.
+                # Schlägt der Download fehl, propagiert die Exception zu play_next
+                # (Fehlerpfad überspringt den Track mit i18n-Meldung).
+                logger.warning(f"[Download-Fallback] Stream schlug zweimal fehl – lade lokal herunter: {title}")
+                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
+                logger.info(f"[Download-Fallback] Fertig: {filename.name}")
+                await self.cleanup_downloads()
             if not filename.exists():  # Prefetch hat es nicht erledigt → sofort als Stream starten
                 audio_url = info.get("url") or url
                 logger.info(f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")

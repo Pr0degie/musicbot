@@ -6,6 +6,7 @@ von Hand – so wie ihn der FFmpeg-Thread bei einem sofort sterbenden Track feue
 """
 
 import asyncio
+import time
 import types
 from collections import deque
 
@@ -49,9 +50,13 @@ class FakeVoiceClient:
 class FakeMessage:
     def __init__(self):
         self.edits = []
+        self.deleted = False
 
     async def edit(self, **kwargs):
         self.edits.append(kwargs)
+
+    async def delete(self):
+        self.deleted = True
 
 
 class FakeCtx:
@@ -78,12 +83,17 @@ class FakeDownloader:
 
     def __init__(self, result):
         self.result = result
+        self.force_result = None   # Rückgabe bei force_download=True (None → self.result)
         self.resolve_calls = []
+        self.force_calls = []
         self.invalidated = []
 
-    async def resolve_track(self, url, title, prefetch_task=None):
+    async def resolve_track(self, url, title, prefetch_task=None, force_download=False):
         self.resolve_calls.append(url)
+        self.force_calls.append(force_download)
         await asyncio.sleep(0)
+        if force_download and self.force_result is not None:
+            return self.force_result
         return self.result
 
     def invalidate(self, url):
@@ -149,6 +159,7 @@ def make_cog(dl):
     mc._track_generation = 0
     mc._ended_np = None
     mc._stream_retry_url = None
+    mc._force_download_url = None
     mc.equalizer = "punchy"
     mc.audio_format = "webm"
     mc.loop_mode = None
@@ -305,7 +316,9 @@ def test_classify_ffmpeg_error(stderr_text, expected):
 
 def test_stream_retry_once_then_give_up(monkeypatch, tmp_path):
     """Sofortiger Track-Tod + Input-Fehler → genau EIN Retry mit frischer URL,
-    danach Aufgeben mit i18n-Meldung und ohne doppelten Play-Count."""
+    danach EIN Download-Fallback-Anlauf; liefert der keine lokale Datei
+    (hier: resolve gibt weiter einen Stream zurück), Aufgeben mit i18n-Meldung
+    und ohne doppelten Play-Count."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         discord,
@@ -333,19 +346,83 @@ def test_stream_retry_once_then_give_up(monkeypatch, tmp_path):
         assert len(vc.play_calls) == 2, "genau ein Retry muss gestartet werden"
         assert dl.invalidated == [url], "Cache-Eintrag muss vor dem Retry invalidiert werden"
 
-        vc.end_track()   # zweiter Versuch stirbt genauso → aufgeben
+        vc.end_track()   # zweiter Versuch stirbt genauso → Download-Fallback → gibt Stream → aufgeben
         for _ in range(200):
             await asyncio.sleep(0.01)
-            if mc.is_playing is False and ctx.sent:
+            if mc.is_playing is False and mc._force_download_url is None and ctx.sent:
                 break
 
-        assert len(vc.play_calls) == 2, "kein dritter Versuch"
+        assert len(vc.play_calls) == 2, "kein dritter Stream-Versuch"
         assert not mc.queue
         assert mc._stream_retry_url is None
-        giveup = t("error.stream_giveup", title="Testsong")
+        assert mc._force_download_url is None
+        assert dl.force_calls == [False, False, True], "dritter resolve muss den Download erzwingen"
         texts = [args[0] for args, kwargs in ctx.sent if args]
+        fallback = t("error.stream_download_fallback", title="Testsong")
+        assert fallback in texts, f"Download-Fallback-Meldung fehlt, gesendet wurde: {texts}"
+        giveup = t("error.stream_giveup", title="Testsong")
         assert giveup in texts, f"Aufgeben-Meldung fehlt, gesendet wurde: {texts}"
         assert mc._play_counts == {url: 1}, "Retry darf den Play-Count nicht doppelt zählen"
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_stream_retry_download_fallback_plays_local_file(monkeypatch, tmp_path):
+    """Zwei tote Stream-Versuche → dritter Anlauf spielt die lokal
+    heruntergeladene Datei; Play-Count bleibt bei 1, Marker werden nach
+    normalem Track-Ende aufgeräumt."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        discord,
+        "FFmpegOpusAudio",
+        make_fake_source(b"[https @ 0x1] HTTP error 403 Forbidden\n"),
+    )
+    from utils.i18n import t
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        local_file = tmp_path / "Testsong.webm"
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        dl.force_result = (STREAM_INFO, local_file, "Testsong", 200)
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+        vc.end_track()   # Versuch 1 stirbt mit 403
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 2:
+                break
+        vc.end_track()   # Versuch 2 stirbt genauso → Download-Fallback
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 3:
+                break
+
+        assert len(vc.play_calls) == 3, "Download-Fallback muss einen dritten Versuch starten"
+        assert dl.force_calls == [False, False, True]
+        texts = [args[0] for args, kwargs in ctx.sent if args]
+        fallback = t("error.stream_download_fallback", title="Testsong")
+        assert fallback in texts, f"Download-Fallback-Meldung fehlt, gesendet wurde: {texts}"
+        assert mc._play_counts == {url: 1}, "Fallback darf den Play-Count nicht mehrfach zählen"
+
+        # Track läuft "lange" und endet normal → Marker müssen aufgeräumt werden.
+        mc.track_start_time = time.monotonic() - 10
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if mc._stream_retry_url is None:
+                break
+
+        assert mc._stream_retry_url is None
+        assert mc._force_download_url is None
+        giveup = t("error.stream_giveup", title="Testsong")
+        texts = [args[0] for args, kwargs in ctx.sent if args]
+        assert giveup not in texts, "erfolgreicher Fallback darf keine Aufgeben-Meldung senden"
 
         _cleanup(mc)
 
