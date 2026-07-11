@@ -654,6 +654,41 @@ def test_skip_on_growing_file_does_not_resume(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
+def test_kick_prefetch_only_while_playing_and_not_running(monkeypatch, tmp_path):
+    """_kick_prefetch startet den Vorlade-Task genau dann, wenn Musik läuft,
+    die Queue Titel hat und noch kein Prefetch aktiv ist – Titel, die mitten
+    im Song eingereiht werden, sollen beim Übergang schon lokal liegen."""
+    monkeypatch.chdir(tmp_path)
+
+    async def run():
+        dl = FakeDownloader((STREAM_INFO, tmp_path / "x.webm", "Testsong", 200))
+        mc = make_cog(dl)
+
+        mc._kick_prefetch()                       # Queue leer → nichts
+        assert mc.prefetch_task is None
+
+        mc.queue.append(("https://www.youtube.com/watch?v=test", "Testsong"))
+        mc._kick_prefetch()                       # nichts am Spielen → nichts
+        assert mc.prefetch_task is None
+
+        mc.is_playing = True
+        mc._kick_prefetch()
+        assert mc.prefetch_task is not None, "spielend + Queue → Prefetch startet"
+        task = mc.prefetch_task
+
+        mc._kick_prefetch()                       # läuft bereits → kein neuer Task
+        assert mc.prefetch_task is task
+        await task
+
+        mc._kick_prefetch()                       # alter Task fertig → neuer Task erlaubt
+        assert mc.prefetch_task is not task
+        await mc.prefetch_task
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("lang", ["de", "en"])
 def test_stream_giveup_message_in_both_locales(lang):
     import json

@@ -1,6 +1,7 @@
 """yt_dlp-Instanzen, Metadaten-Cache und Download-Logik für den MusicBot."""
 
 import asyncio
+import copy
 import json
 import random
 import re
@@ -557,14 +558,34 @@ class Downloader:
         logger.info(f"[Progressiv] Starte Hintergrund-Download: {title}")
         return task
 
+    def _download_progressive_sync(self, ydl, info: dict, url: str, filename: Path):
+        """Läuft im Worker-Thread. Volles, frisch extrahiertes Info-Dict →
+        Schnellstart über process_ie_result (derselbe Pfad wie yt-dlps
+        --load-info-json): spart die komplette Zweit-Extraktion samt
+        JS-Challenge, die sonst 5–10 s Startlatenz vor dem ersten Byte kostet.
+        Reduzierte Einträge aus metadata_cache.json haben keine "formats" →
+        normaler Download mit frischer Extraktion. Scheitert der Schnellstart
+        (z. B. abgelaufene CDN-URL), einmal frisch extrahieren – vorher die
+        Teil-Datei entfernen, damit yt_dlp nicht an einen ggf. abweichenden
+        Download anhängt (OSError propagiert in den Fehlerpfad des Aufrufers)."""
+        if info.get("formats"):
+            try:
+                ydl.process_ie_result(copy.deepcopy(info), download=True)
+                return
+            except Exception as e:
+                logger.info(f"[Progressiv] Schnellstart mit vorhandener Info fehlgeschlagen ({e}) – extrahiere frisch")
+                if filename.exists():
+                    filename.unlink()
+        # download([webpage_url]) extrahiert intern frisch – eine ggf. abgelaufene
+        # CDN-URL aus dem Cache ist egal; yt_dlps HTTP-Client trifft kein CDN-403.
+        ydl.download([info.get("webpage_url") or url])
+
     async def _run_progressive(self, url: str, info: dict, filename: Path, title: str) -> bool:
         """Führt den progressiven Download aus. Fängt alle Fehler selbst;
         Rückgabe True = Datei vollständig."""
         try:
             ydl = self._make_progressive_ydl()
-            # download([webpage_url]) extrahiert intern frisch – eine ggf. abgelaufene
-            # CDN-URL aus dem Cache ist egal; yt_dlps HTTP-Client trifft kein CDN-403.
-            await asyncio.to_thread(ydl.download, [info.get("webpage_url") or url])
+            await asyncio.to_thread(self._download_progressive_sync, ydl, info, url, filename)
             self._incomplete_files.discard(filename.resolve())
             try:
                 self._sidecar_for(filename).unlink()

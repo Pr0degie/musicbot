@@ -352,6 +352,32 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
         await self.dl.prefetch_next(self.queue, idx)
 
+    async def _prefetch_upcoming(self):
+        """Lädt bis zu 2 Queue-Songs sequenziell vor – yt_dlp ist nicht
+        thread-safe, daher kein paralleles gather. Sequenziell reicht: während
+        Song N spielt, werden N+1 und N+2 nacheinander heruntergeladen."""
+        # Bandbreiten-Rücksicht: erst warten, bis kein progressiver Download
+        # mehr läuft – der füttert die laufende Wiedergabe.
+        await self.dl.wait_progressive_idle()
+        await self._prefetch_next(0)
+        if len(self.queue) >= 2:
+            await self._prefetch_next(1)
+
+    def _kick_prefetch(self):
+        """Startet den Hintergrund-Download der nächsten Queue-Songs, wenn
+        gerade ein Song läuft und noch kein Prefetch aktiv ist. Nötig für
+        Titel, die MITTEN im Song eingereiht werden (!p/!next): play_next
+        erstellt den Prefetch-Task nur beim Trackstart – da war die Queue
+        oft noch leer, und der neue Song würde erst beim Übergang (progressiv,
+        inkl. yt_dlp-Extraktion) geladen → hörbare Lücke."""
+        if not self.queue or not self.is_playing:
+            return
+        if self.prefetch_task and not self.prefetch_task.done():
+            # Läuft bereits – _prefetch_upcoming peekt die Queue bei jedem
+            # Schritt frisch, neue Einträge werden also noch mitgenommen.
+            return
+        self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
+
     async def _prefetch_autoplay(self, ctx):
         """Sucht und lädt nächsten Autoplay-Song im Hintergrund während der aktuelle läuft."""
         ref_url = ref_title = None
@@ -1143,17 +1169,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if self.prefetch_task and not self.prefetch_task.done():
                 self.prefetch_task.cancel()
             if self.queue:
-                # Bis zu 2 Songs sequenziell vorladen – yt_dlp ist nicht thread-safe,
-                # daher kein paralleles gather. Sequenziell reicht: während Song N spielt,
-                # werden N+1 und N+2 nacheinander heruntergeladen.
-                async def _prefetch_two():
-                    # Bandbreiten-Rücksicht: erst warten, bis kein progressiver
-                    # Download mehr läuft – der füttert die laufende Wiedergabe.
-                    await self.dl.wait_progressive_idle()
-                    await self._prefetch_next(0)
-                    if len(self.queue) >= 2:
-                        await self._prefetch_next(1)
-                self.prefetch_task = asyncio.create_task(_prefetch_two())
+                self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
 
             # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
             if self.autoplay_enabled and not self.queue:
@@ -1418,6 +1434,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
+            else:
+                self._kick_prefetch()   # läuft schon Musik → neuen Titel sofort vorladen
             return
 
         # --- Ab hier: direkte URL oder Playlist ---
@@ -1470,6 +1488,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
+        else:
+            self._kick_prefetch()   # läuft schon Musik → neue Titel sofort vorladen
 
     @commands.command(name="stop")
     @require_same_voice()
@@ -1509,6 +1529,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
+            else:
+                self._kick_prefetch()
             return
 
         # Suchbegriff → ersten Treffer an erste Stelle, Alternativen als Buttons
@@ -1523,6 +1545,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
+            else:
+                self._kick_prefetch()
             return
 
         # Direkte URL → yt_dlp-Lookup
@@ -1535,6 +1559,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
+        else:
+            self._kick_prefetch()
 
     @commands.command(name="s")
     @require_same_voice()

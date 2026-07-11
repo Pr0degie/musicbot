@@ -164,6 +164,74 @@ def test_buffer_timeout_falls_back_to_stream_without_cancel(tmp_path, monkeypatc
     assert not dl.is_incomplete(target)
 
 
+class InfoYdl:
+    """Progressiv-Instanz-Ersatz mit Schnellstart-API (process_ie_result)."""
+
+    def __init__(self, target, fail_fast=False):
+        self.target = Path(target)
+        self.fail_fast = fail_fast
+        self.process_calls = 0
+        self.download_calls = []
+
+    def process_ie_result(self, info, download=True):
+        self.process_calls += 1
+        if self.fail_fast:
+            self.target.write_bytes(b"\0" * 512)   # Teil-Datei vor dem Fehler
+            raise RuntimeError("URL abgelaufen")
+        self.target.write_bytes(b"\0" * 10 * 1024)
+
+    def download(self, urls):
+        self.download_calls.append(urls)
+        self.target.write_bytes(b"\0" * 10 * 1024)
+
+
+def test_full_info_uses_fast_start_without_second_extraction(tmp_path, monkeypatch):
+    """Volles Info-Dict (mit formats) → Download startet direkt über
+    process_ie_result, ohne zweite Extraktion (JS-Challenge = 5–10 s Latenz)."""
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    ydl = InfoYdl(target)
+    dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
+
+    _, filename, _, _ = resolve(dl)
+
+    assert filename == target
+    assert ydl.process_calls == 1
+    assert ydl.download_calls == []
+
+
+def test_fast_start_failure_falls_back_to_fresh_extract(tmp_path, monkeypatch):
+    """Abgelaufene CDN-URL im Schnellstart → Teil-Datei weg, einmal frisch
+    extrahieren (download über webpage_url) – kein User-sichtbarer Fehler."""
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    ydl = InfoYdl(target, fail_fast=True)
+    dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
+
+    _, filename, _, _ = resolve(dl)
+
+    assert filename == target
+    assert ydl.process_calls == 1
+    assert ydl.download_calls == [[URL]]
+    assert target.stat().st_size == 10 * 1024   # frischer Download, nicht die Teil-Datei
+    assert not dl.is_incomplete(target)
+
+
+def test_reduced_cache_entry_skips_fast_start(tmp_path, monkeypatch):
+    """Reduzierter Eintrag aus metadata_cache.json (keine formats) → direkt
+    frische Extraktion, process_ie_result wird nie versucht."""
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    ydl = InfoYdl(target)
+    dl = make_dl(short_info(), target, ydl)
+
+    _, filename, _, _ = resolve(dl)
+
+    assert filename == target
+    assert ydl.process_calls == 0
+    assert ydl.download_calls == [[URL]]
+
+
 # ---------------------------------------------------------------------------
 # Gates: mp3-Modus, fremder Container, Blockliste, force_download
 # ---------------------------------------------------------------------------

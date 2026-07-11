@@ -79,6 +79,8 @@ class QueuePersistenceMixin:
         if not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
+        else:
+            self._kick_prefetch()   # läuft schon Musik → geladene Titel sofort vorladen
 
     @commands.command(name="lists")
     async def lists(self, ctx):
