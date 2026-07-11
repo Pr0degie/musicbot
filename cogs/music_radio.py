@@ -17,6 +17,7 @@ from discord.ext import commands
 from utils.logger import logger
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
+from utils.checks import check_admin
 from views.music_controls import MusicControlView
 
 RADIO_STATIONS_FILE = Path("radio_stations.json")
@@ -174,6 +175,8 @@ class RadioMixin:
         # Subcommands: !radio delete <nr|name>  /  !radio rename <nr|name> <neuer name>
         tokens = eingabe.split(None, 2)
         if tokens[0] in ("delete", "rename"):
+            if not await check_admin(ctx):
+                return
             subcmd = tokens[0]
             if len(tokens) < 2:
                 await ctx.send(t("error.radio_usage", subcmd=subcmd))

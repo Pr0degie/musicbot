@@ -19,6 +19,7 @@ import psutil
 from utils.logger import logger
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
+from utils.checks import require_same_voice, require_admin
 from discord.ext import commands, tasks
 from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
@@ -164,6 +165,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             logger.warning(f"[Score] Fehler beim Speichern: {e}")
 
     @commands.command(name="reloadcookies")
+    @require_admin()
     async def reloadcookies(self, ctx):
         """Lädt die cookies.txt neu ohne Bot-Neustart (nach manuellem Upload auf den Server)."""
         self.update_ydl()
@@ -177,6 +179,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         await ctx.send(t("misc.cookies_reloaded", source=source))
 
     @commands.command(usage="!format <mp3|webm>")
+    @require_admin()
     async def format(self, ctx, typ: str):
         """Wechselt das Audioformat (mp3 oder webm). Wirkt ab dem nächsten Track."""
         if typ.lower() in ["mp3", "webm"]:
@@ -1196,6 +1199,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await self.play_next(ctx)
 
     @commands.command(name="stop")
+    @require_same_voice()
     async def stop(self, ctx):
         """Beendet Radio-Modus oder aktuelle Wiedergabe (Queue bleibt erhalten)."""
         if self.is_radio:
@@ -1317,6 +1321,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await self.play_next(ctx)
 
     @commands.command(name="s")
+    @require_same_voice()
     async def skip(self, ctx):
         """Überspringt den aktuellen Track. Bei Radio: beendet den Radio-Modus."""
         if self.is_radio:
@@ -1365,6 +1370,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await ctx.send(t("error.no_song_to_resume"))
 
     @commands.command(name="now")
+    @require_same_voice()
     async def now_playing(self, ctx, *, eingabe: str = None):
         """Spielt einen Song sofort ab (stoppt den aktuellen). !now <Suche, URL oder Queue-Position>"""
         if not eingabe:
@@ -1551,6 +1557,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         await ctx.send(embed=view.build_embed(), view=view)
 
     @commands.command()
+    @require_same_voice()
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
         self._stop_radio()
@@ -1569,6 +1576,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         await ctx.send(t("status.cleared"))
 
     @commands.command(usage="!remove <position>")
+    @require_same_voice()
     async def remove(self, ctx, index: int):
         """Entfernt einen Track an Position n aus der Queue."""
         # deque unterstützt kein pop(index) – kurzer Umweg über eine Liste.
@@ -1581,6 +1589,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await ctx.send(t("error.invalid_index"))
 
     @commands.command()
+    @require_same_voice()
     async def move(self, ctx, *, term: str):
         """Verschiebt einen Song an den Anfang der Queue.
 
@@ -1623,6 +1632,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         await ctx.send(t("status.moved_to_front", title=entry[1]))
 
     @commands.command()
+    @require_same_voice()
     async def shuffle(self, ctx):
         """Mischt die Queue zufällig durch."""
         # random.shuffle() arbeitet auf Listen, nicht auf deques – also kurz umwandeln.
@@ -1648,6 +1658,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await ctx.send(t("error.no_last_song"))
 
     @commands.command()
+    @require_same_voice()
     async def eq(self, ctx, preset: str = None):
         """Setzt einen EQ-Preset oder listet verfügbare Presets auf."""
         if not preset:
@@ -1684,6 +1695,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             return None
 
     @commands.command(name="seek")
+    @require_same_voice()
     async def seek(self, ctx, zeit: str = None):
         """Springt an eine Position im aktuellen Track. !seek 1:23 oder !seek 83"""
         if not zeit:

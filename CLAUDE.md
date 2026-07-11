@@ -87,6 +87,9 @@ State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_c
 Alle einschränkenden Änderungen hängen an `.env`-Flags, deren **Default das alte Verhalten beibehält** (Ausnahme: globales `allowed_mentions=none()` im Bot-Konstruktor in `main.py` — Fremd-Content wie YouTube-Titel/`!echo`/Lyrics kann nie pingen; kein Command nutzt Mentions absichtlich).
 
 - **`URL_VALIDATION`** = `off` | `warn` (Default) | `block` — SSRF-Schutz (`utils/url_check.py`) für `!radio <url>` und `!next url||titel`. Nur http/https; Hostname darf nach DNS-Resolve nicht auf private/loopback/link-local IPs zeigen. `warn` spielt wie bisher + Warnung in Log/Channel; `block` lehnt mit i18n-Meldung ab. Nicht auflösbare Hosts gelten als ok (Stream scheitert ohnehin). `!radio` persistiert neue Sender erst **nach** erfolgreichem Stream-Start (`_play_radio_stream` → `bool`).
+- **`REQUIRE_SAME_VOICE`** = `false` (Default) | `true` — Wiedergabe-steuernde Commands (`!s`, `!stop`, `!clear`, `!eq`, `!seek`, `!now`, `!remove`, `!move`, `!shuffle`) erfordern denselben Voice-Channel wie der Bot (`utils/checks.py` → `require_same_voice()`). Bot nicht in Voice → kein Check.
+- **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` (inline `check_admin()`), `!reloadcookies`, `!format` nur für diese Rolle oder den Owner.
+- **Owner-Garantie:** `is_owner()` gewinnt in beiden Checks immer — der Owner kann sich durch keine Flag-Kombination aussperren. Check-Fehlermeldungen kommen via i18n aus dem Check selbst; die `CheckFailure` schluckt `on_command_error` still. Checks greifen nicht in Tests, die Commands über `.callback` aufrufen.
 
 ### Key Bot Commands
 
