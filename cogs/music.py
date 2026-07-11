@@ -21,7 +21,10 @@ from utils.i18n import t
 from utils.url_check import enforce_url_policy
 from utils.checks import require_same_voice, require_admin
 from discord.ext import commands, tasks
-from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
+from cogs.downloader import (
+    Downloader, DOWNLOAD_DIR, entry_url, normalize_title,
+    select_autoplay_candidates, yt_video_id,
+)
 from cogs.presets import EQ_PRESETS
 from views.music_controls import MusicControlView, SearchAutoplayView
 from cogs.music_radio import RadioMixin
@@ -280,11 +283,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             ref_url, ref_title, *_ = self.last_played
 
         # YouTube Mix/Radio-URL: gibt echte Empfehlungen basierend auf dem Video
-        yt_id = None
-        if ref_url:
-            m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", ref_url)
-            if m:
-                yt_id = m.group(1)
+        yt_id = yt_video_id(ref_url)
 
         if yt_id:
             # YouTube-eigene Empfehlungen via RD-Mix-Playlist
@@ -302,39 +301,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             )
             entries = (info.get("entries") or []) if info else []
 
-            def entry_url(e):
-                """Gibt die beste verfügbare URL eines Eintrags zurück (webpage_url > url)."""
-                return e.get("webpage_url") or e.get("url") or ""
-
-            def is_video(e):
-                """Nur echte Videos – keine Playlists, keine leeren URLs."""
-                if not e:
-                    return False
-                if e.get("_type") == "playlist":
-                    return False
-                u = entry_url(e)
-                return bool(u) and "playlist?" not in u and "/playlist/" not in u
-
-            played_ids = {yt_video_id(u) for u in self._recently_played} - {None}
-
-            def is_seen(e):
-                e_url = entry_url(e)
-                if e_url in self._recently_played:
-                    return True
-                e_id = yt_video_id(e_url)
-                if e_id and e_id in played_ids:
-                    return True
-                e_words = set(normalize_title(e.get("title", "")).split())
-                if e_words:
-                    return any(e_words.issubset(set(t.split())) for t in self._recently_played_titles)
-                return False
-
-            ref_id = yt_video_id(ref_url)
-            candidates = [e for e in entries if is_video(e) and not is_seen(e)]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e) and (yt_video_id(entry_url(e)) or entry_url(e)) != (ref_id or ref_url)]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e)]
+            candidates = select_autoplay_candidates(
+                entries, ref_url, self._recently_played, self._recently_played_titles
+            )
 
             if not candidates:
                 await ctx.send(t("error.autoplay_no_results"))

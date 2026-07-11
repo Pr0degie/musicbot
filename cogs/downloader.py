@@ -46,6 +46,61 @@ def yt_video_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def entry_url(e):
+    """Gibt die beste verfügbare URL eines Eintrags zurück (webpage_url > url)."""
+    return e.get("webpage_url") or e.get("url") or ""
+
+
+def is_video(e):
+    """Nur echte Videos – keine Playlists, keine leeren URLs."""
+    if not e:
+        return False
+    if e.get("_type") == "playlist":
+        return False
+    u = entry_url(e)
+    return bool(u) and "playlist?" not in u and "/playlist/" not in u
+
+
+def is_seen(e, recently_played, recently_played_titles, played_ids):
+    """Kürzlich gespielt? Prüft exakte URL, Video-ID und Titel-Wortmenge."""
+    e_url = entry_url(e)
+    if e_url in recently_played:
+        return True
+    e_id = yt_video_id(e_url)
+    if e_id and e_id in played_ids:
+        return True
+    e_words = set(normalize_title(e.get("title", "")).split())
+    if e_words:
+        return any(e_words.issubset(set(seen_title.split())) for seen_title in recently_played_titles)
+    return False
+
+
+def select_autoplay_candidates(entries, ref_url, recently_played, recently_played_titles):
+    """Filtert Mix-Einträge zu Autoplay-Kandidaten – gemeinsame Logik von
+    MusicCommands.autoplay() (Sofort-Pfad) und Downloader.prefetch_autoplay()
+    (Hintergrund-Pfad).
+
+    Fallback-Kaskade:
+    1. Nur Videos, die nicht kürzlich gespielt wurden (is_seen).
+    2. Alles gesehen → nur noch den Referenz-Track ausschließen.
+    3. Zur Not jeden Video-Eintrag nehmen – lieber Wiederholung als Stille.
+    """
+    played_ids = {yt_video_id(u) for u in recently_played} - {None}
+    ref_id = yt_video_id(ref_url)
+    candidates = [
+        e for e in entries
+        if is_video(e) and not is_seen(e, recently_played, recently_played_titles, played_ids)
+    ]
+    if not candidates:
+        candidates = [
+            e for e in entries
+            if is_video(e) and (yt_video_id(entry_url(e)) or entry_url(e)) != (ref_id or ref_url)
+        ]
+    if not candidates:
+        candidates = [e for e in entries if is_video(e)]
+    return candidates
+
+
 class Downloader:
     """Verwaltet alle yt_dlp-Instanzen, den Metadaten-Cache und Download-Logik.
 
@@ -505,11 +560,7 @@ class Downloader:
         Returns: (url, title) bei Erfolg, None bei Fehler/kein Ergebnis.
         Der Caller entscheidet ob der Song in die Queue kommt (autoplay_enabled-Check).
         """
-        yt_id = None
-        if ref_url:
-            m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", ref_url)
-            if m:
-                yt_id = m.group(1)
+        yt_id = yt_video_id(ref_url)
 
         fetch_url = (
             f"https://www.youtube.com/watch?v={yt_id}&list=RD{yt_id}"
@@ -525,35 +576,9 @@ class Downloader:
             )
             entries = (info.get("entries") or []) if info else []
 
-            def entry_url(e):
-                return e.get("webpage_url") or e.get("url") or ""
-
-            def is_video(e):
-                if not e or e.get("_type") == "playlist":
-                    return False
-                u = entry_url(e)
-                return bool(u) and "playlist?" not in u and "/playlist/" not in u
-
-            played_ids = {yt_video_id(u) for u in recently_played} - {None}
-
-            def is_seen(e):
-                e_url = entry_url(e)
-                if e_url in recently_played:
-                    return True
-                e_id = yt_video_id(e_url)
-                if e_id and e_id in played_ids:
-                    return True
-                e_words = set(normalize_title(e.get("title", "")).split())
-                if e_words:
-                    return any(e_words.issubset(set(t.split())) for t in recently_played_titles)
-                return False
-
-            ref_id = yt_video_id(ref_url)
-            candidates = [e for e in entries if is_video(e) and not is_seen(e)]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e) and (yt_video_id(entry_url(e)) or entry_url(e)) != (ref_id or ref_url)]
-            if not candidates:
-                candidates = [e for e in entries if is_video(e)]
+            candidates = select_autoplay_candidates(
+                entries, ref_url, recently_played, recently_played_titles
+            )
             if not candidates:
                 logger.warning("[Autoplay Prefetch] Keine nutzbaren Einträge")
                 return None
