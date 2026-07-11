@@ -76,11 +76,23 @@ class BasicCommands(commands.Cog):
     @commands.command(name="restart")
     @commands.is_owner()
     async def restart(self, ctx):
-        """Startet den Bot-Prozess in einem neuen Terminal neu (nur Bot-Owner)."""
+        """Startet den Bot-Prozess neu (nur Bot-Owner): wt.exe/WSL-Terminal wenn vorhanden, sonst os.execv in-place."""
+        from utils.logger import logger
+
         await ctx.send("🔄 Restarting...")
         # os._exit(0) unten überspringt alle Cleanup-Hooks – gedebouncte
-        # Persistenz (Play-Counts) muss deshalb hier explizit geflusht werden.
+        # Persistenz (Play-Counts, Metadaten-Cache) muss deshalb hier
+        # explizit geflusht werden. Vorher Voice sauber trennen, damit
+        # Discord den alten Prozess nicht als hängende Session sieht.
         music = self.bot.get_cog("MusicCommands")
+        if music is not None:
+            # Watchdog/Auto-Advance dürfen während des Disconnects nichts nachstarten.
+            music._stopped_by_user = True
+        for vc in list(self.bot.voice_clients):
+            try:
+                await vc.disconnect(force=True)
+            except Exception:
+                pass  # Restart darf am Voice-Cleanup nicht scheitern
         if music is not None:
             try:
                 music._flush_scores_now()
@@ -102,9 +114,11 @@ class BasicCommands(commands.Cog):
                 start_new_session=True,
             )
         except FileNotFoundError:
-            # Kein Windows Terminal → in-place restart als Fallback
+            # Kein Windows Terminal (z. B. Linux-Server) → in-place restart
+            logger.info("[restart] wt.exe nicht gefunden – Neustart via os.execv (in-place)")
             os.execv(sys.executable, [sys.executable] + sys.argv)
             return
+        logger.info("[restart] Neustart via wt.exe/WSL-Terminal – beende alten Prozess")
         os._exit(0)
 
     @commands.command(name="l")
