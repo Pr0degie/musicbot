@@ -22,7 +22,7 @@ from utils.url_check import enforce_url_policy
 from utils.checks import require_same_voice, require_admin
 from discord.ext import commands, tasks
 from cogs.downloader import (
-    Downloader, DOWNLOAD_DIR, entry_url, normalize_title,
+    Downloader, entry_url, normalize_title,
     select_autoplay_candidates, yt_video_id,
 )
 from cogs.presets import EQ_PRESETS

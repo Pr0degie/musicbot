@@ -1,0 +1,11 @@
+[tool.ruff]
+# Zeilenlänge passend zum Bestand (längste Zeile: 137) – bewusst großzügig,
+# damit der Linter keine stilistischen Massen-Umbrüche erzwingt.
+line-length = 140
+
+[tool.ruff.lint]
+# Nur echte Fehler und Warnungen: pycodestyle (E/W) + Pyflakes (F).
+# Keine Stil-/Naming-/Import-Sortier-Regeln – der Bestand bleibt wie er ist.
+select = ["E", "F", "W"]
+# E731 (Lambda-Zuweisung): rein stilistisch, der Bestand nutzt bewusst kurze Lambdas.
+ignore = ["E731"]

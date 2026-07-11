@@ -1,13 +1,13 @@
 # CLAUDE.md
 
-Setup → see `README.md`. Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). No linter configured.
+Setup → see `README.md`. Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). Lint: `ruff check .` (nur E/F/W, line-length 140, Config in `pyproject.toml` — bewusst keine Stilregeln).
 
 ## Architecture
 
 Four cogs loaded at startup, all responses in German:
 
 - **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`
-- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`. Radio/stats/queue-persistence commands are split into mixins — same instance state, registered as cog commands via the MRO:
+- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp work to `self.dl`. Der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` steckt in vier Helpern: `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung, Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als Parameter — Semantik-Unterschiede der drei Befehle stehen in der Docstring), `_fetch_single_track_info` (URL-Zweig von `!next`/`!now`; `!p` behält seinen eigenen wegen Playlist-Support + Duplikat-Warnung). Radio/stats/queue-persistence commands are split into mixins — same instance state, registered as cog commands via the MRO:
   - **`cogs/music_radio.py`** — `RadioMixin`: internet-radio streaming (`_play_radio_stream`, reconnect, `!radio`), `RADIO_STATIONS_FILE`
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!lists`, `PLAYLISTS_DIR`
@@ -77,6 +77,8 @@ Cookie config read from `.env` via `update_ydl()`. `cookiefile` takes priority o
 Toggled via `🔁 Autoplay` button. `_prefetch_autoplay` starts at song-begin (only if queue empty): fetches YouTube Mix (`list=RD{video_id}`) via `autoplay_ydl` (max 10 entries), picks randomly from `candidates[1:]` (skips YouTube's top pick which is most personalized), downloads chosen candidate, appends to queue. On song end `play_next` waits up to 60 s for the prefetch task; falls back to `autoplay()` (same lookup, no pre-download) if needed.
 
 Reference track: `current_track` → `last_played`. Autoplay stays on until button pressed again — not one-shot.
+
+Die Kandidatenauswahl (nur Videos, `is_seen`-Filter, Fallback-Kaskade) lebt einmal als Modul-Funktionen in `downloader.py` (`entry_url`, `is_video`, `is_seen`, `select_autoplay_candidates`) und wird von beiden Pfaden genutzt — `MusicCommands.autoplay()` (Sofort-Pfad) und `Downloader.prefetch_autoplay()` (Hintergrund-Pfad).
 
 `_autoplay_queued_url`: URL last added by autoplay; cleared when popped by `play_next` or evicted by `_evict_autoplay_song()`.
 

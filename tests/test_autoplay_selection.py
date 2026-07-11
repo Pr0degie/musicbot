@@ -11,11 +11,8 @@ und in Downloader.prefetch_autoplay() (Hintergrund-Pfad). Beide filtern:
 
 import asyncio
 import random
-from collections import deque
 
-import pytest
 
-import cogs.downloader as downloader_mod
 from cogs.downloader import Downloader
 from conftest import FakeCtx, FakeDownloader, build_cog
 from utils.i18n import t

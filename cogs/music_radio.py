@@ -91,7 +91,7 @@ class RadioMixin:
             if error:
                 logger.warning(f"[Radio] Stream-Fehler: {error}")
             else:
-                logger.info(f"[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
+                logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
             if not self.is_radio:
                 return
             if self._radio_reconnect_count < 3:
