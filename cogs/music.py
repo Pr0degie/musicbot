@@ -404,7 +404,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """'▬▬▬🔘▬▬▬▬ m:ss / m:ss' – None wenn Dauer unbekannt."""
         if not total or total <= 0:
             return None
-        frac = min(1.0, max(0.0, elapsed / total))
+        # elapsed auch fürs Zeitlabel clampen – sonst läuft die Anzeige über die
+        # Songdauer hinaus und der Bar-String ändert sich endlos weiter (jeder
+        # Tick ein neuer String → die _np_last_desc-Dedupe greift nie).
+        elapsed = min(max(0.0, elapsed), total)
+        frac = elapsed / total
         pos = int(frac * (length - 1))
         bar = "▬" * pos + "🔘" + "▬" * (length - 1 - pos)
         fmt = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"
@@ -436,6 +440,15 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         msg, embed = self.now_playing_msg, self.now_playing_embed
         if not (msg and embed and self.current_track and self.is_radio is False):
             return
+        # Nur editieren, wenn wirklich etwas läuft: is_playing ODER pausiert
+        # (der Pause-Button setzt is_playing=False, der Balken soll aber das
+        # ⏸-Präfix noch bekommen). Zusätzlich muss der Voice-Client den Track
+        # tatsächlich spielen/pausiert haben – tote Tracks editieren wir nie.
+        if not self.is_playing and self._np_paused_at is None:
+            return
+        vc = self._last_ctx.voice_client if self._last_ctx else None
+        if not vc or not (vc.is_playing() or vc.is_paused()):
+            return
         duration = self.current_track[2]
         elapsed = self._elapsed_seconds()
         if elapsed is None:
@@ -451,8 +464,24 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         try:
             await msg.edit(embed=embed)      # view-Param weglassen → Buttons bleiben
             self._np_last_desc = bar
+        except discord.RateLimited:
+            self._disable_np_edits(msg)
+        except discord.HTTPException as e:
+            if e.status == 429:
+                self._disable_np_edits(msg)
         except Exception:
             pass
+
+    def _disable_np_edits(self, msg):
+        """Rate-Limit (429): Live-Edits für diese Nachricht dauerhaft einstellen –
+        einmal loggen statt still weiterzuhämmern."""
+        logger.warning(
+            "[Progress] 429 beim Edit der Now-Playing-Nachricht – "
+            "Live-Updates für diese Nachricht deaktiviert."
+        )
+        if self.now_playing_msg is msg:
+            self.now_playing_msg = None
+            self.now_playing_embed = None
 
     @_progress_loop.before_loop
     async def _before_progress_loop(self):

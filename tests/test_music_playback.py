@@ -240,3 +240,20 @@ def test_normal_playback_sets_state_before_play(monkeypatch, tmp_path):
         _cleanup(mc)
 
     asyncio.run(run())
+
+
+def test_progress_bar_clamps_elapsed_beyond_total():
+    """elapsed > total darf weder Label noch Knopf über das Songende hinauslaufen lassen."""
+    bar = MusicCommands._progress_bar(400, 300)
+    assert bar.endswith("5:00 / 5:00")
+    assert bar.startswith("▬" * 20 + "🔘")     # Knopf ganz rechts (length=21)
+    # Über die Dauer hinaus bleibt der String stabil → keine endlosen Edits.
+    assert MusicCommands._progress_bar(402, 300) == bar
+    assert MusicCommands._progress_bar(10_000, 300) == bar
+
+
+def test_progress_bar_clamps_negative_elapsed():
+    bar = MusicCommands._progress_bar(-5, 300)
+    assert bar.startswith("🔘")
+    assert "0:00 / 5:00" in bar
+
