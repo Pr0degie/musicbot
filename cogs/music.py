@@ -47,10 +47,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
     # Channel verlässt. 2 Stunden – der Bot bleibt lange verfügbar und räumt
     # sich erst danach selbst auf.
     IDLE_LEAVE_SECONDS = 7200
-    # Klassen-Default, damit auch ohne __init__ erzeugte Instanzen (Tests via
-    # __new__) einen definierten Zustand haben. Gesetzt von _record_play,
-    # geleert von _persist_flush_loop/_flush_scores_now.
+    # Klassen-Defaults, damit auch ohne __init__ erzeugte Instanzen (Tests via
+    # __new__) einen definierten Zustand haben. _score_dirty: gesetzt von
+    # _record_play, geleert von _persist_flush_loop/_flush_scores_now.
     _score_dirty = False
+    # Eine wiederverwendete aiohttp-Session für alle HTTP-Aufrufe des Cogs
+    # (lyrics.ovh) – erstellt in cog_load, geschlossen in cog_unload.
+    _http_session = None
 
     def __init__(self, bot):
         self.bot = bot
@@ -155,6 +158,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self._voice_watchdog.start()
         self._progress_loop.start()
         self._persist_flush_loop.start()
+        self._http_session = aiohttp.ClientSession()
 
     async def cog_unload(self):
         self._voice_watchdog.cancel()
@@ -165,6 +169,16 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # Gedebouncte Writes dürfen beim Entladen nicht verloren gehen.
         self._flush_scores_now()
         self.dl.flush_cache_now()
+        if self._http_session is not None and not self._http_session.closed:
+            await self._http_session.close()
+
+    def _http(self) -> aiohttp.ClientSession:
+        """Die geteilte HTTP-Session des Cogs. Ist sie unerwartet geschlossen
+        (oder cog_load lief nie, z. B. in Tests), wird eine neue erstellt statt
+        einen Fehler zu werfen."""
+        if self._http_session is None or self._http_session.closed:
+            self._http_session = aiohttp.ClientSession()
+        return self._http_session
 
     def update_ydl(self):
         """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
@@ -1565,13 +1579,14 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
         try:
             url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        await ctx.send(t("error.lyrics_not_found"))
-                        return
-                    data = await resp.json(content_type=None)
-                    lyrics = data.get("lyrics", "").strip()
+            # Geteilte Session (cog_load) statt pro Aufruf eine neue – spart
+            # TLS-Handshake und Connection-Aufbau auf schwacher Hardware.
+            async with self._http().get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    await ctx.send(t("error.lyrics_not_found"))
+                    return
+                data = await resp.json(content_type=None)
+                lyrics = data.get("lyrics", "").strip()
         except asyncio.TimeoutError:
             await ctx.send(t("error.timeout"))
             return
