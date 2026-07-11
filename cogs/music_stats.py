@@ -55,7 +55,7 @@ class StatsMixin:
 
         # asyncio Tasks
         all_tasks = asyncio.all_tasks()
-        running_tasks = sum(1 for t in all_tasks if not t.done())
+        running_tasks = sum(1 for task in all_tasks if not task.done())
 
         # Downloads-Ordner – auf 500 Dateien begrenzen damit stat() nicht ewig läuft
         _SCAN_LIMIT = 500

@@ -1096,10 +1096,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             return None
 
         removed_title = None
-        for i, (u, t) in enumerate(self.queue):
-            if u == self._autoplay_queued_url:
+        for i, (queued_url, queued_title) in enumerate(self.queue):
+            if queued_url == self._autoplay_queued_url:
                 del self.queue[i]
-                removed_title = t
+                removed_title = queued_title
                 self._autoplay_queued_url = None
                 break
         return removed_title
