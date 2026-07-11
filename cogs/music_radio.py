@@ -23,6 +23,13 @@ from views.music_controls import MusicControlView
 RADIO_STATIONS_FILE = Path("radio_stations.json")
 
 
+def _write_stations(stations: dict) -> None:
+    """Blockierender Datei-Write – immer via asyncio.to_thread aufrufen,
+    damit der Event-Loop auf schwacher Hardware nicht hängt."""
+    with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(stations, f, ensure_ascii=False, indent=2)
+
+
 class RadioMixin:
     def _stop_radio(self):
         """Beendet Radio-Modus und setzt alle Flags zurück. Stoppt den Voice-Client NICHT."""
@@ -187,8 +194,7 @@ class RadioMixin:
                 return
             if subcmd == "delete":
                 del stations[key]
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
+                await asyncio.to_thread(_write_stations, stations)
                 await ctx.send(t("radio.station_deleted", name=entry["name"]))
             else:  # rename
                 if len(tokens) < 3:
@@ -196,8 +202,7 @@ class RadioMixin:
                     return
                 old_name = entry["name"]
                 stations[key]["name"] = tokens[2]
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
+                await asyncio.to_thread(_write_stations, stations)
                 await ctx.send(t("radio.station_renamed", old=old_name, new=tokens[2]))
             return
 
@@ -259,6 +264,5 @@ class RadioMixin:
         if started and new_station:
             key, entry = new_station
             stations[key] = entry
-            with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                json.dump(stations, f, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(_write_stations, stations)
             await ctx.send(t("radio.station_saved", name=name, num=len(stations)))

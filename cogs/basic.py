@@ -78,6 +78,14 @@ class BasicCommands(commands.Cog):
     async def restart(self, ctx):
         """Startet den Bot-Prozess in einem neuen Terminal neu (nur Bot-Owner)."""
         await ctx.send("🔄 Restarting...")
+        # os._exit(0) unten überspringt alle Cleanup-Hooks – gedebouncte
+        # Persistenz (Play-Counts) muss deshalb hier explizit geflusht werden.
+        music = self.bot.get_cog("MusicCommands")
+        if music is not None:
+            try:
+                music._flush_scores_now()
+            except Exception:
+                pass  # Restart darf an einem Flush-Fehler nicht scheitern
         cwd = os.getcwd()
         try:
             # WSL2: neues Windows Terminal Tab öffnen, altes schließt sich durch os._exit

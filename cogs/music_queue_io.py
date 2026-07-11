@@ -5,6 +5,7 @@ Per Mehrfachvererbung in MusicCommands eingebunden. Greift auf Instanz-State
 self.play_next zu, die in cogs/music.py definiert sind.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -14,6 +15,12 @@ from utils.i18n import t
 
 PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _write_playlist(path: Path, tracks: list) -> None:
+    """Blockierender Datei-Write – immer via asyncio.to_thread aufrufen."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(tracks, f, ensure_ascii=False, indent=2)
 
 
 def _is_valid_playlist(tracks) -> bool:
@@ -43,8 +50,7 @@ class QueuePersistenceMixin:
             tracks.append([ct_url, ct_title])
         tracks.extend([url, title] for url, title in self.queue)
         path = PLAYLISTS_DIR / f"{safe_name}.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(tracks, f, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(_write_playlist, path, tracks)
         await ctx.send(t("status.queue_saved", name=safe_name, count=len(tracks)))
 
     @commands.command(name="loadq", usage="!loadq <name>")

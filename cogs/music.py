@@ -47,6 +47,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
     # Channel verlässt. 2 Stunden – der Bot bleibt lange verfügbar und räumt
     # sich erst danach selbst auf.
     IDLE_LEAVE_SECONDS = 7200
+    # Klassen-Default, damit auch ohne __init__ erzeugte Instanzen (Tests via
+    # __new__) einen definierten Zustand haben. Gesetzt von _record_play,
+    # geleert von _persist_flush_loop/_flush_scores_now.
+    _score_dirty = False
 
     def __init__(self, bot):
         self.bot = bot
@@ -137,12 +141,16 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         asyncio.create_task(self.dl.warmup())
         self._voice_watchdog.start()
         self._progress_loop.start()
+        self._persist_flush_loop.start()
 
     async def cog_unload(self):
         self._voice_watchdog.cancel()
         self._progress_loop.cancel()
+        self._persist_flush_loop.cancel()
         if self.idle_leave_task and not self.idle_leave_task.done():
             self.idle_leave_task.cancel()
+        # Gedebouncte Writes dürfen beim Entladen nicht verloren gehen.
+        self._flush_scores_now()
 
     def update_ydl(self):
         """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
@@ -158,10 +166,40 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             entry["title"] = title
         else:
             self._play_counts[url] = {"title": title, "count": 1}
+        # Kein sofortiger Disk-Write: _persist_flush_loop schreibt spätestens
+        # alle 30 s im Worker-Thread. Bewusster Trade-off für den Dauerbetrieb
+        # auf schwacher Hardware: bei einem harten Crash können bis zu 30 s
+        # Play-Counts verloren gehen – akzeptiert. cog_unload und !restart
+        # flushen zusätzlich sofort (_flush_scores_now).
+        self._score_dirty = True
+
+    def _flush_scores_now(self):
+        """Synchroner Score-Flush für Shutdown-Pfade (cog_unload, !restart)."""
+        if not self._score_dirty:
+            return
+        self._score_dirty = False
         try:
-            with open(SCORE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._play_counts, f, ensure_ascii=False, indent=2)
+            SCORE_FILE.write_text(
+                json.dumps(self._play_counts, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
         except Exception as e:
+            self._score_dirty = True
+            logger.warning(f"[Score] Fehler beim Speichern: {e}")
+
+    @tasks.loop(seconds=30)
+    async def _persist_flush_loop(self):
+        """Schreibt geänderte Play-Counts gebündelt (Debounce) im Worker-Thread."""
+        if not self._score_dirty:
+            return
+        self._score_dirty = False
+        # Snapshot per json.dumps auf dem Event-Loop, damit der Worker-Thread
+        # nie ein Dict serialisiert, das gleichzeitig mutiert wird.
+        payload = json.dumps(self._play_counts, ensure_ascii=False, indent=2)
+        try:
+            await asyncio.to_thread(SCORE_FILE.write_text, payload, encoding="utf-8")
+        except Exception as e:
+            self._score_dirty = True
             logger.warning(f"[Score] Fehler beim Speichern: {e}")
 
     @commands.command(name="reloadcookies")
