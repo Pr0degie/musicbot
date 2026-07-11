@@ -127,6 +127,7 @@
   "embed.queue_empty": "*(leer)*",
   "embed.queue_footer": "{total} Songs gesamt • Loop: {loop}",
   "embed.queue_footer_duration": "{total} Songs gesamt • {duration} • Loop: {loop}",
+  "embed.queue_footer_duration_partial": "{total} Songs gesamt • ≥ {duration} ({missing} ohne Angabe) • Loop: {loop}",
   "embed.loop_song": "🔂 Song",
   "embed.loop_queue": "🔁 Queue",
   "embed.loop_off": "aus",

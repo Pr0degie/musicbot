@@ -67,8 +67,14 @@ class QueueView(View):
             h, m = divmod(m, 60)
             dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
             if known_count < total_items:
-                dur_str = "~" + dur_str
-            footer = t("embed.queue_footer_duration", total=total, duration=dur_str, loop=loop_text)
+                # Nur gecachte Dauern summiert → Untergrenze, Rest ausgewiesen.
+                footer = t(
+                    "embed.queue_footer_duration_partial",
+                    total=total, duration=dur_str,
+                    missing=total_items - known_count, loop=loop_text,
+                )
+            else:
+                footer = t("embed.queue_footer_duration", total=total, duration=dur_str, loop=loop_text)
         else:
             footer = t("embed.queue_footer", total=total, loop=loop_text)
         embed.set_footer(text=footer)
