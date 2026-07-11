@@ -181,3 +181,10 @@ play_counts.json
 
 aaa
 metadata_cache.json
+
+# Secrets & Laufzeit-Daten (bot.log und last_queue.json sind oben schon
+# via *.log bzw. explizit abgedeckt – hier nochmal explizit als Security-Block)
+cookies.txt
+*.cookies
+bot.log
+playlists/
