@@ -96,7 +96,7 @@ class MusicControlView(View):
             return
         # stop() löst den after_playing-Callback aus, der den nächsten Track startet.
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
-            self.ctx.voice_client.stop()
+            self.music_cog._stop_for_advance(self.ctx.voice_client)
             await interaction.response.send_message(t("status.skipped_eph"), ephemeral=True)
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)

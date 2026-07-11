@@ -17,6 +17,17 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 STREAM_THRESHOLD_SECONDS = 20 * 60  # Videos > 20 min werden gestreamt statt heruntergeladen
 
+# Progressiver Download: ungecachte Tracks ≤ STREAM_THRESHOLD_SECONDS werden
+# nicht mehr als CDN-Stream gestartet (YouTube lehnt FFmpegs HTTP-Client oft
+# mit 403 ab), sondern sofort via yt_dlp heruntergeladen; FFmpeg spielt die
+# wachsende Datei, sobald genug gepuffert ist.
+PROGRESSIVE_MIN_BYTES = 256 * 1024        # 160 kbit/s Opus ≈ 20 KB/s → ≈ 13 s Puffer
+PROGRESSIVE_BYTES_PER_SECOND = 20 * 1024  # konservative Bitraten-Schätzung für Seek-/Resume-Puffer
+PROGRESSIVE_WAIT_TIMEOUT = 15.0           # danach Fallback auf den alten CDN-Stream-Pfad
+PROGRESSIVE_POLL_INTERVAL = 0.2           # Dateigrößen-Polling während der Pufferung
+PROGRESSIVE_BLOCK_TTL = 600.0             # gescheiterte URL solange nicht erneut progressiv versuchen
+PROGRESSIVE_SIDECAR_SUFFIX = ".inprogress"  # Crash-Marker neben der wachsenden Datei
+
 METADATA_CACHE_FILE = Path("metadata_cache.json")
 CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
 
@@ -120,12 +131,23 @@ class Downloader:
     # Callable ohne Argumente → (urls, titles) der Songs in Queue/current_track;
     # wird von MusicCommands gesetzt. None = Cleanup traut sich nichts zu löschen.
     protected_provider = None
+    # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
+    # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
+    _progressive = None          # dict[url → asyncio.Task]: laufende progressive Downloads
+    _progressive_files = None    # dict[url → Path]: Zieldateien (Schutz vor cleanup_downloads)
+    _incomplete_files = None     # set[Path]: resolved Pfade unvollständiger Dateien
+    _progressive_blocked = None  # dict[url → monotonic]: TTL-Blockliste nach Fehlschlag
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
         self._url_cache: dict = {}
         self._cache_timestamps: dict[str, float] = {}
         self._pending_resolves: dict[str, asyncio.Task] = {}
+        self._progressive: dict[str, asyncio.Task] = {}
+        self._progressive_files: dict[str, Path] = {}
+        self._incomplete_files: set[Path] = set()
+        self._progressive_blocked: dict[str, float] = {}
+        self._purge_stale_progressive()
         self._load_cache()
         self._init_ydl()
 
@@ -158,7 +180,6 @@ class Downloader:
         damit der nächste resolve_track eine frische Stream-URL extrahiert."""
         self._url_cache.pop(url, None)
         self._cache_timestamps.pop(url, None)
-        self._cache_timestamps.clear()
 
     def _load_cache(self):
         """Lädt persistierten Metadaten-Cache vom letzten Bot-Lauf (TTL: 2h).
@@ -286,15 +307,17 @@ class Downloader:
         except Exception as e:
             logger.debug(f"[Warmup] Fehlgeschlagen (ignoriert): {e}")
 
-    def _init_ydl(self):
+    @staticmethod
+    def _cookie_opts() -> dict:
         if YDL_COOKIES_FILE:
-            _cookies = {"cookiefile": YDL_COOKIES_FILE}
-        elif YDL_BROWSER:
-            _cookies = {"cookiesfrombrowser": (YDL_BROWSER,)}
-        else:
-            _cookies = {}
+            return {"cookiefile": YDL_COOKIES_FILE}
+        if YDL_BROWSER:
+            return {"cookiesfrombrowser": (YDL_BROWSER,)}
+        return {}
 
-        base_opts = {
+    def _build_base_opts(self) -> dict:
+        _cookies = self._cookie_opts()
+        return {
             "quiet": True,
             "no_warnings": True,
             # Bevorzugt Opus/webm mit mindestens 160kbps (YouTube's höchste Audio-Tier),
@@ -314,6 +337,23 @@ class Downloader:
             "js_runtimes": {"node": {}},
             **_cookies,
         }
+
+    def _make_progressive_ydl(self) -> "yt_dlp.YoutubeDL":
+        """Frische Wegwerf-Instanz für einen progressiven Download.
+
+        Eigene Instanz pro Download, weil yt_dlp nicht threadsafe ist (läuft
+        parallel zu prefetch_next auf self.ydl) und rebuild() die geteilten
+        Instanzen mitten im Download austauschen kann. nopart schreibt direkt
+        in den Zielnamen: FFmpeg hält die wachsende Datei offen, das übliche
+        .part-Rename würde auf Windows mit Sharing Violation scheitern.
+        outtmpl ist identisch zu self.ydl → prepare_filename(info) der
+        Hauptinstanz liefert exakt den Pfad, in den hier geschrieben wird.
+        Keine mp3-Postprocessors: der progressive Pfad ist im mp3-Modus gesperrt.
+        """
+        return yt_dlp.YoutubeDL({**self._build_base_opts(), "nopart": True, "noplaylist": True})
+
+    def _init_ydl(self):
+        base_opts = self._build_base_opts()
         if self.audio_format == "mp3":
             # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
             base_opts["postprocessors"] = [
@@ -326,6 +366,7 @@ class Downloader:
         self.ydl = yt_dlp.YoutubeDL(base_opts)
 
         # Gecachte Instanzen für Suche und URL-Abfragen.
+        _cookies = self._cookie_opts()
         _js = {"js_runtimes": {"node": {}}}
         self.search_ydl = yt_dlp.YoutubeDL({
             "quiet": True,
@@ -392,10 +433,15 @@ class Downloader:
                 protected_paths.add(Path(self.ydl.prepare_filename(info)).resolve())
             except Exception:
                 continue
-        for tabu in (self.last_resolved_file, extra_protected):
+        # Wachsende Dateien laufender progressiver Downloads (samt Sidecars):
+        # last_resolved_file reicht nicht – nach einem weiteren Skip zeigt es
+        # schon auf den neuen Track, während der alte noch fertiglädt.
+        _prog_files = list((self._progressive_files or {}).values())
+        for tabu in (self.last_resolved_file, extra_protected, *_prog_files):
             if tabu is not None:
                 try:
                     protected_paths.add(Path(tabu).resolve())
+                    protected_paths.add(self._sidecar_for(Path(tabu)).resolve())
                 except Exception:
                     pass
         # Zweite Schutzschiene über den Titel (Dateiname = "<Titel>.<ext>"):
@@ -434,13 +480,163 @@ class Downloader:
             logger.info(f"[Cleanup] Gelöscht ({size / (1024 * 1024):.1f} MB): {p.name}")
 
     # ------------------------------------------------------------------
+    # Progressiver Download (wachsende Datei spielt, Download läuft weiter)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sidecar_for(filename: Path) -> Path:
+        return filename.with_name(filename.name + PROGRESSIVE_SIDECAR_SUFFIX)
+
+    def is_incomplete(self, path) -> bool:
+        """True, wenn die Datei zu einem laufenden/gescheiterten progressiven
+        Download gehört und daher nicht als fertiger Cache gelten darf."""
+        if not self._incomplete_files:
+            return False
+        try:
+            return Path(path).resolve() in self._incomplete_files
+        except OSError:
+            return False
+
+    def progressive_task_for(self, url: str):
+        """Laufender progressiver Download-Task für diese URL, sonst None."""
+        return (self._progressive or {}).get(url)
+
+    def block_progressive(self, url: str):
+        """Sperrt eine URL für PROGRESSIVE_BLOCK_TTL Sekunden gegen weitere
+        progressive Versuche (nach Fehlschlag/Timeout → Stream-Pfad)."""
+        if self._progressive_blocked is None:
+            self._progressive_blocked = {}
+        self._progressive_blocked[url] = time.monotonic()
+
+    def _progressive_is_blocked(self, url: str) -> bool:
+        if not self._progressive_blocked:
+            return False
+        now = time.monotonic()
+        # Abgelaufene Einträge lazy wegräumen.
+        for u, ts in list(self._progressive_blocked.items()):
+            if now - ts > PROGRESSIVE_BLOCK_TTL:
+                self._progressive_blocked.pop(u, None)
+        return url in self._progressive_blocked
+
+    def _purge_stale_progressive(self):
+        """Startup-Aufräumen: .inprogress-Sidecars aus einem früheren Lauf
+        markieren unvollständige Dateien (harter Crash mitten im Download,
+        oder unlink scheiterte, weil FFmpeg noch las) → beide löschen."""
+        purged = 0
+        for sidecar in DOWNLOAD_DIR.glob(f"*{PROGRESSIVE_SIDECAR_SUFFIX}"):
+            media = sidecar.with_name(sidecar.name[: -len(PROGRESSIVE_SIDECAR_SUFFIX)])
+            try:
+                if media.exists():
+                    media.unlink()
+                sidecar.unlink()
+                purged += 1
+            except OSError:
+                continue  # im Zweifel liegen lassen, nächster Start versucht es erneut
+        if purged:
+            logger.info(f"[Progressiv] {purged} unvollständige Datei(en) aus früherem Lauf entfernt")
+
+    def _start_progressive(self, url: str, info: dict, filename: Path, title: str) -> asyncio.Task:
+        """Registriert die Zieldatei als unvollständig (Set + Sidecar) und
+        startet den Hintergrund-Download. Muss auf dem Event-Loop laufen."""
+        if self._progressive is None:
+            self._progressive = {}
+        if self._progressive_files is None:
+            self._progressive_files = {}
+        if self._incomplete_files is None:
+            self._incomplete_files = set()
+        self._incomplete_files.add(filename.resolve())
+        self._progressive_files[url] = filename
+        try:
+            # Marker muss existieren, bevor die ersten Datenbytes geschrieben
+            # werden – winziger synchroner touch, analog zum last_queue.json-Write.
+            self._sidecar_for(filename).touch()
+        except OSError:
+            pass
+        task = asyncio.create_task(self._run_progressive(url, info, filename, title))
+        self._progressive[url] = task
+        logger.info(f"[Progressiv] Starte Hintergrund-Download: {title}")
+        return task
+
+    async def _run_progressive(self, url: str, info: dict, filename: Path, title: str) -> bool:
+        """Führt den progressiven Download aus. Fängt alle Fehler selbst;
+        Rückgabe True = Datei vollständig."""
+        try:
+            ydl = self._make_progressive_ydl()
+            # download([webpage_url]) extrahiert intern frisch – eine ggf. abgelaufene
+            # CDN-URL aus dem Cache ist egal; yt_dlps HTTP-Client trifft kein CDN-403.
+            await asyncio.to_thread(ydl.download, [info.get("webpage_url") or url])
+            self._incomplete_files.discard(filename.resolve())
+            try:
+                self._sidecar_for(filename).unlink()
+            except OSError:
+                pass
+            logger.info(f"[Progressiv] Download fertig: {filename.name}")
+            await self.cleanup_downloads()
+            return True
+        except Exception as e:
+            logger.warning(f"[Progressiv] Download fehlgeschlagen für {title}: {e} – unvollständige Datei wird entfernt")
+            try:
+                if filename.exists():
+                    filename.unlink()
+                self._sidecar_for(filename).unlink(missing_ok=True)
+                self._incomplete_files.discard(filename.resolve())
+            except OSError:
+                # FFmpeg liest noch (Windows-Sharing) → Datei bleibt im Set und der
+                # Sidecar liegen: in dieser Session gilt sie als "nicht vorhanden",
+                # der nächste Bot-Start räumt sie via _purge_stale_progressive weg.
+                logger.warning(f"[Progressiv] Unvollständige Datei konnte nicht gelöscht werden (in Benutzung?): {filename.name}")
+            return False
+        finally:
+            self._progressive.pop(url, None)
+            self._progressive_files.pop(url, None)
+
+    async def _wait_for_buffer(self, filename: Path, task: asyncio.Task, min_buffer_seconds: int = 0) -> bool:
+        """Wartet, bis die wachsende Datei genug Startpuffer hat (oder der
+        Download komplett fertig ist). min_buffer_seconds erhöht die Schwelle
+        um die Bytes bis zu einem -ss-Ziel: die cues-lose wachsende webm wird
+        von FFmpeg linear bis dorthin geparst – diese Bytes müssen existieren.
+        False = Timeout oder Download gescheitert (→ Aufrufer fällt auf Stream zurück).
+        """
+        min_bytes = PROGRESSIVE_MIN_BYTES + int(min_buffer_seconds) * PROGRESSIVE_BYTES_PER_SECOND
+        deadline = time.monotonic() + PROGRESSIVE_WAIT_TIMEOUT
+        while True:
+            if task.done():
+                try:
+                    ok = task.result() is True
+                except (asyncio.CancelledError, Exception):
+                    ok = False
+                return ok and filename.exists()
+            try:
+                size = filename.stat().st_size
+            except OSError:
+                size = 0
+            if size >= min_bytes:
+                return True
+            if time.monotonic() > deadline:
+                return False
+            await asyncio.sleep(PROGRESSIVE_POLL_INTERVAL)
+
+    async def wait_progressive_idle(self, timeout: float = 300.0):
+        """Wartet, bis kein progressiver Download mehr läuft (Bandbreiten-
+        Rücksicht für den Prefetch). Fehler/Timeout werden geschluckt."""
+        deadline = time.monotonic() + timeout
+        while self._progressive and time.monotonic() < deadline:
+            await asyncio.sleep(PROGRESSIVE_POLL_INTERVAL)
+
+    # ------------------------------------------------------------------
     # Download-Logik
     # ------------------------------------------------------------------
 
-    async def resolve_track(self, url: str, title: str, prefetch_task=None, force_download=False):
+    async def resolve_track(self, url: str, title: str, prefetch_task=None, force_download=False,
+                            min_buffer_seconds: int = 0):
         """Löst URL auf: extrahiert Metadaten und stellt sicher dass die Audiodatei lokal vorliegt.
 
         prefetch_task: läuft ggf. parallel – warten statt doppelt herunterladen.
+        min_buffer_seconds: -ss-Ziel des Aufrufers – der progressive Pfad puffert
+        zusätzlich so viele Sekunden, bevor die wachsende Datei zurückgegeben wird.
+        Ungecachte kurze Tracks starten als progressiver Download (wachsende
+        Datei, siehe is_incomplete()), nicht mehr als CDN-Stream; der Stream
+        ist nur noch Fallback.
         force_download: Stream-Abkürzung deaktivieren und die Datei sofort lokal
         herunterladen (letzter Anlauf nach zwei toten Stream-Versuchen; yt_dlp
         nutzt den eigenen HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen).
@@ -498,6 +694,33 @@ class Downloader:
             filename = Path(self.ydl.prepare_filename(info))
             self.last_resolved_file = filename
 
+        # Läuft für diese URL bereits ein progressiver Download (Loop-Mode,
+        # !replay, !eq-Restart re-queuen den aktuellen Track)? → am laufenden
+        # Task teilnehmen statt die noch wachsende Datei als fertig zu missdeuten.
+        prog_task = self.progressive_task_for(url)
+        if prog_task is not None:
+            if await self._wait_for_buffer(filename, prog_task, min_buffer_seconds):
+                logger.info(f"[Progressiv] Laufender Download wird mitgenutzt: {title}")
+                self.last_resolved_file = filename
+                return info, filename, title, duration
+            # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln.
+
+        # Leiche eines früheren Fehlschlags (unlink scheiterte, weil FFmpeg die
+        # Datei noch offen hatte): existiert, ist aber unvollständig → wegräumen.
+        if filename.exists() and self.is_incomplete(filename):
+            _resolved = filename.resolve()
+            try:
+                filename.unlink()
+                self._sidecar_for(filename).unlink(missing_ok=True)
+                self._incomplete_files.discard(_resolved)
+            except OSError:
+                # Datei blockiert → als Stream ausweichen; der nächste Bot-Start
+                # räumt sie via _purge_stale_progressive weg.
+                audio_url = info.get("url") or url
+                logger.info(f"[Stream] Unvollständige Datei blockiert – starte als Stream: {title}")
+                self.last_resolved_file = None
+                return info, audio_url, title, duration
+
         if not filename.exists():
             # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
             # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
@@ -516,7 +739,41 @@ class Downloader:
                 await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
                 logger.info(f"[Download-Fallback] Fertig: {filename.name}")
                 await self.cleanup_downloads()
-            if not filename.exists():  # Prefetch hat es nicht erledigt → sofort als Stream starten
+            if not filename.exists():
+                # Primärpfad: progressiver Download – yt_dlp lädt sofort, FFmpeg
+                # spielt die wachsende Datei, sobald der Startpuffer steht. Gates:
+                # mp3-Modus konvertiert erst NACH dem Download; m4a/mp4 ist
+                # wachsend nicht lesbar (moov-Atom am Dateiende); geblockte URLs
+                # sind gerade erst progressiv gescheitert.
+                if (not force_download
+                        and self.audio_format != "mp3"
+                        and info.get("ext") in ("webm", "opus")
+                        and not self._progressive_is_blocked(url)):
+                    _t0 = time.monotonic()
+                    task = self._start_progressive(url, info, filename, title)
+                    if await self._wait_for_buffer(filename, task, min_buffer_seconds):
+                        try:
+                            _kb = filename.stat().st_size // 1024
+                        except OSError:
+                            _kb = 0
+                        logger.info(
+                            f"[Progressiv] Puffer erreicht ({_kb} KB nach {time.monotonic() - _t0:.1f}s) "
+                            f"– Wiedergabe startet: {title}"
+                        )
+                        self.last_resolved_file = filename
+                        return info, filename, title, duration
+                    # Task NICHT canceln: bei bloßem Timeout darf er fertigladen
+                    # (Datei wird Cache); war er gescheitert, hat _run_progressive
+                    # bereits aufgeräumt.
+                    self.block_progressive(url)
+                    if task.done():
+                        logger.warning(f"[Progressiv] Download scheiterte sofort – Fallback auf CDN-Stream: {title}")
+                    else:
+                        logger.warning(
+                            f"[Progressiv] Pufferung nicht rechtzeitig ({PROGRESSIVE_WAIT_TIMEOUT:.0f}s) "
+                            f"– Fallback auf CDN-Stream: {title}"
+                        )
+                # Fallback: direkter CDN-Stream (früherer Primärpfad).
                 audio_url = info.get("url") or url
                 logger.info(f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
                 self.last_resolved_file = None
@@ -533,6 +790,11 @@ class Downloader:
         if len(queue) <= idx:
             return
         url, title = queue[idx]  # Peek – nicht aus der Queue entfernen
+        if self.progressive_task_for(url) is not None:
+            # Läuft bereits progressiv → nie zwei Downloads auf dieselbe Datei
+            # (das .part-Rename des Prefetch liefe gegen die offene FFmpeg-Datei).
+            logger.info(f"[Prefetch] Übersprungen – läuft bereits progressiv: {title}")
+            return
         try:
             if url in self._url_cache:
                 info = self._url_cache[url]
@@ -553,6 +815,16 @@ class Downloader:
                 if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
                     return
                 filename = Path(self.ydl.prepare_filename(info))
+            if filename.exists() and self.is_incomplete(filename):
+                # Leiche eines gescheiterten progressiven Downloads → erst weg,
+                # sonst hält yt_dlp die Datei für fertig. Blockiert (FFmpeg liest
+                # noch) → diesen Prefetch auslassen.
+                try:
+                    filename.unlink()
+                    self._sidecar_for(filename).unlink(missing_ok=True)
+                    self._incomplete_files.discard(filename.resolve())
+                except OSError:
+                    return
             if not filename.exists():
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
                 await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])

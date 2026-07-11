@@ -206,9 +206,9 @@ def test_rebuild_saves_cache_to_disk_first(monkeypatch, tmp_path):
     assert dl._url_cache == {}
 
 
-def test_invalidate_removes_entry_but_clears_all_timestamps():
-    """IST: invalidate(url) entfernt den einen Cache-Eintrag, leert aber
-    zusätzlich ALLE Timestamps – auch die fremder Einträge (Auffälligkeit)."""
+def test_invalidate_removes_only_the_given_entry():
+    """invalidate(url) entfernt genau diesen Cache-Eintrag samt Timestamp –
+    fremde Einträge und deren Timestamps bleiben unangetastet."""
     dl = bare_downloader()
     now = time.time()
     dl._url_cache["https://x/1"] = {"title": "Eins"}
@@ -219,5 +219,6 @@ def test_invalidate_removes_entry_but_clears_all_timestamps():
     dl.invalidate("https://x/1")
 
     assert "https://x/1" not in dl._url_cache
-    assert "https://x/2" in dl._url_cache          # Eintrag bleibt ...
-    assert dl._cache_timestamps == {}              # ... sein Timestamp nicht
+    assert "https://x/1" not in dl._cache_timestamps
+    assert "https://x/2" in dl._url_cache
+    assert dl._cache_timestamps == {"https://x/2": now}

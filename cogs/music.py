@@ -33,6 +33,10 @@ from cogs.music_queue_io import QueuePersistenceMixin
 
 SCORE_FILE = Path("play_counts.json")
 
+# Max. Seek-Resumes pro Track, wenn FFmpeg die wachsende Datei eines progressiven
+# Downloads überholt hat – danach Fallback auf die Stream-/Retry-Kaskade.
+PROGRESSIVE_MAX_RESUMES = 2
+
 # Sentinel für _extract_info_or_report: unterscheidet "Fehler wurde bereits
 # gemeldet" von einem echten None-Ergebnis aus yt_dlp (das die Aufrufer wie
 # bisher selbst krachen lassen).
@@ -109,6 +113,16 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # CDN-403s gegen FFmpeg meist nicht betroffen). Lebenszyklus wie
         # _stream_retry_url; beide zusammen begrenzen einen Track auf 3 Versuche.
         self._force_download_url = None
+        # Progressiver Download: Endet die wachsende Datei vorzeitig (FFmpeg hat
+        # den Download überholt), wird der Track mit -ss wieder vorn eingereiht.
+        # Mechanik wie _stream_retry_url (kein doppelter Play-Count); die Kappe
+        # verhindert Endlos-Resumes bei stotterndem Download.
+        self._progressive_resume_url = None
+        self._progressive_resume_count = 0
+        # One-Shot-Flag: absichtlicher Stopp (Skip, !now, !eq, !seek, Auto-Leave …)
+        # → after_playing darf die wachsende Datei NICHT wieder einreihen.
+        # Gesetzt via _stop_for_advance(), konsumiert (und gelöscht) in after_playing.
+        self._suppress_resume = False
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -358,7 +372,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self.is_playing = False
             self.current_track = None
             if voice_client.is_playing() or voice_client.is_paused():
-                voice_client.stop()
+                self._stop_for_advance(voice_client)
             await voice_client.disconnect()
             if self.text_channel:
                 await self.text_channel.send(t("misc.auto_leave"))
@@ -565,12 +579,27 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 self.auto_leave_task.cancel()
                 self.auto_leave_task = None
 
+    def _stop_for_advance(self, voice_client):
+        """vc.stop() für absichtliche Wiedergabe-Wechsel (Skip, !now, !eq, !seek,
+        !stop, !clear, Auto-Leave). Setzt das One-Shot-Flag _suppress_resume,
+        damit after_playing den Stopp nicht als vorzeitiges Dateiende einer
+        wachsenden Datei missdeutet und den Track wieder vorn einreiht."""
+        self._suppress_resume = True
+        voice_client.stop()
+
     async def _resolve_track(self, url: str, title: str, force_download: bool = False):
         """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
 
         Returns: (info, filename, title, duration)
         """
-        return await self.dl.resolve_track(url, title, self.prefetch_task, force_download=force_download)
+        # _seek_offset wird erst NACH diesem Aufruf in play_next konsumiert
+        # (Swap auf 0) – hier lesen ist also der Wert des anstehenden -ss.
+        # Der progressive Pfad puffert entsprechend mehr, damit die Bytes bis
+        # zum Seek-Ziel in der wachsenden Datei existieren.
+        return await self.dl.resolve_track(
+            url, title, self.prefetch_task,
+            force_download=force_download, min_buffer_seconds=self._seek_offset,
+        )
 
     @staticmethod
     def _ffmpeg_header_opts(info) -> str:
@@ -749,6 +778,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             eq_filter = self.eq_presets.get(self.equalizer, "")
             seek_offset, self._seek_offset = self._seek_offset, 0
             is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
+            # Wachsende Datei eines progressiven Downloads? Snapshot zum Start-
+            # zeitpunkt – der Download kann während der Wiedergabe fertig werden.
+            is_growing = (not is_stream) and self.dl.is_incomplete(filename)
+            prog_task = None if is_stream else self.dl.progressive_task_for(url)
 
             if is_stream and force_download:
                 # Der Download-Fallback konnte keine lokale Datei liefern (>20-min-
@@ -795,6 +828,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 source = discord.FFmpegOpusAudio(
                     str(filename), bitrate=192, before_options=before_opts, stderr=stderr_buf
                 )
+            elif is_growing:
+                # Wachsende webm: nie codec=copy – der Muxer schreibt Cues/Duration
+                # erst am Dateiende, Transkodieren liest tolerant linear. Lokale
+                # Datei → keine -reconnect/-headers-Optionen nötig.
+                source = discord.FFmpegOpusAudio(
+                    str(filename), bitrate=192, before_options=before_opts, stderr=stderr_buf
+                )
             else:
                 # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
                 source = discord.FFmpegOpusAudio(
@@ -808,6 +848,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 statt await. Direkt awaiten würde hier crashen.
                 """
                 self.bot.loop.call_soon_threadsafe(self._playback_done.set)
+                # One-Shot: Flag immer konsumieren, damit ein absichtlicher Stopp
+                # nicht in den after_playing-Lauf eines späteren Tracks leakt.
+                suppress_resume, self._suppress_resume = self._suppress_resume, False
                 if error:
                     logger.warning(f"[Fehler beim Abspielen] {error}")
                 elapsed = time.monotonic() - self.track_start_time if self.track_start_time else 999
@@ -827,17 +870,53 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                             f"{_verdicts.get(verdict, 'unbekannt (keine verwertbare stderr-Ausgabe)')}. "
                             f"Aktives Preset: '{self.equalizer}'"
                         )
-                elif self._stream_retry_url == url:
-                    # Der Neuversuch lief normal durch → Retry-Sperren wieder aufheben.
-                    self._stream_retry_url = None
-                    self._force_download_url = None
+
+                retry_scheduled = False
+
+                # Progressiver Download: Endete die wachsende Datei vorzeitig
+                # (FFmpeg hat den Download überholt oder der Download starb),
+                # wird der Track mit -ss an der Hörposition wieder vorn eingereiht.
+                # Läuft VOR dem Marker-Reset unten: auch ein Resume-Durchlauf, der
+                # ≥2 s spielte und erneut früh endete, muss den Zähler behalten –
+                # sonst griffe die Kappe nie. Nie bei absichtlichen Stopps
+                # (_suppress_resume via _stop_for_advance, !stop/!restart via
+                # _stopped_by_user, Radio-Takeover, DM-Bridge-Übernahme).
+                if (is_growing and not error and verdict != "filter"
+                        and not suppress_resume and not self._stopped_by_user
+                        and not self.is_radio
+                        and not getattr(self.bot, "dm_speaking", False)):
+                    played = seek_offset + max(0.0, elapsed - self._np_paused_total)
+                    still_incomplete = (
+                        (prog_task is not None and not prog_task.done())
+                        or self.dl.is_incomplete(filename)
+                    )
+                    if still_incomplete and duration and played < duration - 5:
+                        self._seek_offset = max(0, int(played) - 1)  # 1 s Überlappung gegen Schnittkante
+                        self._progressive_resume_url = url           # kein doppelter Play-Count
+                        if (self._progressive_resume_count < PROGRESSIVE_MAX_RESUMES
+                                and prog_task is not None and not prog_task.done()):
+                            # Download läuft noch → wieder einsteigen.
+                            self._progressive_resume_count += 1
+                            self.queue.appendleft((url, title))
+                            retry_scheduled = True
+                            logger.warning(
+                                f"[Progressiv] Vorzeitiges Dateiende nach {played:.0f}s/{duration}s – "
+                                f"setze bei {int(played) // 60}:{int(played) % 60:02d} fort: {title}"
+                            )
+                        else:
+                            # Download tot oder Resume-Kappe erreicht → progressiv für
+                            # diese URL sperren; resolve_track liefert dann den CDN-
+                            # Stream, dessen bestehende Retry-Kette übernimmt.
+                            self.dl.block_progressive(url)
+                            self.queue.appendleft((url, title))
+                            retry_scheduled = True
+                            logger.warning(f"[Progressiv] Resume aufgegeben (Download tot/Kappe) – Fallback auf Stream: {title}")
 
                 # Selbstheilung: Stream starb sofort an einem Input-Fehler (typisch:
                 # sporadisches 403 vom CDN) → genau EIN Neuversuch mit frisch
                 # extrahierter URL, danach EIN letzter Anlauf als lokaler Download.
                 # Echte Filterfehler werden NICHT wiederholt.
-                retry_scheduled = False
-                if is_stream and elapsed < 1.0 and verdict == "input":
+                if not retry_scheduled and is_stream and elapsed < 1.0 and verdict == "input":
                     if self._stream_retry_url != url:
                         self._stream_retry_url = url
                         self.dl.invalidate(url)   # gecachte (Prefetch-)Metadaten wegwerfen
@@ -868,6 +947,14 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                     asyncio.run_coroutine_threadsafe(
                         ctx.send(t("error.stream_giveup", title=title)), self.bot.loop
                     )
+
+                if (not retry_scheduled and not error and elapsed >= 2.0
+                        and url in (self._stream_retry_url, self._progressive_resume_url)):
+                    # Der Neuversuch/Resume lief normal zu Ende → Sperren aufheben.
+                    self._stream_retry_url = None
+                    self._force_download_url = None
+                    self._progressive_resume_url = None
+                    self._progressive_resume_count = 0
 
                 # Queue-Stand nach jedem Track in Datei sichern – nicht als
                 # Restore-Point gedacht, nur als Protokoll der letzten Session.
@@ -960,13 +1047,15 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._np_last_desc = None
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
-            if url == self._stream_retry_url:
-                # Zweiter/dritter Anlauf desselben Tracks (Stream-Retry bzw.
-                # Download-Fallback) → nicht doppelt zählen.
+            if url in (self._stream_retry_url, self._progressive_resume_url):
+                # Weiterer Anlauf desselben Tracks (Stream-Retry, Download-
+                # Fallback oder progressives Seek-Resume) → nicht doppelt zählen.
                 pass
             else:
                 self._stream_retry_url = None   # anderer Track → Retry-Sperren aufheben
                 self._force_download_url = None
+                self._progressive_resume_url = None
+                self._progressive_resume_count = 0
                 self._record_play(url, title)
             self.text_channel = ctx.channel
 
@@ -1058,6 +1147,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 # daher kein paralleles gather. Sequenziell reicht: während Song N spielt,
                 # werden N+1 und N+2 nacheinander heruntergeladen.
                 async def _prefetch_two():
+                    # Bandbreiten-Rücksicht: erst warten, bis kein progressiver
+                    # Download mehr läuft – der füttert die laufende Wiedergabe.
+                    await self.dl.wait_progressive_idle()
                     await self._prefetch_next(0)
                     if len(self.queue) >= 2:
                         await self._prefetch_next(1)
@@ -1391,7 +1483,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         elif ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             self.is_playing = False
             self._stopped_by_user = True   # Watchdog soll hier nicht von selbst neu starten
-            ctx.voice_client.stop()
+            self._stop_for_advance(ctx.voice_client)
             await ctx.send(t("status.playback_stopped"))
         else:
             await ctx.send(t("error.nothing_playing"))
@@ -1458,7 +1550,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 await self.play_next(ctx)
             return
         if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+            self._stop_for_advance(ctx.voice_client)
             await ctx.send(t("status.skipped"), delete_after=20)
         else:
             await ctx.send(t("error.no_song_playing"))
@@ -1519,7 +1611,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._evict_autoplay_song()
             await ctx.send(t("status.playing", title=entry[1]))
             if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-                ctx.voice_client.stop()
+                self._stop_for_advance(ctx.voice_client)
             elif not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -1550,7 +1642,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             await ctx.send(t("status.playing", title=title))
 
         if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
-            ctx.voice_client.stop()  # after_playing-Callback startet den neuen Song
+            self._stop_for_advance(ctx.voice_client)  # after_playing-Callback startet den neuen Song
         elif not self.is_playing:
             self.is_playing = True
             await self.play_next(ctx)
@@ -1639,7 +1731,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
             self._autoplay_prefetch_task.cancel()   # darf die geleerte Queue nicht neu befüllen
         if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+            self._stop_for_advance(ctx.voice_client)
         await ctx.send(t("status.cleared"))
 
     @commands.command(usage="!remove <position>")
@@ -1739,7 +1831,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 tr_url, tr_title, *_ = self.current_track
                 self.current_track = None  # verhindert Doppel-Insert durch loop-Branch in after_playing
                 self.queue.appendleft((tr_url, tr_title))
-                ctx.voice_client.stop()
+                self._stop_for_advance(ctx.voice_client)
                 msg += t("status.eq_restart")
             await ctx.send(msg)
         else:
@@ -1787,7 +1879,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         self._seek_offset = offset
         self.current_track = None
         self.queue.appendleft((url, title))
-        ctx.voice_client.stop()
+        self._stop_for_advance(ctx.voice_client)
         await ctx.send(t("status.seeking", mins=mins, secs=f"{secs:02d}", title=title))
 
     @commands.command(name="baba")

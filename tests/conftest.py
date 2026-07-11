@@ -87,12 +87,20 @@ class FakeDownloader:
         self.force_result = None   # Rückgabe bei force_download=True (None → self.result)
         self.resolve_calls = []
         self.force_calls = []
+        self.min_buffer_calls = []
         self.invalidated = []
         self.cleared = 0
+        # Progressiver Download: Tests setzen incomplete_paths/progressive_tasks,
+        # um eine wachsende Datei bzw. einen laufenden Download zu simulieren.
+        self.incomplete_paths = set()
+        self.progressive_tasks = {}
+        self.blocked = []
 
-    async def resolve_track(self, url, title, prefetch_task=None, force_download=False):
+    async def resolve_track(self, url, title, prefetch_task=None, force_download=False,
+                            min_buffer_seconds=0):
         self.resolve_calls.append(url)
         self.force_calls.append(force_download)
+        self.min_buffer_calls.append(min_buffer_seconds)
         await asyncio.sleep(0)
         if force_download and self.force_result is not None:
             return self.force_result
@@ -105,6 +113,18 @@ class FakeDownloader:
         self.cleared += 1
 
     async def prefetch_next(self, queue, idx=0):
+        pass
+
+    def is_incomplete(self, path):
+        return path in self.incomplete_paths
+
+    def progressive_task_for(self, url):
+        return self.progressive_tasks.get(url)
+
+    def block_progressive(self, url):
+        self.blocked.append(url)
+
+    async def wait_progressive_idle(self, timeout=300.0):
         pass
 
 
@@ -146,6 +166,9 @@ def build_cog(dl=None):
     mc._ended_np = None
     mc._stream_retry_url = None
     mc._force_download_url = None
+    mc._progressive_resume_url = None
+    mc._progressive_resume_count = 0
+    mc._suppress_resume = False
     mc.equalizer = "punchy"
     mc.audio_format = "webm"
     mc.loop_mode = None

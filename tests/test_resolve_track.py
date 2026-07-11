@@ -1,8 +1,12 @@
 """Characterization-Tests: resolve_track-Verzweigung (Stream vs. Download).
 
-Dokumentiert die drei Rückgabe-Formen:
-  - str  (CDN-Stream-URL): Dauer > 20 min ODER Datei fehlt lokal
-  - Path (lokale Datei):   Datei existiert (auch nach erfolgreichem Prefetch)
+Dokumentiert die Rückgabe-Formen:
+  - str  (CDN-Stream-URL): Dauer > 20 min ODER Datei fehlt lokal und der
+    progressive Pfad greift nicht (die Info-Dicts hier haben kein "ext" →
+    das webm/opus-Gate bleibt zu; der progressive Pfad selbst wird in
+    test_progressive_download.py getestet)
+  - Path (lokale Datei):   Datei existiert (auch nach erfolgreichem Prefetch
+    oder als wachsende Datei eines progressiven Downloads)
 """
 
 import asyncio
@@ -91,6 +95,7 @@ def test_existing_file_returns_path(tmp_path):
 
 
 def test_missing_file_without_prefetch_streams(tmp_path):
+    # Kein "ext" im Info-Dict → progressives Gate zu → alter Stream-Pfad.
     info = {"title": "Kurz", "duration": 180, "url": "https://cdn.example/stream"}
     dl = make_dl(info, tmp_path / "fehlt.webm")
 

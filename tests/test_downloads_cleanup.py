@@ -141,6 +141,27 @@ def test_last_resolved_file_is_protected(tmp_path, monkeypatch):
     assert not frei.exists()
 
 
+def test_progressive_in_flight_file_is_protected(tmp_path, monkeypatch):
+    """Wachsende Datei eines laufenden progressiven Downloads (samt Sidecar) ist
+    tabu – auch wenn last_resolved_file schon auf den nächsten Track zeigt."""
+    monkeypatch.setattr(dlmod, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 1)
+    growing = make_file(tmp_path, "wächst-noch.webm", 512 * 1024, age_seconds=5000)
+    sidecar = make_file(tmp_path, "wächst-noch.webm" + dlmod.PROGRESSIVE_SIDECAR_SUFFIX, 1, age_seconds=5000)
+    frei = make_file(tmp_path, "frei.webm", 512 * 1024, age_seconds=3000)
+    make_file(tmp_path, "neu.webm", 512 * 1024, age_seconds=10)
+    dl = make_dl()
+    dl.protected_provider = lambda: ([], [])
+    dl._progressive_files = {"https://x/1": growing}
+    dl.last_resolved_file = None   # zeigt schon woanders hin
+
+    run_cleanup(dl)
+
+    assert growing.exists()
+    assert sidecar.exists()
+    assert not frei.exists()
+
+
 def test_extra_protected_survives(tmp_path, monkeypatch):
     """Frisch geladener Autoplay-Song (noch nicht in der Queue) ist tabu."""
     monkeypatch.setattr(dlmod, "DOWNLOAD_DIR", tmp_path)

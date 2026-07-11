@@ -87,8 +87,12 @@ class FakeDownloader:
         self.resolve_calls = []
         self.force_calls = []
         self.invalidated = []
+        self.incomplete_paths = set()
+        self.progressive_tasks = {}
+        self.blocked = []
 
-    async def resolve_track(self, url, title, prefetch_task=None, force_download=False):
+    async def resolve_track(self, url, title, prefetch_task=None, force_download=False,
+                            min_buffer_seconds=0):
         self.resolve_calls.append(url)
         self.force_calls.append(force_download)
         await asyncio.sleep(0)
@@ -100,6 +104,20 @@ class FakeDownloader:
         self.invalidated.append(url)
 
     async def prefetch_next(self, queue, idx=0):
+        pass
+
+    # Progressiver Download: Tests simulieren über incomplete_paths/
+    # progressive_tasks eine wachsende Datei bzw. einen laufenden Download.
+    def is_incomplete(self, path):
+        return path in self.incomplete_paths
+
+    def progressive_task_for(self, url):
+        return self.progressive_tasks.get(url)
+
+    def block_progressive(self, url):
+        self.blocked.append(url)
+
+    async def wait_progressive_idle(self, timeout=300.0):
         pass
 
 
@@ -160,6 +178,9 @@ def make_cog(dl):
     mc._ended_np = None
     mc._stream_retry_url = None
     mc._force_download_url = None
+    mc._progressive_resume_url = None
+    mc._progressive_resume_count = 0
+    mc._suppress_resume = False
     mc.equalizer = "punchy"
     mc.audio_format = "webm"
     mc.loop_mode = None
@@ -456,6 +477,178 @@ def test_no_retry_on_filter_error(monkeypatch, tmp_path):
         assert not mc.queue
         assert mc.is_playing is False
 
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_growing_file_transcodes_without_reconnect_options(monkeypatch, tmp_path):
+    """Wachsende Datei (progressiver Download): nie codec=copy (Cues fehlen bis
+    Dateiende), lokale Quelle → keine -reconnect/-headers-Optionen."""
+    monkeypatch.chdir(tmp_path)
+    source_calls = []
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source(calls=source_calls))
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        growing = tmp_path / "Testsong.webm"
+        dl = FakeDownloader((STREAM_INFO, growing, "Testsong", 200))
+        dl.incomplete_paths.add(growing)
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.equalizer = "flat"   # sonst greift der EQ-Zweig (transkodiert sowieso)
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+
+        _, kwargs = source_calls[0]
+        assert "codec" not in kwargs, "wachsende Datei darf nie codec=copy bekommen"
+        assert kwargs.get("bitrate") == 192
+        before = kwargs.get("before_options") or ""
+        assert "-reconnect" not in before
+        assert "-headers" not in before
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_growing_file_early_eof_resumes_with_seek(monkeypatch, tmp_path):
+    """FFmpeg überholt den laufenden Download → Track wird mit -ss an der
+    Hörposition wieder vorn eingereiht, ohne doppelten Play-Count; nach
+    normalem Ende werden die Marker aufgeräumt."""
+    monkeypatch.chdir(tmp_path)
+    source_calls = []
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source(calls=source_calls))
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        growing = tmp_path / "Testsong.webm"
+        dl = FakeDownloader((STREAM_INFO, growing, "Testsong", 200))
+        dl.incomplete_paths.add(growing)
+        prog_task = asyncio.create_task(asyncio.sleep(30))   # Download "läuft noch"
+        dl.progressive_tasks[url] = prog_task
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+        # Track "spielte" 30 s und endet dann vorzeitig (Datei-EOF, kein Fehler).
+        mc.track_start_time = time.monotonic() - 30
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 2:
+                break
+
+        assert len(vc.play_calls) == 2, "Resume muss einen zweiten Versuch starten"
+        assert mc._progressive_resume_count == 1
+        assert mc._play_counts == {url: 1}, "Resume darf den Play-Count nicht doppelt zählen"
+        before = source_calls[1][1].get("before_options") or ""
+        assert "-ss 29" in before, "Resume muss 1 s vor der Hörposition einsteigen"
+
+        # Download wird fertig, Track endet diesmal normal → Marker aufgeräumt.
+        prog_task.cancel()
+        dl.progressive_tasks.clear()
+        dl.incomplete_paths.clear()
+        mc.track_start_time = time.monotonic() - 300
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if mc._progressive_resume_url is None:
+                break
+
+        assert mc._progressive_resume_url is None
+        assert mc._progressive_resume_count == 0
+        assert mc._play_counts == {url: 1}
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_growing_file_dead_download_blocks_and_requeues(monkeypatch, tmp_path):
+    """Download tot (kein laufender Task, Datei weiter unvollständig) → progressiv
+    wird für die URL gesperrt und der Track vorn eingereiht (Stream-Kaskade)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        growing = tmp_path / "Testsong.webm"
+        dl = FakeDownloader((STREAM_INFO, growing, "Testsong", 200))
+        dl.incomplete_paths.add(growing)   # kein Task in progressive_tasks → Download tot
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.loop_mode = "song"              # darf trotz Requeue nicht doppelt einreihen
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+        mc.track_start_time = time.monotonic() - 30
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 2:
+                break
+
+        assert dl.blocked == [url], "tote wachsende Datei muss die URL progressiv sperren"
+        assert len(vc.play_calls) == 2
+        assert mc._play_counts == {url: 1}
+        # Loop-Mode + Resume-Requeue dürfen den Song nicht doppelt in die Queue legen:
+        assert list(mc.queue).count((url, "Testsong")) == 0, "Song spielt gerade, Queue muss leer sein"
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_skip_on_growing_file_does_not_resume(monkeypatch, tmp_path):
+    """!s während eine wachsende Datei spielt: der absichtliche Stopp darf
+    NICHT als vorzeitiges Dateiende gewertet werden – kein Requeue, kein
+    _seek_offset, der nächste Song aus der Queue spielt."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+    from cogs.music import MusicCommands as MC
+
+    async def run():
+        url1 = "https://www.youtube.com/watch?v=test"
+        url2 = "https://www.youtube.com/watch?v=zwei"
+        growing = tmp_path / "Testsong.webm"
+        dl = FakeDownloader((STREAM_INFO, growing, "Testsong", 200))
+        dl.incomplete_paths.add(growing)
+        prog_task = asyncio.create_task(asyncio.sleep(30))
+        dl.progressive_tasks[url1] = prog_task
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.queue.append((url1, "Testsong"))
+        mc.queue.append((url2, "Zweiter"))
+
+        await mc.play_next(ctx)
+        mc.track_start_time = time.monotonic() - 30   # Track lief 30 s
+
+        # User skippt: Kommando stoppt via _stop_for_advance, dann feuert
+        # der after_playing-Callback (im echten Betrieb durch vc.stop()).
+        await MC.skip.callback(mc, ctx)
+        assert mc._suppress_resume is True
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 2:
+                break
+
+        assert len(vc.play_calls) == 2
+        assert mc.current_track[0] == url2, "nach dem Skip muss der zweite Song laufen"
+        assert not mc.queue, "der geskippte Song darf nicht wieder eingereiht werden"
+        assert mc._seek_offset == 0
+        assert mc._progressive_resume_url is None
+        assert mc._suppress_resume is False, "One-Shot-Flag muss konsumiert sein"
+        assert dl.blocked == []
+
+        prog_task.cancel()
         _cleanup(mc)
 
     asyncio.run(run())

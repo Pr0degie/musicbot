@@ -245,6 +245,7 @@ class RadioMixin:
             url = entry["url"]
             name = entry["name"]
 
+        was_radio = self.is_radio
         if self.is_radio:
             self._stop_radio()
         else:
@@ -252,7 +253,12 @@ class RadioMixin:
 
         # Immer warten bis FFmpeg wirklich fertig ist – egal ob Radio oder Song lief.
         if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+            if was_radio:
+                ctx.voice_client.stop()
+            else:
+                # Musik weicht dem Radio → absichtlicher Stopp: kein Seek-Resume
+                # einer noch wachsenden Datei in after_playing.
+                self._stop_for_advance(ctx.voice_client)
             try:
                 await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
             except asyncio.TimeoutError:
