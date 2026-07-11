@@ -57,3 +57,16 @@ REQUIRE_SAME_VOICE = _parse_bool(os.getenv("REQUIRE_SAME_VOICE", "false"))
 # Wenn gesetzt: !radio delete/rename, !reloadcookies und !format nur für Mitglieder
 # dieser Rolle ODER den Bot-Owner. 0/leer (Default) = kein Gating.
 ADMIN_ROLE_ID = _parse_role_id(os.getenv("ADMIN_ROLE_ID", ""))
+
+
+def _parse_max_mb(value) -> int:
+    """Nicht-negative Ganzzahl in MB; leer oder ungültig → 0 (= Cleanup aus)."""
+    v = str(value or "").strip()
+    return int(v) if v.isdigit() else 0
+
+
+# Maximale Größe des downloads/-Ordners in MB. 0 (Default) = kein Cleanup,
+# heutiges Verhalten. Wenn gesetzt: nach jedem Download werden die ältesten
+# Dateien (mtime) gelöscht, bis das Limit eingehalten ist – niemals Dateien
+# zu Songs in Queue/current_track oder die gerade abgespielte Datei.
+DOWNLOADS_MAX_MB = _parse_max_mb(os.getenv("DOWNLOADS_MAX_MB", "0"))

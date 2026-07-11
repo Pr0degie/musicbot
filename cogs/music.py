@@ -135,7 +135,20 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
         # Downloader hält alle yt_dlp-Instanzen und den Metadaten-Cache.
         self.dl = Downloader(self.audio_format)
+        # Downloads-Cleanup (DOWNLOADS_MAX_MB): welche Songs dürfen NIE
+        # gelöscht werden – Queue + current_track, geliefert bei jedem Lauf.
+        self.dl.protected_provider = self._protected_tracks
         logger.info("[INIT] MusicCommands erfolgreich initialisiert.")
+
+    def _protected_tracks(self):
+        """(urls, titles) aller Songs, deren Downloads der Cleanup nicht anfassen darf."""
+        urls = [url for url, _ in self.queue]
+        titles = [title for _, title in self.queue]
+        if self.current_track:
+            url, title, *_ = self.current_track
+            urls.append(url)
+            titles.append(title)
+        return urls, titles
 
     async def cog_load(self):
         asyncio.create_task(self.dl.warmup())

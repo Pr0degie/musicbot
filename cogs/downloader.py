@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import yt_dlp
-from config import YDL_BROWSER, YDL_COOKIES_FILE
+from config import DOWNLOADS_MAX_MB, YDL_BROWSER, YDL_COOKIES_FILE
 from utils.logger import logger
 from utils.text import normalize_title  # re-exportiert: music.py importiert es von hier
 
@@ -53,10 +53,18 @@ class Downloader:
     bezüglich Queue/Playback – das bleibt in MusicCommands.
     """
 
-    # Klassen-Default, damit auch ohne __init__ erzeugte Instanzen (Tests via
-    # __new__) einen definierten Zustand haben. Gesetzt bei jeder Cache-Änderung,
-    # geleert vom Debounce-Flush (music._persist_flush_loop) bzw. flush_cache_now.
+    # Klassen-Defaults, damit auch ohne __init__ erzeugte Instanzen (Tests via
+    # __new__) einen definierten Zustand haben. _cache_dirty: gesetzt bei jeder
+    # Cache-Änderung, geleert vom Debounce-Flush (music._persist_flush_loop)
+    # bzw. flush_cache_now.
     _cache_dirty = False
+    # Zuletzt von resolve_track gelieferte lokale Datei = die Datei, die FFmpeg
+    # gerade abspielt (None wenn die aktive Quelle ein HTTP-Stream ist). Für den
+    # Downloads-Cleanup tabu – auch wenn current_track schon weitergewandert ist.
+    last_resolved_file = None
+    # Callable ohne Argumente → (urls, titles) der Songs in Queue/current_track;
+    # wird von MusicCommands gesetzt. None = Cleanup traut sich nichts zu löschen.
+    protected_provider = None
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
@@ -298,6 +306,79 @@ class Downloader:
         })
 
     # ------------------------------------------------------------------
+    # Downloads-Cleanup (DOWNLOADS_MAX_MB, 0 = aus)
+    # ------------------------------------------------------------------
+
+    async def cleanup_downloads(self, extra_protected: Path | None = None):
+        """Hält downloads/ unter DOWNLOADS_MAX_MB; läuft nach jedem Download.
+
+        Tabu sind: Dateien zu Songs in Queue/current_track (protected_provider,
+        gesetzt von MusicCommands – doppelt abgesichert über prepare_filename
+        UND den Titel als Datei-Stem), last_resolved_file (die aktive
+        FFmpeg-Quelle) sowie extra_protected (z. B. der frisch geladene
+        Autoplay-Song, der noch nicht in der Queue hängt). Jeder Fehler wird
+        geschluckt: Cleanup darf niemals einen neuen Fehlerpfad einführen –
+        im Zweifel bleibt eine Datei liegen.
+        """
+        if DOWNLOADS_MAX_MB <= 0:
+            return  # Flag nicht gesetzt → heutiges Verhalten, kein Cleanup
+        if self.protected_provider is None:
+            return  # ohne Queue-Info lieber gar nichts löschen
+        try:
+            urls, titles = self.protected_provider()
+        except Exception:
+            return
+        protected_paths = set()
+        for u in urls:
+            info = self._url_cache.get(u)
+            if not info:
+                continue
+            try:
+                protected_paths.add(Path(self.ydl.prepare_filename(info)).resolve())
+            except Exception:
+                continue
+        for tabu in (self.last_resolved_file, extra_protected):
+            if tabu is not None:
+                try:
+                    protected_paths.add(Path(tabu).resolve())
+                except Exception:
+                    pass
+        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel>.<ext>"):
+        # greift auch, wenn der Cache-Eintrag eines Queue-Songs fehlt/abgelaufen ist.
+        protected_stems = {t for t in titles if t}
+        try:
+            await asyncio.to_thread(self._cleanup_downloads_sync, protected_paths, protected_stems)
+        except Exception as e:
+            logger.warning(f"[Cleanup] Fehlgeschlagen (ignoriert): {e}")
+
+    def _cleanup_downloads_sync(self, protected_paths: set, protected_stems: set):
+        """Löscht die ältesten Dateien (mtime), bis das Limit eingehalten ist.
+        Läuft im Worker-Thread (asyncio.to_thread)."""
+        limit = DOWNLOADS_MAX_MB * 1024 * 1024
+        files = []
+        for p in DOWNLOAD_DIR.iterdir():
+            try:
+                if p.is_file():
+                    st = p.stat()
+                    files.append((st.st_mtime, st.st_size, p))
+            except OSError:
+                continue
+        total = sum(size for _, size, _ in files)
+        if total <= limit:
+            return
+        for _, size, p in sorted(files, key=lambda item: item[0]):
+            if total <= limit:
+                break
+            if p.resolve() in protected_paths or p.stem in protected_stems:
+                continue
+            try:
+                p.unlink()
+            except OSError:
+                continue  # z. B. Datei gerade in Benutzung (Windows) → überspringen
+            total -= size
+            logger.info(f"[Cleanup] Gelöscht ({size / (1024 * 1024):.1f} MB): {p.name}")
+
+    # ------------------------------------------------------------------
     # Download-Logik
     # ------------------------------------------------------------------
 
@@ -331,10 +412,16 @@ class Downloader:
             # Langer Track → direkt streamen, kein lokaler Download nötig
             audio_url = info.get("url") or url
             logger.info(f"[Stream] {title} ({duration//60} min) wird gestreamt – kein Download")
+            self.last_resolved_file = None  # aktive Quelle ist ein Stream, keine Datei
             return info, audio_url, title, duration
 
         try:
             filename = Path(self.ydl.prepare_filename(info))
+            # Sofort als tabu markieren (nicht erst beim Return): der Song ist
+            # bereits aus der Queue gepoppt und damit nicht mehr über den
+            # protected_provider geschützt – ein parallel fertig werdender
+            # Prefetch könnte sonst per Cleanup genau diese Datei löschen.
+            self.last_resolved_file = filename
         except Exception as e:
             # Fallback-Garantie: Ein aus der Datei geladener reduzierter (oder
             # sonst kaputter) Cache-Eintrag darf nie zum Fehler beim User werden.
@@ -347,8 +434,10 @@ class Downloader:
             if duration > STREAM_THRESHOLD_SECONDS:
                 audio_url = info.get("url") or url
                 logger.info(f"[Stream] {title} ({duration//60} min) wird gestreamt – kein Download")
+                self.last_resolved_file = None
                 return info, audio_url, title, duration
             filename = Path(self.ydl.prepare_filename(info))
+            self.last_resolved_file = filename
 
         if not filename.exists():
             # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
@@ -363,6 +452,7 @@ class Downloader:
             if not filename.exists():  # Prefetch hat es nicht erledigt → sofort als Stream starten
                 audio_url = info.get("url") or url
                 logger.info(f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
+                self.last_resolved_file = None
                 return info, audio_url, title, duration
             else:
                 logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
@@ -400,6 +490,7 @@ class Downloader:
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
                 await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
                 logger.info(f"[Prefetch] Fertig: {filename.name}")
+                await self.cleanup_downloads()
             else:
                 logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
         except asyncio.TimeoutError:
@@ -488,6 +579,15 @@ class Downloader:
                 self._cache_timestamps[url] = time.time()
                 self._cache_dirty = True
             logger.info(f"[Autoplay Prefetch] Fertig: {title}")
+            # Der frisch geladene Song hängt noch nicht in der Queue (macht der
+            # Caller) → seine Datei explizit vor dem Cleanup schützen.
+            just_downloaded = None
+            if full_info:
+                try:
+                    just_downloaded = Path(self.ydl.prepare_filename(full_info))
+                except Exception:
+                    pass
+            await self.cleanup_downloads(extra_protected=just_downloaded)
             return url, title
 
         except asyncio.TimeoutError:
