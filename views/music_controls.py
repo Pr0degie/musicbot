@@ -1,9 +1,17 @@
 import asyncio
+import uuid
 from collections import deque
 import discord
 from discord.ui import Button, View
 from utils.logger import logger
 from utils.i18n import t
+
+# Prozessweiter Marker in jeder Button-custom_id: unterscheidet Buttons dieses
+# Bot-Laufs von denen früherer Läufe. Nach einem Neustart tragen alte
+# Nachrichten eine fremde BOOT_ID → StaleControlsFallback greift; Buttons des
+# laufenden Prozesses matchen sein Template nie (negative lookahead unten).
+BOOT_ID = uuid.uuid4().hex[:8]
+_CUSTOM_ID_PREFIX = "musicctl"
 
 
 class MusicControlView(View):
@@ -11,7 +19,8 @@ class MusicControlView(View):
 
     timeout=None bedeutet, dass die Buttons nie ablaufen – auch nach einem
     Bot-Neustart sind alte Nachrichten theoretisch noch klickbar, solange
-    der Bot läuft (die View-Instanz ist dann allerdings weg).
+    der Bot läuft (die View-Instanz ist dann allerdings weg). Klicks auf
+    Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
     """
 
     def __init__(self, music_cog, ctx, song=None):
@@ -19,6 +28,16 @@ class MusicControlView(View):
         self.music_cog = music_cog
         self.ctx = ctx
         self.song = song  # (url, title) des Songs zu dem diese View gehört
+        # custom_ids: eindeutig pro Nachricht (nonce) und pro Bot-Lauf (BOOT_ID).
+        nonce = uuid.uuid4().hex[:8]
+        for action, item in (
+            ("pause", self.pause),
+            ("resume", self.resume),
+            ("skip", self.skip),
+            ("autoplay", self.autoplay_toggle),
+            ("loop", self.loop_toggle),
+        ):
+            item.custom_id = f"{_CUSTOM_ID_PREFIX}:{BOOT_ID}:{nonce}:{action}"
 
     @discord.ui.button(label=t("button.pause"), style=discord.ButtonStyle.primary)
     async def pause(self, interaction: discord.Interaction, button: Button):
@@ -176,3 +195,32 @@ class SearchAutoplayView(View):
                 await self.message.edit(content=self.base_content, view=None)
             except discord.HTTPException:
                 pass
+
+
+class StaleControlsFallback(
+    discord.ui.DynamicItem[Button],
+    template=rf"{_CUSTOM_ID_PREFIX}:(?!{BOOT_ID}:)[0-9a-f]+:[0-9a-f]+:\w+",
+):
+    """Fängt Klicks auf Now-Playing-Buttons aus früheren Bot-Läufen ab.
+
+    Wird in setup_hook via bot.add_dynamic_items() registriert. discord.py
+    dispatcht Dynamic Items zusätzlich zu Live-Views (nicht nur als Fallback!),
+    deshalb schließt das Template die BOOT_ID des laufenden Prozesses per
+    negative lookahead aus – ein Klick auf eine lebende View kann hier nie
+    landen. Kein State-Rekonstruktionsversuch: nur ephemere Erklärung + tote
+    Buttons von der alten Nachricht entfernen.
+    """
+
+    def __init__(self, custom_id: str):
+        super().__init__(Button(label="…", custom_id=custom_id))
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item, match):
+        return cls(item.custom_id)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(t("error.stale_controls"), ephemeral=True)
+        try:
+            await interaction.message.edit(view=None)
+        except (discord.HTTPException, AttributeError):
+            pass

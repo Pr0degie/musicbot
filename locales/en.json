@@ -55,6 +55,7 @@
   "error.move_failed": "❌ Failed to move to {channel}: {err}\n⚠️ Check server permissions (bot role)",
   "error.leave_failed": "⚠️ Failed to leave: {err}",
   "error.bot_not_in_voice": "🙅 The bot is not in a voice channel.",
+  "error.stale_controls": "⚠️ The bot was restarted — these buttons belong to an old message. Use the current now-playing message or start with `!p`.",
 
   "status.format_set": "🔄 Audio format set to **{format}**{note}.",
   "status.format_note": " (takes effect on the next track)",

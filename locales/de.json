@@ -55,6 +55,7 @@
   "error.move_failed": "❌ Bewegung zu {channel} fehlgeschlagen: {err}\n⚠️ Prüfe Server-Berechtigungen (Bot-Rolle)",
   "error.leave_failed": "⚠️ Verlassen fehlgeschlagen: {err}",
   "error.bot_not_in_voice": "🙅 Der Bot ist nicht in einem Voice-Channel.",
+  "error.stale_controls": "⚠️ Der Bot wurde neu gestartet — diese Buttons gehören zu einer alten Nachricht. Nutze die aktuelle Now-Playing-Nachricht oder starte mit `!p`.",
 
   "status.format_set": "🔄 Audioformat auf **{format}** gesetzt{note}.",
   "status.format_note": " (wirkt ab dem nächsten Titel)",

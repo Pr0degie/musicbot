@@ -30,6 +30,11 @@ class MusicBot(commands.Bot):
         await self.add_cog(BasicCommands(self))
         await self.add_cog(MusicCommands(self))
         await self.add_cog(DMBridge(self))
+        # Beantwortet Klicks auf Now-Playing-Buttons aus früheren Bot-Läufen
+        # mit einer ephemeren Erklärung statt "Interaktion fehlgeschlagen".
+        from views.music_controls import StaleControlsFallback
+
+        self.add_dynamic_items(StaleControlsFallback)
 
     async def on_message(self, message):
         if message.author.bot:
