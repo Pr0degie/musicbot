@@ -30,6 +30,11 @@ from cogs.music_queue_io import QueuePersistenceMixin
 
 SCORE_FILE = Path("play_counts.json")
 
+# Sentinel für _extract_info_or_report: unterscheidet "Fehler wurde bereits
+# gemeldet" von einem echten None-Ergebnis aus yt_dlp (das die Aufrufer wie
+# bisher selbst krachen lassen).
+_YTDLP_FAILED = object()
+
 
 class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog):
     """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay.
@@ -1130,6 +1135,150 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 break
         return removed_title
 
+    async def _stop_radio_for_takeover(self, ctx):
+        """Beendet einen laufenden Radio-Stream, bevor ein Song übernimmt.
+
+        Gemeinsamer Vorspann von !p, !next und !now: Radio stoppen und auf das
+        Ende der laufenden Wiedergabe warten (max. 3 s), damit der neue Song
+        nicht mit dem Radio-Callback kollidiert.
+        """
+        if not self.is_radio:
+            return
+        self._stop_radio()
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+            try:
+                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                pass
+            self._playback_done.clear()
+
+    async def _extract_info_or_report(self, ctx, query, ydl_instance, *,
+                                      status_key, timeout_key, error_key, log_msg):
+        """Ruft yt_dlp-Infos ab und meldet Timeout/Fehler direkt im Channel.
+
+        Gemeinsamer Fetch-Teil der Such- und URL-Zweige von !p, !next und !now.
+        Gibt das Info-Dict zurück (kann auch None sein, wenn yt_dlp nichts
+        liefert – damit gehen die Aufrufer wie bisher selbst um), oder
+        _YTDLP_FAILED wenn bereits eine Fehlermeldung gesendet wurde.
+        """
+        try:
+            await ctx.send(t(status_key))
+            return await asyncio.wait_for(
+                asyncio.to_thread(ydl_instance.extract_info, query, download=False),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            await ctx.send(t(timeout_key))
+            return _YTDLP_FAILED
+        except Exception:
+            logger.exception(log_msg)
+            await ctx.send(t(error_key))
+            return _YTDLP_FAILED
+
+    async def _search_and_enqueue(self, ctx, eingabe, *, log_tag, timeout_key,
+                                  insert, with_alts_key, no_alts_key,
+                                  base_content_key=None):
+        """Gemeinsamer Suchbegriff-Zweig von !p, !next und !now.
+
+        ytsearch3 → ersten Treffer vorab auflösen und einreihen, Treffer 2
+        und 3 als Buttons anzeigen (SearchAutoplayView) falls es der Falsche
+        war. Die drei Befehle unterscheiden sich bewusst – die Unterschiede
+        stecken in den Parametern:
+
+        - !p:    insert="evict_or_back" – wenn Autoplay einen Song vorgemerkt
+                 hat, fliegt der raus (nur bei aktiviertem Autoplay) und der
+                 manuelle Wunsch landet VORN in der Queue, sonst hinten.
+                 Die Eviction wird geloggt.
+        - !next: insert="front" – keine Eviction, Treffer immer vorn;
+                 eigene Meldungs-Keys (next_added/next_with_alts) und
+                 base_content_key für die View.
+        - !now:  insert="evict_front" – Eviction immer (Rückgabe ignoriert),
+                 Treffer vorn; die laufende Wiedergabe stoppt der Aufrufer
+                 danach selbst.
+
+        Gibt True zurück wenn ein Treffer eingereiht wurde, sonst False
+        (die Fehlermeldung wurde dann bereits gesendet).
+        """
+        results = await self._extract_info_or_report(
+            ctx, f"ytsearch3:{eingabe}", self.dl.search_ydl,
+            status_key="status.searching", timeout_key=timeout_key,
+            error_key="error.search_error",
+            log_msg=f"[{log_tag}] Fehler bei Suche",
+        )
+        if results is _YTDLP_FAILED:
+            return False
+
+        entries = (results.get("entries") or [])[:3]
+        if not entries:
+            await ctx.send(t("error.no_results"))
+            return False
+
+        first = entries[0]
+        url = first.get("webpage_url") or first.get("url")
+        title = first.get("title", t("misc.unknown_title"))
+        asyncio.create_task(self.dl._start_resolve(url))
+
+        if insert == "evict_or_back":
+            evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
+            if evicted:
+                logger.info(f"[{log_tag}] Autoplay-Song verdrängt: {evicted}")
+                self.queue.appendleft((url, title))
+            else:
+                self.queue.append((url, title))
+        elif insert == "evict_front":
+            self._evict_autoplay_song()
+            self.queue.appendleft((url, title))
+        else:  # "front"
+            self.queue.appendleft((url, title))
+
+        # Alternativen (Treffer 2 und 3) als Buttons anzeigen
+        alternatives = entries[1:]
+        if alternatives:
+            view = SearchAutoplayView(
+                first, alternatives, self, ctx,
+                base_content=t(base_content_key, title=title) if base_content_key else None,
+            )
+            letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            alt_lines = "\n".join(
+                t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
+                for i, e in enumerate(alternatives)
+            )
+            msg = await ctx.send(
+                t(with_alts_key, title=title, alts=alt_lines),
+                view=view,
+            )
+            view.message = msg
+        else:
+            await ctx.send(t(no_alts_key, title=title))
+        return True
+
+    async def _fetch_single_track_info(self, ctx, eingabe, log_tag):
+        """Gemeinsamer Direkt-URL-Zweig von !next und !now (ohne Playlists).
+
+        Löst die URL via url_ydl auf; Playlists werden abgelehnt
+        (error.next_no_playlist). Gibt (url, title) zurück oder None, wenn
+        bereits eine Fehlermeldung gesendet wurde. !p behält seinen eigenen
+        URL-Zweig: Playlist-Unterstützung, Duplikat-Warnung und andere
+        Meldungs-Keys.
+        """
+        info = await self._extract_info_or_report(
+            ctx, eingabe, self.dl.url_ydl,
+            status_key="status.processing_url", timeout_key="error.timeout",
+            error_key="error.fetch_error",
+            log_msg=f"[{log_tag}] Fehler beim Abrufen von yt_dlp-Infos",
+        )
+        if info is _YTDLP_FAILED:
+            return None
+
+        if "entries" in info:
+            await ctx.send(t("error.next_no_playlist"))
+            return None
+
+        url = info.get("webpage_url") or eingabe
+        title = info.get("title", t("misc.unknown_title"))
+        return (url, title)
+
     @commands.command()
     async def p(self, ctx, *, eingabe: str = None):
         """Spielt eine URL, Playlist oder Suchbegriff. Bei Suche werden 3 Treffer zur Auswahl angezeigt."""
@@ -1141,69 +1290,19 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if not await self._ensure_voice(ctx):
             return
 
-        if self.is_radio:
-            self._stop_radio()
-            if ctx.voice_client and ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
-                try:
-                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    pass
-                self._playback_done.clear()
+        await self._stop_radio_for_takeover(ctx)
 
         # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
         # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
+        # Insert-Semantik ("evict_or_back"): siehe _search_and_enqueue-Docstring.
         if not eingabe.startswith("http"):
-            try:
-                await ctx.send(t("status.searching"))
-                results = await asyncio.wait_for(
-                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                await ctx.send(t("error.search_timeout"))
+            queued = await self._search_and_enqueue(
+                ctx, eingabe, log_tag="p", timeout_key="error.search_timeout",
+                insert="evict_or_back", with_alts_key="status.playing_with_alts",
+                no_alts_key="status.added",
+            )
+            if not queued:
                 return
-            except Exception:
-                logger.exception("[p] Fehler bei Suche")
-                await ctx.send(t("error.search_error"))
-                return
-
-            entries = (results.get("entries") or [])[:3]
-            if not entries:
-                await ctx.send(t("error.no_results"))
-                return
-
-            # Ersten Treffer direkt in die Queue legen.
-            # Wenn Autoplay einen Song vorgemerkt hat, fliegt der raus – der manuelle
-            # Wunsch hat Vorrang und soll als nächstes spielen.
-            first = entries[0]
-            url = first.get("webpage_url") or first.get("url")
-            title = first.get("title", t("misc.unknown_title"))
-            asyncio.create_task(self.dl._start_resolve(url))
-            evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
-            if evicted:
-                logger.info(f"[p] Autoplay-Song verdrängt: {evicted}")
-                self.queue.appendleft((url, title))
-            else:
-                self.queue.append((url, title))
-
-            # Alternativen (Treffer 2 und 3) als Buttons anzeigen
-            alternatives = entries[1:]
-            if alternatives:
-                view = SearchAutoplayView(first, alternatives, self, ctx)
-                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                alt_lines = "\n".join(
-                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
-                    for i, e in enumerate(alternatives)
-                )
-                msg = await ctx.send(
-                    t("status.playing_with_alts", title=title, alts=alt_lines),
-                    view=view,
-                )
-                view.message = msg
-            else:
-                await ctx.send(t("status.added", title=title))
-
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
@@ -1216,18 +1315,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         is_playlist = "playlist?" in eingabe or "list=" in eingabe
         ydl_instance = self.dl.playlist_ydl if is_playlist else self.dl.url_ydl
 
-        try:
-            await ctx.send(t("status.processing"))
-            info = await asyncio.wait_for(
-                asyncio.to_thread(ydl_instance.extract_info, eingabe, download=False),
-                timeout=30.0,
-            )
-        except asyncio.TimeoutError:
-            await ctx.send(t("error.processing_timeout"))
-            return
-        except Exception:
-            logger.exception("[p] Fehler beim Abrufen von yt_dlp-Infos")
-            await ctx.send(t("error.url_error"))
+        info = await self._extract_info_or_report(
+            ctx, eingabe, ydl_instance,
+            status_key="status.processing", timeout_key="error.processing_timeout",
+            error_key="error.url_error",
+            log_msg="[p] Fehler beim Abrufen von yt_dlp-Infos",
+        )
+        if info is _YTDLP_FAILED:
             return
 
         if "entries" in info:
@@ -1289,15 +1383,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if not await self._ensure_voice(ctx):
             return
 
-        if self.is_radio:
-            self._stop_radio()
-            if ctx.voice_client and ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
-                try:
-                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    pass
-                self._playback_done.clear()
+        await self._stop_radio_for_takeover(ctx)
 
         # Format: URL||Titel → direkt ohne yt_dlp-Lookup hinzufügen
         if "||" in eingabe:
@@ -1315,72 +1401,23 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
         # Suchbegriff → ersten Treffer an erste Stelle, Alternativen als Buttons
         if not eingabe.startswith("http"):
-            try:
-                await ctx.send(t("status.searching"))
-                results = await asyncio.wait_for(
-                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                await ctx.send(t("error.search_timeout_short"))
+            queued = await self._search_and_enqueue(
+                ctx, eingabe, log_tag="next", timeout_key="error.search_timeout_short",
+                insert="front", with_alts_key="status.next_with_alts",
+                no_alts_key="status.next_added", base_content_key="status.next_added",
+            )
+            if not queued:
                 return
-            except Exception:
-                logger.exception("[next] Fehler bei Suche")
-                await ctx.send(t("error.search_error"))
-                return
-            entries = (results.get("entries") or [])[:3]
-            if not entries:
-                await ctx.send(t("error.no_results"))
-                return
-            first = entries[0]
-            url = first.get("webpage_url") or first.get("url")
-            title = first.get("title", t("misc.unknown_title"))
-            asyncio.create_task(self.dl._start_resolve(url))
-            self.queue.appendleft((url, title))
-            alternatives = entries[1:]
-            if alternatives:
-                view = SearchAutoplayView(
-                    first, alternatives, self, ctx,
-                    base_content=t("status.next_added", title=title),
-                )
-                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                alt_lines = "\n".join(
-                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
-                    for i, e in enumerate(alternatives)
-                )
-                msg = await ctx.send(
-                    t("status.next_with_alts", title=title, alts=alt_lines),
-                    view=view,
-                )
-                view.message = msg
-            else:
-                await ctx.send(t("status.next_added", title=title))
             if not self.is_playing:
                 self.is_playing = True
                 await self.play_next(ctx)
             return
 
         # Direkte URL → yt_dlp-Lookup
-        try:
-            await ctx.send(t("status.processing_url"))
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.dl.url_ydl.extract_info, eingabe, download=False),
-                timeout=30.0,
-            )
-        except asyncio.TimeoutError:
-            await ctx.send(t("error.timeout"))
+        result = await self._fetch_single_track_info(ctx, eingabe, "next")
+        if result is None:
             return
-        except Exception:
-            logger.exception("[next] Fehler beim Abrufen von yt_dlp-Infos")
-            await ctx.send(t("error.fetch_error"))
-            return
-
-        if "entries" in info:
-            await ctx.send(t("error.next_no_playlist"))
-            return
-
-        url = info.get("webpage_url") or eingabe
-        title = info.get("title", t("misc.unknown_title"))
+        url, title = result
         self.queue.appendleft((url, title))
         await ctx.send(t("status.next_added", title=title))
         if not self.is_playing:
@@ -1473,79 +1510,21 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         if not await self._ensure_voice(ctx):
             return
 
-        if self.is_radio:
-            self._stop_radio()
-            if ctx.voice_client and ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
-                try:
-                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    pass
-                self._playback_done.clear()
+        await self._stop_radio_for_takeover(ctx)
 
         if not eingabe.startswith("http"):
-            try:
-                await ctx.send(t("status.searching"))
-                results = await asyncio.wait_for(
-                    asyncio.to_thread(self.dl.search_ydl.extract_info, f"ytsearch3:{eingabe}", download=False),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                await ctx.send(t("error.search_timeout"))
+            queued = await self._search_and_enqueue(
+                ctx, eingabe, log_tag="now", timeout_key="error.search_timeout",
+                insert="evict_front", with_alts_key="status.playing_with_alts",
+                no_alts_key="status.playing",
+            )
+            if not queued:
                 return
-            except Exception:
-                logger.exception("[now] Fehler bei Suche")
-                await ctx.send(t("error.search_error"))
-                return
-
-            entries = (results.get("entries") or [])[:3]
-            if not entries:
-                await ctx.send(t("error.no_results"))
-                return
-
-            first = entries[0]
-            url = first.get("webpage_url") or first.get("url")
-            title = first.get("title", t("misc.unknown_title"))
-            asyncio.create_task(self.dl._start_resolve(url))
-            self._evict_autoplay_song()
-            self.queue.appendleft((url, title))
-
-            alternatives = entries[1:]
-            if alternatives:
-                view = SearchAutoplayView(first, alternatives, self, ctx)
-                letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                alt_lines = "\n".join(
-                    t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
-                    for i, e in enumerate(alternatives)
-                )
-                msg = await ctx.send(
-                    t("status.playing_with_alts", title=title, alts=alt_lines),
-                    view=view,
-                )
-                view.message = msg
-            else:
-                await ctx.send(t("status.playing", title=title))
         else:
-            try:
-                await ctx.send(t("status.processing_url"))
-                info = await asyncio.wait_for(
-                    asyncio.to_thread(self.dl.url_ydl.extract_info, eingabe, download=False),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                await ctx.send(t("error.timeout"))
+            result = await self._fetch_single_track_info(ctx, eingabe, "now")
+            if result is None:
                 return
-            except Exception:
-                logger.exception("[now] Fehler beim Abrufen von yt_dlp-Infos")
-                await ctx.send(t("error.fetch_error"))
-                return
-
-            if "entries" in info:
-                await ctx.send(t("error.next_no_playlist"))
-                return
-
-            url = info.get("webpage_url") or eingabe
-            title = info.get("title", t("misc.unknown_title"))
+            url, title = result
             self._evict_autoplay_song()
             self.queue.appendleft((url, title))
             await ctx.send(t("status.playing", title=title))
