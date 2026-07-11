@@ -64,6 +64,12 @@ class Downloader:
 
     def clear_cache(self):
         self._url_cache.clear()
+
+    def invalidate(self, url: str):
+        """Wirft den Cache-Eintrag einer URL weg (z.B. nach einem 403 vom CDN),
+        damit der nächste resolve_track eine frische Stream-URL extrahiert."""
+        self._url_cache.pop(url, None)
+        self._cache_timestamps.pop(url, None)
         self._cache_timestamps.clear()
 
     def _load_cache(self):

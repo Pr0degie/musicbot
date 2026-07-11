@@ -83,6 +83,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # den _progress_loop werden im Cleanup gekappt, aber die Buttons der Nachricht
         # sollen erst beim nächsten Track entfernt werden (Resume/Autoplay bleiben nutzbar).
         self._ended_np = None
+        # URL, für die gerade ein Stream-Retry läuft (Sofort-Tod + Input-Fehler →
+        # genau EIN Neuversuch mit frischer URL). Verhindert Retry-Schleifen und
+        # doppelte Play-Counts; wird bei normalem Track-Ende wieder gelöscht.
+        self._stream_retry_url = None
 
         # Standard-EQ und -Format beim Start
         self.equalizer = "punchy"
@@ -743,6 +747,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 elapsed = time.monotonic() - self.track_start_time if self.track_start_time else 999
                 # stderr immer auslesen (schließt den Puffer), loggen nur im Fehlerfall.
                 stderr_tail = self._stderr_tail(stderr_buf)
+                verdict = self._classify_ffmpeg_error(stderr_tail)
                 if error or elapsed < 2.0:
                     if stderr_tail:
                         logger.warning(f"[FFmpeg] stderr (letzte Zeilen):\n{stderr_tail}")
@@ -751,11 +756,34 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                             "input": "Input-/Netzwerkfehler (Quelle lieferte keine Daten)",
                             "filter": "Filterfehler (EQ-Kette)",
                         }
-                        verdict = self._classify_ffmpeg_error(stderr_tail)
                         logger.warning(
                             f"[FFmpeg] Track lief nur {elapsed:.2f}s – Einstufung: "
                             f"{_verdicts.get(verdict, 'unbekannt (keine verwertbare stderr-Ausgabe)')}. "
                             f"Aktives Preset: '{self.equalizer}'"
+                        )
+                elif self._stream_retry_url == url:
+                    # Der Neuversuch lief normal durch → Retry-Sperre wieder aufheben.
+                    self._stream_retry_url = None
+
+                # Selbstheilung: Stream starb sofort an einem Input-Fehler (typisch:
+                # sporadisches 403 vom CDN) → genau EIN Neuversuch mit frisch
+                # extrahierter URL. Echte Filterfehler werden NICHT wiederholt.
+                retry_scheduled = False
+                if is_stream and elapsed < 1.0 and verdict == "input":
+                    if self._stream_retry_url != url:
+                        self._stream_retry_url = url
+                        self.dl.invalidate(url)   # gecachte (Prefetch-)Metadaten wegwerfen
+                        self.queue.appendleft((url, title))
+                        retry_scheduled = True
+                        logger.warning(
+                            f"[Stream-Retry] Input-Fehler nach {elapsed:.2f}s – "
+                            f"einmaliger Neuversuch mit frischer URL: {title}"
+                        )
+                    else:
+                        self._stream_retry_url = None
+                        logger.warning(f"[Stream-Retry] Auch der zweite Versuch schlug fehl – gebe auf: {title}")
+                        asyncio.run_coroutine_threadsafe(
+                            ctx.send(t("error.stream_giveup", title=title)), self.bot.loop
                         )
 
                 # Queue-Stand nach jedem Track in Datei sichern – nicht als
@@ -770,12 +798,15 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
                 # Loop-Logik: Song zurück in die Queue legen bevor play_next aufgerufen wird.
                 # Queue speichert 2-Tuples (url, title), current_track ist ein 3-Tuple.
-                if self.loop_mode == "song" and self.current_track:
-                    ct_url, ct_title, *_ = self.current_track
-                    self.queue.appendleft((ct_url, ct_title))
-                elif self.loop_mode == "queue" and self.current_track:
-                    ct_url, ct_title, *_ = self.current_track
-                    self.queue.append((ct_url, ct_title))
+                # Steht ein Stream-Retry an, liegt der Song schon vorne in der Queue –
+                # die Loop-Logik würde ihn sonst doppelt einreihen.
+                if not retry_scheduled:
+                    if self.loop_mode == "song" and self.current_track:
+                        ct_url, ct_title, *_ = self.current_track
+                        self.queue.appendleft((ct_url, ct_title))
+                    elif self.loop_mode == "queue" and self.current_track:
+                        ct_url, ct_title, *_ = self.current_track
+                        self.queue.append((ct_url, ct_title))
 
                 if ctx.voice_client:
                     # Immer play_next aufrufen – die Queue-leer+Autoplay-Logik liegt dort.
@@ -846,7 +877,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._np_last_desc = None
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
-            self._record_play(url, title)
+            if url == self._stream_retry_url:
+                # Zweiter Anlauf desselben Tracks (Stream-Retry) → nicht doppelt zählen.
+                pass
+            else:
+                self._stream_retry_url = None   # anderer Track → Retry-Sperre aufheben
+                self._record_play(url, title)
             self.text_channel = ctx.channel
 
             ctx.voice_client.play(source, after=after_playing)

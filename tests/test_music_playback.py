@@ -148,6 +148,7 @@ def make_cog(dl):
     mc._skip_resolving = False
     mc._track_generation = 0
     mc._ended_np = None
+    mc._stream_retry_url = None
     mc.equalizer = "punchy"
     mc.audio_format = "webm"
     mc.loop_mode = None
@@ -300,6 +301,99 @@ def test_progress_bar_clamps_negative_elapsed():
 )
 def test_classify_ffmpeg_error(stderr_text, expected):
     assert MusicCommands._classify_ffmpeg_error(stderr_text) == expected
+
+
+def test_stream_retry_once_then_give_up(monkeypatch, tmp_path):
+    """Sofortiger Track-Tod + Input-Fehler → genau EIN Retry mit frischer URL,
+    danach Aufgeben mit i18n-Meldung und ohne doppelten Play-Count."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        discord,
+        "FFmpegOpusAudio",
+        make_fake_source(b"[https @ 0x1] HTTP error 403 Forbidden\n"),
+    )
+    from utils.i18n import t
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+        assert len(vc.play_calls) == 1
+        vc.end_track()   # stirbt sofort mit 403
+
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if len(vc.play_calls) >= 2:
+                break
+        assert len(vc.play_calls) == 2, "genau ein Retry muss gestartet werden"
+        assert dl.invalidated == [url], "Cache-Eintrag muss vor dem Retry invalidiert werden"
+
+        vc.end_track()   # zweiter Versuch stirbt genauso → aufgeben
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if mc.is_playing is False and ctx.sent:
+                break
+
+        assert len(vc.play_calls) == 2, "kein dritter Versuch"
+        assert not mc.queue
+        assert mc._stream_retry_url is None
+        giveup = t("error.stream_giveup", title="Testsong")
+        texts = [args[0] for args, kwargs in ctx.sent if args]
+        assert giveup in texts, f"Aufgeben-Meldung fehlt, gesendet wurde: {texts}"
+        assert mc._play_counts == {url: 1}, "Retry darf den Play-Count nicht doppelt zählen"
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_no_retry_on_filter_error(monkeypatch, tmp_path):
+    """Echter Filterfehler → kein Retry, Track wird normal übersprungen."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        discord,
+        "FFmpegOpusAudio",
+        make_fake_source(b"Error initializing filter 'equalizer' with args 'f=80'\n"),
+    )
+
+    async def run():
+        url = "https://www.youtube.com/watch?v=test"
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.queue.append((url, "Testsong"))
+
+        await mc.play_next(ctx)
+        vc.end_track()
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+
+        assert len(vc.play_calls) == 1
+        assert dl.invalidated == []
+        assert not mc.queue
+        assert mc.is_playing is False
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("lang", ["de", "en"])
+def test_stream_giveup_message_in_both_locales(lang):
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "locales" / f"{lang}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert "error.stream_giveup" in data
+    assert "{title}" in data["error.stream_giveup"]
+    assert "Testsong" in data["error.stream_giveup"].format(title="Testsong")
 
 
 def test_stderr_tail_reads_and_closes():

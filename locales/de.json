@@ -46,6 +46,7 @@
   "error.no_active_song": "⚠️ Kein aktiver Song.",
   "error.track_timeout": "⚠️ Timeout beim Laden von **{title}**. Überspringe...",
   "error.track_error": "⚠️ Fehler beim Laden von **{title}**. Überspringe...",
+  "error.stream_giveup": "⚠️ Stream für **{title}** ist zweimal fehlgeschlagen (Quelle bricht sofort ab). Überspringe...",
   "error.nothing_to_save": "⚠️ Nichts zu speichern – Queue und aktueller Track sind leer.",
   "error.invalid_name": "❌ Ungültiger Name.",
   "error.queue_not_found": "❌ Keine gespeicherte Queue mit dem Namen **{name}** gefunden.",
