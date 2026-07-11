@@ -82,6 +82,12 @@ State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_c
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
 `!stop` beendet Radio oder aktuelle Wiedergabe (Queue bleibt erhalten). Radio-Modus und Song-Modus schließen sich gegenseitig aus.
 
+### Security
+
+Alle einschränkenden Änderungen hängen an `.env`-Flags, deren **Default das alte Verhalten beibehält** (Ausnahme: globales `allowed_mentions=none()` im Bot-Konstruktor in `main.py` — Fremd-Content wie YouTube-Titel/`!echo`/Lyrics kann nie pingen; kein Command nutzt Mentions absichtlich).
+
+- **`URL_VALIDATION`** = `off` | `warn` (Default) | `block` — SSRF-Schutz (`utils/url_check.py`) für `!radio <url>` und `!next url||titel`. Nur http/https; Hostname darf nach DNS-Resolve nicht auf private/loopback/link-local IPs zeigen. `warn` spielt wie bisher + Warnung in Log/Channel; `block` lehnt mit i18n-Meldung ab. Nicht auflösbare Hosts gelten als ok (Stream scheitert ohnehin). `!radio` persistiert neue Sender erst **nach** erfolgreichem Stream-Start (`_play_radio_stream` → `bool`).
+
 ### Key Bot Commands
 
 Full list via `!help`. Non-obvious:

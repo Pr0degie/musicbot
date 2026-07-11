@@ -21,3 +21,19 @@ DM_BRIDGE_PORT = int(os.getenv("DM_BRIDGE_PORT", "8765"))
 # Shared Secret, nur nötig wenn nicht-localhost gebunden (Byte-Modus). Muss mit
 # DMbots DM_BRIDGE_SECRET übereinstimmen. Leer + 127.0.0.1 = klassischer Pfad-Modus.
 DM_BRIDGE_SECRET = os.getenv("DM_BRIDGE_SECRET", "")
+
+
+# --- Security-Flags -----------------------------------------------------------
+# Defaults erhalten das heutige Verhalten; scharf geschaltet wird bewusst per .env
+# nach dem Live-Test.
+
+def _parse_url_validation(value) -> str:
+    """"off" | "warn" | "block" – alles andere (auch leer) fällt auf "warn" zurück."""
+    v = (value or "").strip().lower()
+    return v if v in ("off", "warn", "block") else "warn"
+
+
+# SSRF-Schutz für !radio <url> und !next url||titel (utils/url_check.py):
+# off = kein Check, warn (Default) = spielt wie bisher + Warnung in Log/Channel,
+# block = URLs auf private/loopback/link-local Adressen werden abgelehnt.
+URL_VALIDATION = _parse_url_validation(os.getenv("URL_VALIDATION", "warn"))

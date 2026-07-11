@@ -16,6 +16,7 @@ from discord.ext import commands
 
 from utils.logger import logger
 from utils.i18n import t
+from utils.url_check import enforce_url_policy
 from views.music_controls import MusicControlView
 
 RADIO_STATIONS_FILE = Path("radio_stations.json")
@@ -33,11 +34,15 @@ class RadioMixin:
             self._autoplay_prefetch_task.cancel()
             self._autoplay_prefetch_task = None
 
-    async def _play_radio_stream(self, ctx, url: str, name: str) -> None:
-        """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp)."""
+    async def _play_radio_stream(self, ctx, url: str, name: str) -> bool:
+        """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp).
+
+        Gibt True zurück wenn der Stream gestartet wurde – radio_play persistiert
+        neue Sender nur dann.
+        """
         if not ctx.voice_client or not ctx.voice_client.is_connected():
             await ctx.send(t("error.no_voice_connected"))
-            return
+            return False
 
         # Sicherheitsnetz: falls FFmpeg noch nicht terminiert ist, kurz warten.
         if ctx.voice_client.is_playing():
@@ -46,7 +51,7 @@ class RadioMixin:
             except asyncio.TimeoutError:
                 await ctx.send(t("error.stream_busy"))
                 self._stop_radio()
-                return
+                return False
             self._playback_done.clear()
 
         if self.prefetch_task and not self.prefetch_task.done():
@@ -71,7 +76,7 @@ class RadioMixin:
             logger.exception(f"[Radio] Fehler beim Erstellen der FFmpeg-Quelle für {url}")
             await ctx.send(t("error.stream_connect_error"))
             self._stop_radio()
-            return
+            return False
 
         def after_radio(error):
             self.bot.loop.call_soon_threadsafe(self._playback_done.set)
@@ -111,6 +116,7 @@ class RadioMixin:
         self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
         self.text_channel = ctx.channel
         logger.info(f"[Radio] Stream gestartet: {name} ({url})")
+        return True
 
     async def _reconnect_radio(self, ctx) -> None:
         """Versucht einen abgebrochenen Radio-Stream neu zu verbinden."""
@@ -195,6 +201,7 @@ class RadioMixin:
         if not await self._ensure_voice(ctx):
             return
 
+        new_station = None  # (key, entry) – wird erst nach erfolgreichem Stream-Start persistiert
         if eingabe.startswith("http"):
             parts = eingabe.split(None, 1)
             url = parts[0]
@@ -204,7 +211,12 @@ class RadioMixin:
                 from urllib.parse import urlparse
                 name = urlparse(url).hostname or url
 
-            # Sender speichern falls noch nicht vorhanden
+            if not await enforce_url_policy(ctx, url):
+                return
+
+            # Sender vormerken falls noch nicht vorhanden – gespeichert wird
+            # erst NACH erfolgreichem Stream-Start, damit kaputte oder
+            # abgelehnte URLs nicht in radio_stations.json landen.
             existing = next((v for v in stations.values() if v["url"] == url), None)
             if existing is None:
                 key = name.lower().replace(" ", "").replace("-", "")
@@ -213,10 +225,7 @@ class RadioMixin:
                 while key in stations:
                     key = f"{base_key}{n}"
                     n += 1
-                stations[key] = {"name": name, "url": url}
-                with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(stations, f, ensure_ascii=False, indent=2)
-                await ctx.send(t("radio.station_saved", name=name, num=len(stations)))
+                new_station = (key, {"name": name, "url": url})
         else:
             _, entry = self._resolve_station_entry(eingabe, items)
             if entry is None:
@@ -243,4 +252,10 @@ class RadioMixin:
             self._playback_done.clear()
 
         self._radio_reconnect_count = 0
-        await self._play_radio_stream(ctx, url, name)
+        started = await self._play_radio_stream(ctx, url, name)
+        if started and new_station:
+            key, entry = new_station
+            stations[key] = entry
+            with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(stations, f, ensure_ascii=False, indent=2)
+            await ctx.send(t("radio.station_saved", name=name, num=len(stations)))

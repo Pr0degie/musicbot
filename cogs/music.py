@@ -18,6 +18,7 @@ import discord
 import psutil
 from utils.logger import logger
 from utils.i18n import t
+from utils.url_check import enforce_url_policy
 from discord.ext import commands, tasks
 from cogs.downloader import Downloader, DOWNLOAD_DIR, normalize_title, yt_video_id
 from cogs.presets import EQ_PRESETS
@@ -1232,6 +1233,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             parts = eingabe.split("||", 1)
             url = parts[0].strip()
             title = parts[1].strip()
+            if not await enforce_url_policy(ctx, url):
+                return
             self.queue.appendleft((url, title))
             await ctx.send(t("status.next_added", title=title))
             if not self.is_playing:
