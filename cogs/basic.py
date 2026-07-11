@@ -84,6 +84,7 @@ class BasicCommands(commands.Cog):
         if music is not None:
             try:
                 music._flush_scores_now()
+                music.dl.flush_cache_now()
             except Exception:
                 pass  # Restart darf an einem Flush-Fehler nicht scheitern
         cwd = os.getcwd()

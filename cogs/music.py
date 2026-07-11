@@ -151,6 +151,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self.idle_leave_task.cancel()
         # Gedebouncte Writes dürfen beim Entladen nicht verloren gehen.
         self._flush_scores_now()
+        self.dl.flush_cache_now()
 
     def update_ydl(self):
         """Baut yt_dlp-Instanzen neu auf. Cache-Einträge für Queue-Songs bleiben erhalten."""
@@ -189,18 +190,19 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
 
     @tasks.loop(seconds=30)
     async def _persist_flush_loop(self):
-        """Schreibt geänderte Play-Counts gebündelt (Debounce) im Worker-Thread."""
-        if not self._score_dirty:
-            return
-        self._score_dirty = False
-        # Snapshot per json.dumps auf dem Event-Loop, damit der Worker-Thread
-        # nie ein Dict serialisiert, das gleichzeitig mutiert wird.
-        payload = json.dumps(self._play_counts, ensure_ascii=False, indent=2)
-        try:
-            await asyncio.to_thread(SCORE_FILE.write_text, payload, encoding="utf-8")
-        except Exception as e:
-            self._score_dirty = True
-            logger.warning(f"[Score] Fehler beim Speichern: {e}")
+        """Schreibt geänderte Play-Counts und den Metadaten-Cache gebündelt
+        (Debounce) im Worker-Thread."""
+        if self._score_dirty:
+            self._score_dirty = False
+            # Snapshot per json.dumps auf dem Event-Loop, damit der Worker-Thread
+            # nie ein Dict serialisiert, das gleichzeitig mutiert wird.
+            payload = json.dumps(self._play_counts, ensure_ascii=False, indent=2)
+            try:
+                await asyncio.to_thread(SCORE_FILE.write_text, payload, encoding="utf-8")
+            except Exception as e:
+                self._score_dirty = True
+                logger.warning(f"[Score] Fehler beim Speichern: {e}")
+        await self.dl.flush_cache()
 
     @commands.command(name="reloadcookies")
     @require_admin()
