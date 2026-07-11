@@ -257,3 +257,33 @@ def test_progress_bar_clamps_negative_elapsed():
     assert bar.startswith("🔘")
     assert "0:00 / 5:00" in bar
 
+
+@pytest.mark.parametrize(
+    "stderr_text,expected",
+    [
+        ("[https @ 0x1] HTTP error 403 Forbidden\nInput/output error", "input"),
+        ("Invalid data found when processing input", "input"),
+        ("Connection reset by peer", "input"),
+        ("Error initializing filter 'equalizer' with args 'f=80'", "filter"),
+        ("No such filter: 'equalizzer'", "filter"),
+        ("", None),
+        ("irgendein harmloses Gebrabbel", None),
+    ],
+)
+def test_classify_ffmpeg_error(stderr_text, expected):
+    assert MusicCommands._classify_ffmpeg_error(stderr_text) == expected
+
+
+def test_stderr_tail_reads_and_closes():
+    import tempfile
+
+    buf = tempfile.TemporaryFile()
+    buf.write(b"\n".join(f"zeile {i}".encode() for i in range(30)))
+    tail = MusicCommands._stderr_tail(buf)
+    lines = tail.splitlines()
+    assert len(lines) == 20
+    assert lines[-1] == "zeile 29"
+    assert buf.closed
+    # Doppelt lesen (z.B. Fehlerpfad nach after_playing) darf nicht crashen.
+    assert MusicCommands._stderr_tail(buf) == ""
+

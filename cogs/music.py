@@ -5,6 +5,7 @@ import asyncio
 import json
 import random
 import re
+import tempfile
 import time
 import urllib.parse
 from collections import deque
@@ -516,6 +517,59 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         """
         return await self.dl.resolve_track(url, title, self.prefetch_task)
 
+    @staticmethod
+    def _stderr_tail(buf, max_lines: int = 20) -> str:
+        """Liest die letzten Zeilen aus dem FFmpeg-stderr-Puffer und schließt ihn."""
+        if buf is None:
+            return ""
+        try:
+            buf.seek(0)
+            data = buf.read()
+        except Exception:
+            return ""
+        finally:
+            try:
+                buf.close()
+            except Exception:
+                pass
+        lines = data.decode("utf-8", errors="replace").strip().splitlines()
+        return "\n".join(lines[-max_lines:])
+
+    @staticmethod
+    def _classify_ffmpeg_error(stderr_text: str):
+        """Ordnet FFmpeg-stderr grob ein: 'input' (Netz/HTTP-Quelle), 'filter' (EQ-Kette)
+        oder None (keine verwertbare Ausgabe). Filter-Marker gewinnen, weil sie
+        eindeutig sind – Input-Marker sind breiter gefasst."""
+        if not stderr_text:
+            return None
+        low = stderr_text.lower()
+        filter_markers = (
+            "error initializing filter",
+            "error reinitializing filters",
+            "no such filter",
+            "invalid filter",
+            "error applying option",
+        )
+        input_markers = (
+            "403 forbidden",
+            "404 not found",
+            "http error",
+            "invalid data found",
+            "connection reset",
+            "connection refused",
+            "connection timed out",
+            "server returned",
+            "input/output error",
+            "end of file",
+            "error in the pull function",
+            "failed to resolve",
+        )
+        if any(m in low for m in filter_markers):
+            return "filter"
+        if any(m in low for m in input_markers):
+            return "input"
+        return None
+
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
         if self.is_radio:
@@ -609,6 +663,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             self._autoplay_queued_url = None
         logger.info(f"[Nächster Track] {title} ({url})")
 
+        stderr_buf = None
         try:
             info, filename, title, duration = await self._resolve_track(url, title)
 
@@ -627,6 +682,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             else:
                 before_opts = f"-ss {seek_offset}" if seek_offset else None
 
+            # FFmpeg-stderr in eine Temp-Datei umleiten: Stirbt der Prozess sofort,
+            # sind die letzten Zeilen der einzige Beweis für die Ursache (403 vom
+            # CDN? kaputter Filter?). Gelesen und geschlossen wird in after_playing.
+            stderr_buf = tempfile.TemporaryFile()
+
             if eq_filter:
                 # Filter aktiv → dekodieren, EQ anwenden, mit 192kbps zu Opus enkodieren.
                 # -vn unterdrückt den Video-Stream.
@@ -635,13 +695,18 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                     bitrate=192,
                     before_options=before_opts,
                     options=f"-vn {eq_filter}",
+                    stderr=stderr_buf,
                 )
             elif is_stream:
                 # HTTP-Stream: codec=copy funktioniert nicht zuverlässig bei Netz-URLs → transkodieren.
-                source = discord.FFmpegOpusAudio(str(filename), bitrate=192, before_options=before_opts)
+                source = discord.FFmpegOpusAudio(
+                    str(filename), bitrate=192, before_options=before_opts, stderr=stderr_buf
+                )
             else:
                 # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
-                source = discord.FFmpegOpusAudio(str(filename), codec="copy", before_options=before_opts)
+                source = discord.FFmpegOpusAudio(
+                    str(filename), codec="copy", before_options=before_opts, stderr=stderr_buf
+                )
 
             def after_playing(error):
                 """Callback, der nach jedem Track von FFmpeg aufgerufen wird.
@@ -653,11 +718,22 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 if error:
                     logger.warning(f"[Fehler beim Abspielen] {error}")
                 elapsed = time.monotonic() - self.track_start_time if self.track_start_time else 999
-                if elapsed < 2.0:
-                    logger.warning(
-                        f"[FFmpeg] Track lief nur {elapsed:.2f}s – wahrscheinlich ungültiger Filter. "
-                        f"Aktives Preset: '{self.equalizer}', Filter: {self.eq_presets.get(self.equalizer, '(keiner)')}"
-                    )
+                # stderr immer auslesen (schließt den Puffer), loggen nur im Fehlerfall.
+                stderr_tail = self._stderr_tail(stderr_buf)
+                if error or elapsed < 2.0:
+                    if stderr_tail:
+                        logger.warning(f"[FFmpeg] stderr (letzte Zeilen):\n{stderr_tail}")
+                    if elapsed < 2.0:
+                        _verdicts = {
+                            "input": "Input-/Netzwerkfehler (Quelle lieferte keine Daten)",
+                            "filter": "Filterfehler (EQ-Kette)",
+                        }
+                        verdict = self._classify_ffmpeg_error(stderr_tail)
+                        logger.warning(
+                            f"[FFmpeg] Track lief nur {elapsed:.2f}s – Einstufung: "
+                            f"{_verdicts.get(verdict, 'unbekannt (keine verwertbare stderr-Ausgabe)')}. "
+                            f"Aktives Preset: '{self.equalizer}'"
+                        )
 
                 # Queue-Stand nach jedem Track in Datei sichern – nicht als
                 # Restore-Point gedacht, nur als Protokoll der letzten Session.
@@ -699,6 +775,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
+                self._stderr_tail(stderr_buf)   # after_playing läuft nie → Puffer schließen
                 return
 
             # Zweite dm_speaking-Prüfung: Das Auflösen oben (await _resolve_track) kann ein
@@ -708,6 +785,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 logger.info("[play_next] DM spricht – Track zurückgestellt statt überspielt.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
+                self._track_generation += 1     # hängende Post-Play-awaits entwerten
+                self._stderr_tail(stderr_buf)   # after_playing läuft nie → Puffer schließen
                 return
 
             self._playback_done.clear()
@@ -847,6 +926,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
                 self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
         except asyncio.TimeoutError:
+            self._stderr_tail(stderr_buf)   # Puffer schließen falls schon angelegt
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
@@ -861,6 +941,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
             return
         except Exception:
             logger.exception("[Fehler bei play_next]")
+            self._stderr_tail(stderr_buf)   # Puffer schließen falls schon angelegt
             self._recently_played.append(url)
             self._recently_played_titles.append(normalize_title(title))
             if ctx.voice_client and ctx.voice_client.is_connected():
