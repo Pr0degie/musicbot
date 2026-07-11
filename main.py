@@ -14,7 +14,14 @@ class MusicBot(commands.Bot):
         intents.message_content = True
         # help_command=None deaktiviert den eingebauten !help –
         # wir haben unseren eigenen mit deutschem Text in basic.py.
-        super().__init__(command_prefix="!", intents=intents, help_command=None)
+        # allowed_mentions=none(): der Bot gibt Fremd-Content wieder (YouTube-Titel,
+        # !echo, Lyrics) – ein "@everyone" darin darf nie tatsächlich pingen.
+        super().__init__(
+            command_prefix="!",
+            intents=intents,
+            help_command=None,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def setup_hook(self):
         # Cogs werden hier registriert – BasicCommands für Voice-Management,
