@@ -77,6 +77,7 @@
   "status.paused": "⏸️ Song paused.",
   "status.resumed": "▶️ Song resumed.",
   "status.paused_eph": "⏸️ Paused.",
+  "status.paused_at_eph": "⏸️ Paused at {position}.",
   "status.resumed_eph": "▶️ Resumed.",
   "status.playback_started": "▶️ Playback started.",
   "status.autoplay_starting": "🔁 Starting autoplay...",

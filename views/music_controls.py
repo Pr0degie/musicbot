@@ -46,7 +46,14 @@ class MusicControlView(View):
             self.music_cog._mark_paused()   # Fortschrittsbalken einfrieren
             # is_playing syncen, damit !resume und !p den richtigen Zustand sehen.
             self.music_cog.is_playing = False
-            await interaction.response.send_message(t("status.paused_eph"), ephemeral=True)
+            # Position ist durch _mark_paused eingefroren; ohne track_start_time
+            # (z. B. Radio) bleibt es bei der Meldung ohne Position.
+            elapsed = self.music_cog._elapsed_seconds()
+            if elapsed is None:
+                msg = t("status.paused_eph")
+            else:
+                msg = t("status.paused_at_eph", position=f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}")
+            await interaction.response.send_message(msg, ephemeral=True)
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
