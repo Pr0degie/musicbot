@@ -34,7 +34,17 @@ Four cogs loaded at startup, all responses in German:
 
 Background tasks: `prefetch_task` downloads the next two queued songs sequentially (`_prefetch_next(0)` then `_prefetch_next(1)` — sequential because yt_dlp is not thread-safe); `_autoplay_prefetch_task` searches + downloads next autoplay song while current plays.
 
-`_url_cache` on `self.dl`: URL → yt_dlp info-dict. All three callers cache the **full** info-dict (with `ext`, `webpage_url`) so `prepare_filename()` works. `autoplay_ydl` yields shallow playlist entries; `prefetch_autoplay()` upgrades via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely. Persisted to `metadata_cache.json` — survives bot restarts.
+`_url_cache` on `self.dl`: URL → yt_dlp info-dict. All three callers cache the **full** info-dict (with `ext`, `webpage_url`) so `prepare_filename()` works. `autoplay_ydl` yields shallow playlist entries; `prefetch_autoplay()` upgrades via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries still in queue/`current_track`; `clear()` wipes entirely. Persisted to `metadata_cache.json` — survives bot restarts. **Persistiert wird reduziert**: nur `PERSISTED_CACHE_FIELDS` (title, ext, duration, url, webpage_url, thumbnail, uploader, http_headers — die einzigen Felder, die je aus dem Cache gelesen werden; ~1,3 MB → ~7 KB bei 4 Songs). In-Memory bleibt das volle Dict. Alte Dateien im vollen Format laden weiterhin; unlesbare werden geloggt verworfen (Kaltstart). Scheitert ein aus der Datei geladener Eintrag bei `prepare_filename`, wird er verworfen und frisch extrahiert (Cache-Miss-Pfad, nie ein User-Fehler).
+
+### Persistenz & Dauerbetrieb (schwache Hardware)
+
+Kein blockierendes File-I/O im Event-Loop; alle wiederkehrenden Writes sind gedebounct:
+
+- **`_persist_flush_loop`** (`@tasks.loop(seconds=30)` in `music.py`): schreibt `play_counts.json` (`_score_dirty`, gesetzt von `_record_play`) und `metadata_cache.json` (`dl._cache_dirty`, via `dl.flush_cache()`) gebündelt — Serialisierung/Snapshot auf dem Loop, Write in `asyncio.to_thread`. **Trade-off (im Code dokumentiert):** bei hartem Crash fehlen bis zu 30 s Play-Counts bzw. Cache-Einträge (Letzteres = nur Cache-Miss).
+- **Flush-Garantien:** `cog_unload` und `!restart` (in `basic.py`, vor `os._exit`) rufen `_flush_scores_now()` + `dl.flush_cache_now()` synchron auf.
+- **Einmalige Writes** (`radio_stations.json`, `!saveq`-Playlists) laufen ohne Debounce via `asyncio.to_thread` (`_write_stations`/`_write_playlist`). Der `last_queue.json`-Write in `after_playing` bleibt synchron — der Callback läuft ohnehin im FFmpeg-Thread, nicht im Event-Loop.
+- **`DOWNLOADS_MAX_MB`** (`.env`, Default 0 = aus = heutiges Verhalten): nach jedem Download löscht `dl.cleanup_downloads()` (to_thread) die ältesten Dateien (mtime) aus `downloads/`, bis das Limit passt. Tabu: Songs in Queue/`current_track` (`protected_provider` aus `music.py`; Schutz über Cache→`prepare_filename` **und** Titel-Stem), `dl.last_resolved_file` (aktive FFmpeg-Quelle, aus dem letzten `resolve_track`-Ergebnis) und der frisch geladene Autoplay-Song (`extra_protected`). Fehler werden geschluckt — Cleanup löscht im Zweifel lieber nichts.
+- **HTTP:** `lyrics_cmd` nutzt die geteilte `self._http_session` (cog_load→cog_unload; `_http()` erstellt bei geschlossener Session eine neue).
 
 ### Audio Configuration
 
