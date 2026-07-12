@@ -623,7 +623,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, commands.Cog)
         # Der progressive Pfad puffert entsprechend mehr, damit die Bytes bis
         # zum Seek-Ziel in der wachsenden Datei existieren.
         return await self.dl.resolve_track(
-            url, title, self.prefetch_task,
+            url, title,
             force_download=force_download, min_buffer_seconds=self._seek_offset,
         )
 

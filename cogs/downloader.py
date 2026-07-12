@@ -719,11 +719,13 @@ class Downloader:
     # Download-Logik
     # ------------------------------------------------------------------
 
-    async def resolve_track(self, url: str, title: str, prefetch_task=None, force_download=False,
+    async def resolve_track(self, url: str, title: str, force_download=False,
                             min_buffer_seconds: int = 0):
         """Löst URL auf: extrahiert Metadaten und stellt sicher dass die Audiodatei lokal vorliegt.
 
-        prefetch_task: läuft ggf. parallel – warten statt doppelt herunterladen.
+        Läuft für die URL bereits ein schreibender Download (In-Flight-Registry:
+        Queue-/Autoplay-Prefetch, progressiv, Download-Fallback), wird der
+        adoptiert bzw. abgewartet statt ein zweiter gestartet.
         min_buffer_seconds: -ss-Ziel des Aufrufers – der progressive Pfad puffert
         zusätzlich so viele Sekunden, bevor die wachsende Datei zurückgegeben wird.
         Ungecachte kurze Tracks starten als progressiver Download (wachsende
@@ -786,19 +788,44 @@ class Downloader:
             filename = Path(self.ydl.prepare_filename(info))
             self.last_resolved_file = filename
 
-        # Läuft für diese URL bereits ein progressiver Download (Loop-Mode,
-        # !replay, !eq-Restart re-queuen den aktuellen Track)? → am laufenden
-        # Task teilnehmen statt die noch wachsende Datei als fertig zu missdeuten.
+        # In-Flight-Registry zuerst: schreibt bereits irgendein Pfad Bytes für
+        # diese URL? Lebendig vs. Leiche entscheidet NUR die Registry (bzw.
+        # _progressive), nie eine Datei-Heuristik.
+        # a) progressiv (Loop-Mode, !replay, !eq-Restart re-queuen den aktuellen
+        #    Track) → adoptieren: am laufenden Task/der wachsenden Datei
+        #    teilnehmen statt sie als fertig oder als Leiche zu missdeuten.
+        # b) Queue-/Autoplay-Prefetch o. Ä. → Task abwarten, danach normaler
+        #    Datei-Check.
         prog_task = self.progressive_task_for(url)
+        entry = None if prog_task is not None else self.inflight_download(url)
+        if entry is not None:
+            if entry[1] == "progressiv":
+                prog_task = entry[0]
+            else:
+                logger.info(f"[Download] Warte auf laufenden {entry[1]} für: {title}")
+                try:
+                    await asyncio.shield(entry[0])
+                except Exception:
+                    pass  # gescheitert → unten normaler Datei-Check, ggf. selbst laden
         if prog_task is not None:
             if await self._wait_for_buffer(filename, prog_task, min_buffer_seconds):
-                logger.info(f"[Progressiv] Laufender Download wird mitgenutzt: {title}")
+                logger.info(f"[Progressiv] Laufenden Download adoptiert: {title}")
                 self.last_resolved_file = filename
                 return info, filename, title, duration
-            # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln.
+            if not prog_task.done():
+                # Task lebt, puffert nur zu langsam → Stream-Fallback; der
+                # Download läuft weiter und wird Cache. KEIN unlink, kein
+                # Neustart: die wachsende Datei ist keine Leiche.
+                audio_url = info.get("url") or url
+                logger.info(f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
+                self.last_resolved_file = None
+                return info, audio_url, title, duration
+            # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln
+            # (Aufräumen hat _run_progressive selbst erledigt).
 
         # Leiche eines früheren Fehlschlags (unlink scheiterte, weil FFmpeg die
-        # Datei noch offen hatte): existiert, ist aber unvollständig → wegräumen.
+        # Datei noch offen hatte): existiert, ist aber unvollständig, und die
+        # Registry kennt keinen lebenden Task mehr → wegräumen.
         if filename.exists() and self.is_incomplete(filename):
             _resolved = filename.resolve()
             if safe_unlink(filename):
@@ -813,16 +840,7 @@ class Downloader:
                 return info, audio_url, title, duration
 
         if not filename.exists():
-            # Wenn der Prefetch-Task diese Datei gerade lädt, warten statt
-            # parallel runterzuladen – doppelte Downloads würden die Datei korrumpieren.
-            if prefetch_task and not prefetch_task.done():
-                logger.info(f"[Download] Warte auf laufenden Prefetch für: {title}")
-                try:
-                    await prefetch_task
-                except Exception:
-                    logger.debug("[Prefetch wait] Prefetch fehlgeschlagen, lade selbst herunter.")
-
-            if not filename.exists() and force_download:
+            if force_download:
                 # Letzter Anlauf: kein Stream mehr, Datei jetzt blockierend laden.
                 # Schlägt der Download fehl, propagiert die Exception zu play_next
                 # (Fehlerpfad überspringt den Track mit i18n-Meldung).

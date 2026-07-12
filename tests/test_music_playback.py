@@ -91,7 +91,7 @@ class FakeDownloader:
         self.progressive_tasks = {}
         self.blocked = []
 
-    async def resolve_track(self, url, title, prefetch_task=None, force_download=False,
+    async def resolve_track(self, url, title, force_download=False,
                             min_buffer_seconds=0):
         self.resolve_calls.append(url)
         self.force_calls.append(force_download)

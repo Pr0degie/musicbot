@@ -44,9 +44,9 @@ def make_dl(info, filename, cached=True, fail_extract=False):
     return dl
 
 
-def resolve(dl, prefetch_task=None):
+def resolve(dl):
     async def run():
-        result = await dl.resolve_track(URL, "Fallback-Titel", prefetch_task=prefetch_task)
+        result = await dl.resolve_track(URL, "Fallback-Titel")
         pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
@@ -128,7 +128,8 @@ def test_running_prefetch_is_awaited_then_file_used(tmp_path):
             local.write_bytes(b"x")
 
         task = asyncio.create_task(prefetch())
-        return await dl.resolve_track(URL, "T", prefetch_task=task)
+        dl._register_inflight(URL, "Queue-Prefetch", "T", task=task)
+        return await dl.resolve_track(URL, "T")
 
     _, filename, _, _ = asyncio.run(run())
 
@@ -146,8 +147,9 @@ def test_finished_prefetch_without_file_streams(tmp_path):
             pass  # tut nichts, erzeugt keine Datei
 
         task = asyncio.create_task(prefetch())
+        dl._register_inflight(URL, "Queue-Prefetch", "T", task=task)
         await asyncio.sleep(0)  # Task abschließen lassen
-        return await dl.resolve_track(URL, "T", prefetch_task=task)
+        return await dl.resolve_track(URL, "T")
 
     _, filename, _, _ = asyncio.run(run())
 
