@@ -813,13 +813,21 @@ class Downloader:
                 self.last_resolved_file = filename
                 return info, filename, title, duration
             if not prog_task.done():
-                # Task lebt, puffert nur zu langsam → Stream-Fallback; der
-                # Download läuft weiter und wird Cache. KEIN unlink, kein
-                # Neustart: die wachsende Datei ist keine Leiche.
-                audio_url = info.get("url") or url
-                logger.info(f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
-                self.last_resolved_file = None
-                return info, audio_url, title, duration
+                if force_download:
+                    # Letzter Anlauf nach zwei toten Streams: der lebende Task
+                    # IST der Download – zu Ende warten, Datei-Check unten.
+                    try:
+                        await asyncio.shield(prog_task)
+                    except Exception:
+                        pass
+                else:
+                    # Task lebt, puffert nur zu langsam → Stream-Fallback; der
+                    # Download läuft weiter und wird Cache. KEIN unlink, kein
+                    # Neustart: die wachsende Datei ist keine Leiche.
+                    audio_url = info.get("url") or url
+                    logger.info(f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
+                    self.last_resolved_file = None
+                    return info, audio_url, title, duration
             # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln
             # (Aufräumen hat _run_progressive selbst erledigt).
 
@@ -841,6 +849,18 @@ class Downloader:
 
         if not filename.exists():
             if force_download:
+                # Läuft (noch/inzwischen) ein lebender Download für die URL,
+                # IST der der letzte Anlauf – awaiten und Datei-Check
+                # wiederholen; nur wenn keiner läuft oder er scheitert,
+                # blockierend selbst laden.
+                other = self.inflight_download(url)
+                if other is not None:
+                    logger.info(f"[Download-Fallback] Warte auf laufenden {other[1]}: {title}")
+                    try:
+                        await asyncio.shield(other[0])
+                    except Exception:
+                        pass
+            if not filename.exists() and force_download:
                 # Letzter Anlauf: kein Stream mehr, Datei jetzt blockierend laden.
                 # Schlägt der Download fehl, propagiert die Exception zu play_next
                 # (Fehlerpfad überspringt den Track mit i18n-Meldung).

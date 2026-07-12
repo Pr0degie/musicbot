@@ -101,6 +101,50 @@ def test_resolve_adopts_running_progressive_without_second_download(tmp_path, mo
 
 
 # ---------------------------------------------------------------------------
+# b) force_download bei lebendem Task → awaitet statt parallel zu laden
+# ---------------------------------------------------------------------------
+
+def test_force_download_awaits_running_task_instead_of_parallel(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(), target)
+
+    async def run():
+        async def running_download():
+            await asyncio.sleep(0.05)
+            target.write_bytes(b"\0" * 4096)
+
+        task = asyncio.create_task(running_download())
+        dl._register_inflight(URL, "Queue-Prefetch", "Kurz", task=task)
+        return await dl.resolve_track(URL, "Kurz", force_download=True)
+
+    _, filename, _, _ = asyncio.run(run())
+
+    assert filename == target
+    assert dl.ydl.download_calls == []     # der lebende Task WAR der Download
+
+
+def test_force_download_loads_itself_when_task_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(), target)
+
+    async def run():
+        async def dying_download():
+            await asyncio.sleep(0.05)
+            raise RuntimeError("Download kaputt")
+
+        task = asyncio.create_task(dying_download())
+        dl._register_inflight(URL, "Queue-Prefetch", "Kurz", task=task)
+        return await dl.resolve_track(URL, "Kurz", force_download=True)
+
+    _, filename, _, _ = asyncio.run(run())
+
+    assert filename == target
+    assert dl.ydl.download_calls == [[URL]]   # erst nach dem Scheitern selbst geladen
+
+
+# ---------------------------------------------------------------------------
 # c) Autoplay-Prefetch lädt noch → resolve_track wartet statt doppelt zu laden
 # ---------------------------------------------------------------------------
 
