@@ -9,6 +9,7 @@ from aiohttp import web
 import discord
 from discord.ext import commands
 
+from utils.files import safe_unlink
 from utils.logger import logger
 from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT, DM_BRIDGE_SECRET
 
@@ -47,6 +48,12 @@ class DMBridge(commands.Cog):
         self._speak_lock = asyncio.Lock()
 
     async def cog_load(self):
+        # Temp-WAVs aus früheren Läufen wegräumen: safe_unlink konnte eine noch
+        # von FFmpeg gelesene Datei nur bis zum Prozessende aufschieben – nach
+        # einem Neustart hält sie niemand mehr offen.
+        for stale in Path(tempfile.gettempdir()).glob("dm_recv_*.wav"):
+            if safe_unlink(stale, defer=False):
+                logger.info(f"[DMBridge] Alte Temp-WAV entfernt: {stale.name}")
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
         app.router.add_post("/speak", self._handle_speak)
@@ -144,10 +151,13 @@ class DMBridge(commands.Cog):
                     logger.exception("[DMBridge] Fehler beim Abspielen der empfangenen WAV")
                     return web.json_response({"error": "playback failed"}, status=500)
         finally:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+            # Der after-Callback von vc.play feuert, BEVOR discord.py die
+            # FFmpeg-Quelle aufräumt (Player-Thread: _call_after → cleanup) –
+            # FFmpeg kann die WAV hier also noch offen halten. Windows wirft
+            # dann PermissionError; safe_unlink schiebt die Löschung auf
+            # (Retry beim nächsten cleanup_downloads-Drain, Reste aus
+            # früheren Läufen räumt cog_load weg).
+            safe_unlink(tmp)
         return web.json_response({"status": "played"})
 
     # -------------------------------------------------------------- Internals

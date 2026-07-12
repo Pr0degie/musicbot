@@ -10,12 +10,24 @@ import asyncio
 import time
 from pathlib import Path
 
+import pytest
+
 import cogs.downloader as dlmod
+import utils.files as files_mod
 from cogs.downloader import (
     PROGRESSIVE_MIN_BYTES, PROGRESSIVE_SIDECAR_SUFFIX, Downloader,
 )
 
 URL = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+
+
+@pytest.fixture(autouse=True)
+def clean_pending_deletes():
+    """Simulierte Windows-Blockaden füllen die Pending-Delete-Liste –
+    zwischen den Tests leeren, damit nichts in andere Tests blutet."""
+    files_mod._pending_deletes.clear()
+    yield
+    files_mod._pending_deletes.clear()
 
 
 class FakeYdl:
@@ -215,6 +227,29 @@ def test_fast_start_failure_falls_back_to_fresh_extract(tmp_path, monkeypatch):
     assert ydl.download_calls == [[URL]]
     assert target.stat().st_size == 10 * 1024   # frischer Download, nicht die Teil-Datei
     assert not dl.is_incomplete(target)
+
+
+def test_fast_start_failure_with_blocked_unlink_aborts_and_blocks(tmp_path, monkeypatch):
+    """Windows: FFmpeg hält die Teil-Datei des gescheiterten Schnellstarts noch
+    offen → unlink schlägt fehl. Dann darf KEIN zweiter Download an dieselbe
+    Datei anhängen (yt_dlp continuedl → korrupter Mischling); stattdessen wird
+    die URL geblockt und der Stream-Fallback übernimmt."""
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "blockiert.webm"
+    ydl = InfoYdl(target, fail_fast=True)
+    dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
+    monkeypatch.setattr(
+        Path, "unlink",
+        lambda self, missing_ok=False: (_ for _ in ()).throw(PermissionError("in use")),
+    )
+
+    _, filename, _, _ = resolve(dl)
+
+    assert filename == "https://cdn.example/stream"   # Fallback statt Mischling
+    assert ydl.download_calls == []                   # nie an die blockierte Datei angehängt
+    assert URL in dl._progressive_blocked
+    assert target.exists()                            # bleibt liegen – Startup-Purge räumt auf
+    assert dl.is_incomplete(target)
 
 
 def test_reduced_cache_entry_skips_fast_start(tmp_path, monkeypatch):

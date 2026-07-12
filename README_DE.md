@@ -73,7 +73,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!j` / `!l` | Voice-Channel beitreten / verlassen |
 | `!dm` | DM-Bridge-Status anzeigen (KI-Dungeon-Master-Audioausgabe) |
 | `!reloadcookies` | `cookies.txt` neu laden ohne Bot-Neustart |
-| `!restart` | Bot in neuem Terminal neu starten (nur Owner) |
+| `!restart` | Bot neu starten (nur Owner) — Windows: neues Konsolenfenster, Linux: in-place |
 
 ---
 
@@ -96,6 +96,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   └── queue_view.py          # Paginierte Queue-Ansicht
 ├── utils/
 │   ├── logger.py              # Logging (Konsole + bot.log)
+│   ├── files.py               # safe_unlink + Pending-Delete-Liste (Windows-Datei-Locking)
 │   ├── text.py                # normalize_title (abhängigkeitsfrei, getestet)
 │   └── i18n.py                # Lokalisierungs-Helfer (t()-Funktion)
 ├── locales/

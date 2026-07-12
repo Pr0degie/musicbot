@@ -8,16 +8,24 @@
 
 ## 2. Installation
 
+**Windows (primary path):**
+
+```bat
+git clone https://github.com/Pr0degie/musicbot.git
+cd Musicbot
+install.bat
+```
+
+`install.bat` creates the venv, installs the dependencies, checks/installs
+FFmpeg via winget and creates a `.env` stub.
+
+**Linux / macOS (manual):**
+
 ```bash
 git clone https://github.com/Pr0degie/musicbot.git
 cd Musicbot
 python -m venv venv
-
-# Windows:
-venv\Scripts\activate
-# Linux / macOS:
 source venv/bin/activate
-
 pip install -r requirements.txt
 ```
 
@@ -142,6 +150,18 @@ pip install "yt-dlp[default]"
 `js_runtimes: {node: {}}` is already configured in all ydl instances in `update_ydl()`.
 
 ## 5. Start
+
+**Windows (primary path):**
+
+```bat
+start.bat
+```
+
+Activates the venv (if present) and runs `python main.py`. On `!restart` the
+bot reopens in a new console window; the old window stops at `start.bat`'s
+`pause` and can be closed.
+
+**Linux / macOS:**
 
 ```bash
 python main.py

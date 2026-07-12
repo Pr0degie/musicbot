@@ -76,7 +76,7 @@ class BasicCommands(commands.Cog):
     @commands.command(name="restart")
     @commands.is_owner()
     async def restart(self, ctx):
-        """Startet den Bot-Prozess neu (nur Bot-Owner): wt.exe/WSL-Terminal wenn vorhanden, sonst os.execv in-place."""
+        """Startet den Bot-Prozess neu (nur Bot-Owner): Windows → neue Konsole, Linux/macOS → os.execv in-place."""
         from utils.logger import logger
 
         await ctx.send("🔄 Restarting...")
@@ -99,27 +99,25 @@ class BasicCommands(commands.Cog):
                 music.dl.flush_cache_now()
             except Exception:
                 pass  # Restart darf an einem Flush-Fehler nicht scheitern
-        cwd = os.getcwd()
-        try:
-            # WSL2: neues Windows Terminal Tab öffnen, altes schließt sich durch os._exit
+        if sys.platform == "win32":
+            # os.execv ist auf Windows kein echter exec (CreateProcess + Exit):
+            # das Kind teilt die Konsole mit start.bat, dessen `pause` dann mit
+            # dem Bot um stdin konkurriert, und argv wird nicht Windows-konform
+            # gequotet (Pfade mit Leerzeichen brechen). Deshalb sauberer Schnitt:
+            # neues Konsolenfenster, alter Prozess beendet sich hart.
+            # sys.executable ist bereits die venv-Python aus start.bat – die
+            # .bat muss nicht erneut laufen (activate setzt nur PATH/Umgebung,
+            # ihr `pause` beendet nur das alte Fenster).
             subprocess.Popen(
-                [
-                    "wt.exe",
-                    "wsl",
-                    "--",
-                    "bash",
-                    "-c",
-                    f'cd "{cwd}" && python main.py; exec bash',
-                ],
-                start_new_session=True,
+                [sys.executable] + sys.argv,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
-        except FileNotFoundError:
-            # Kein Windows Terminal (z. B. Linux-Server) → in-place restart
-            logger.info("[restart] wt.exe nicht gefunden – Neustart via os.execv (in-place)")
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-            return
-        logger.info("[restart] Neustart via wt.exe/WSL-Terminal – beende alten Prozess")
-        os._exit(0)
+            logger.info("[restart] Neustart in neuer Konsole (CREATE_NEW_CONSOLE) – beende alten Prozess")
+            os._exit(0)
+            return  # unerreichbar – nur für Tests, die os._exit mocken
+        # Linux/macOS: echter exec ersetzt den Prozess in-place.
+        logger.info("[restart] Neustart via os.execv (in-place)")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     @commands.command(name="l")
     async def leave(self, ctx):

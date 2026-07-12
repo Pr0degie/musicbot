@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yt_dlp
 from config import DOWNLOADS_MAX_MB, YDL_BROWSER, YDL_COOKIES_FILE
+from utils.files import drain_pending_deletes, safe_unlink
 from utils.logger import logger
 from utils.text import normalize_title  # re-exportiert: music.py importiert es von hier
 
@@ -417,6 +418,23 @@ class Downloader:
         geschluckt: Cleanup darf niemals einen neuen Fehlerpfad einführen –
         im Zweifel bleibt eine Datei liegen.
         """
+        # Aufgeschobene Löschungen (Windows: Datei war beim unlink in Benutzung)
+        # zuerst nachholen – unabhängig vom DOWNLOADS_MAX_MB-Flag. Tabu bleiben
+        # die aktive FFmpeg-Quelle und wachsende progressive Dateien: ein Pfad
+        # aus der Pending-Liste könnte inzwischen neu heruntergeladen worden
+        # und wieder aktiv sein.
+        _drain_protect = set()
+        for tabu in (self.last_resolved_file, *(self._progressive_files or {}).values()):
+            if tabu is not None:
+                try:
+                    _drain_protect.add(Path(tabu).resolve())
+                except OSError:
+                    pass
+        try:
+            await asyncio.to_thread(drain_pending_deletes, _drain_protect)
+        except Exception:
+            pass  # Drain darf nie einen neuen Fehlerpfad einführen
+
         if DOWNLOADS_MAX_MB <= 0:
             return  # Flag nicht gesetzt → heutiges Verhalten, kein Cleanup
         if self.protected_provider is None:
@@ -473,10 +491,11 @@ class Downloader:
                 break
             if p.resolve() in protected_paths or p.stem in protected_stems:
                 continue
-            try:
-                p.unlink()
-            except OSError:
-                continue  # z. B. Datei gerade in Benutzung (Windows) → überspringen
+            # defer=False: der Größen-Cleanup bewertet jeden Lauf frisch – eine
+            # aufgeschobene Löschung könnte eine Datei treffen, die bis zum
+            # Drain wieder in der Queue hängt. Gesperrte Datei → überspringen.
+            if not safe_unlink(p, defer=False):
+                continue
             total -= size
             logger.info(f"[Cleanup] Gelöscht ({size / (1024 * 1024):.1f} MB): {p.name}")
 
@@ -526,13 +545,13 @@ class Downloader:
         purged = 0
         for sidecar in DOWNLOAD_DIR.glob(f"*{PROGRESSIVE_SIDECAR_SUFFIX}"):
             media = sidecar.with_name(sidecar.name[: -len(PROGRESSIVE_SIDECAR_SUFFIX)])
-            try:
-                if media.exists():
-                    media.unlink()
-                sidecar.unlink()
+            if not safe_unlink(media):
+                continue  # blockiert → Sidecar liegen lassen, nächster Start versucht es erneut
+            if safe_unlink(sidecar):
                 purged += 1
-            except OSError:
-                continue  # im Zweifel liegen lassen, nächster Start versucht es erneut
+        # Aufgeschobene Löschungen aus diesem Prozess nachholen (beim echten
+        # Start leer; relevant, wenn der Purge erneut aufgerufen wird).
+        drain_pending_deletes()
         if purged:
             logger.info(f"[Progressiv] {purged} unvollständige Datei(en) aus früherem Lauf entfernt")
 
@@ -574,8 +593,15 @@ class Downloader:
                 return
             except Exception as e:
                 logger.info(f"[Progressiv] Schnellstart mit vorhandener Info fehlgeschlagen ({e}) – extrahiere frisch")
-                if filename.exists():
-                    filename.unlink()
+                if not safe_unlink(filename):
+                    # Windows: FFmpeg liest die Teil-Datei noch → unlink schlägt
+                    # fehl. Weiterladen wäre fatal: yt_dlp (continuedl) hängt an
+                    # die vorhandene Datei an → korrupter Mischling. Abbrechen;
+                    # der Fehlerpfad des Aufrufers blockt die URL, der
+                    # Stream-Fallback übernimmt.
+                    raise OSError(
+                        f"Teil-Datei in Benutzung – progressiver Neuversuch abgebrochen: {filename.name}"
+                    ) from e
         # download([webpage_url]) extrahiert intern frisch – eine ggf. abgelaufene
         # CDN-URL aus dem Cache ist egal; yt_dlps HTTP-Client trifft kein CDN-403.
         ydl.download([info.get("webpage_url") or url])
@@ -587,24 +613,22 @@ class Downloader:
             ydl = self._make_progressive_ydl()
             await asyncio.to_thread(self._download_progressive_sync, ydl, info, url, filename)
             self._incomplete_files.discard(filename.resolve())
-            try:
-                self._sidecar_for(filename).unlink()
-            except OSError:
-                pass
+            safe_unlink(self._sidecar_for(filename))
             logger.info(f"[Progressiv] Download fertig: {filename.name}")
             await self.cleanup_downloads()
             return True
         except Exception as e:
             logger.warning(f"[Progressiv] Download fehlgeschlagen für {title}: {e} – unvollständige Datei wird entfernt")
-            try:
-                if filename.exists():
-                    filename.unlink()
-                self._sidecar_for(filename).unlink(missing_ok=True)
+            if safe_unlink(filename):
+                safe_unlink(self._sidecar_for(filename))
                 self._incomplete_files.discard(filename.resolve())
-            except OSError:
+            else:
                 # FFmpeg liest noch (Windows-Sharing) → Datei bleibt im Set und der
                 # Sidecar liegen: in dieser Session gilt sie als "nicht vorhanden",
                 # der nächste Bot-Start räumt sie via _purge_stale_progressive weg.
+                # URL sofort blocken: jeder weitere progressive Versuch liefe in
+                # dieselbe blockierte Teil-Datei (Stream-Fallback übernimmt).
+                self.block_progressive(url)
                 logger.warning(f"[Progressiv] Unvollständige Datei konnte nicht gelöscht werden (in Benutzung?): {filename.name}")
             return False
         finally:
@@ -730,11 +754,10 @@ class Downloader:
         # Datei noch offen hatte): existiert, ist aber unvollständig → wegräumen.
         if filename.exists() and self.is_incomplete(filename):
             _resolved = filename.resolve()
-            try:
-                filename.unlink()
-                self._sidecar_for(filename).unlink(missing_ok=True)
+            if safe_unlink(filename):
+                safe_unlink(self._sidecar_for(filename))
                 self._incomplete_files.discard(_resolved)
-            except OSError:
+            else:
                 # Datei blockiert → als Stream ausweichen; der nächste Bot-Start
                 # räumt sie via _purge_stale_progressive weg.
                 audio_url = info.get("url") or url
@@ -840,12 +863,10 @@ class Downloader:
                 # Leiche eines gescheiterten progressiven Downloads → erst weg,
                 # sonst hält yt_dlp die Datei für fertig. Blockiert (FFmpeg liest
                 # noch) → diesen Prefetch auslassen.
-                try:
-                    filename.unlink()
-                    self._sidecar_for(filename).unlink(missing_ok=True)
-                    self._incomplete_files.discard(filename.resolve())
-                except OSError:
+                if not safe_unlink(filename):
                     return
+                safe_unlink(self._sidecar_for(filename))
+                self._incomplete_files.discard(filename.resolve())
             if not filename.exists():
                 logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
                 await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])

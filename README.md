@@ -73,7 +73,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!j` / `!l` | Join / leave voice channel |
 | `!dm` | Show DM-bridge status (AI dungeon master audio output) |
 | `!reloadcookies` | Reload `cookies.txt` without restarting |
-| `!restart` | Restart bot in new terminal (owner only) |
+| `!restart` | Restart bot (owner only) — new console window on Windows, in-place on Linux |
 
 ---
 
@@ -96,6 +96,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   └── queue_view.py          # Paginated queue view
 ├── utils/
 │   ├── logger.py              # Logging (console + bot.log)
+│   ├── files.py               # safe_unlink + pending-delete list (Windows file locking)
 │   ├── text.py                # normalize_title (dependency-free, tested)
 │   └── i18n.py                # Localization helper (t() function)
 ├── locales/
