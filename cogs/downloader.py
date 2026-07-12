@@ -139,6 +139,10 @@ class Downloader:
     _progressive_files = None    # dict[url → Path]: Zieldateien (Schutz vor cleanup_downloads)
     _incomplete_files = None     # set[Path]: resolved Pfade unvollständiger Dateien
     _progressive_blocked = None  # dict[url → monotonic]: TTL-Blockliste nach Fehlschlag
+    # In-Flight-Registry – Invariante: pro URL maximal ein schreibender Download.
+    # Jeder Pfad, der Bytes für eine URL auf die Platte schreibt (Queue-Prefetch,
+    # Autoplay-Prefetch, progressiv, Download-Fallback), registriert sich hier.
+    _inflight = None             # dict[url → (asyncio.Task, quelle)]
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
@@ -149,6 +153,7 @@ class Downloader:
         self._progressive_files: dict[str, Path] = {}
         self._incomplete_files: set[Path] = set()
         self._progressive_blocked: dict[str, float] = {}
+        self._inflight: dict[str, tuple] = {}
         self._purge_stale_progressive()
         self._load_cache()
         self._init_ydl()
@@ -500,6 +505,46 @@ class Downloader:
             logger.info(f"[Cleanup] Gelöscht ({size / (1024 * 1024):.1f} MB): {p.name}")
 
     # ------------------------------------------------------------------
+    # In-Flight-Registry: pro URL maximal ein schreibender Download
+    # ------------------------------------------------------------------
+
+    def inflight_download(self, url: str):
+        """(task, quelle) des lebenden fremden Downloads für diese URL, sonst None.
+
+        Die eigene Registrierung (derselbe Task) zählt nicht – ein Pfad darf
+        nie auf sich selbst warten."""
+        entry = (self._inflight or {}).get(url)
+        if entry is None:
+            return None
+        task, _quelle = entry
+        if task.done() or task is asyncio.current_task():
+            return None
+        return entry
+
+    def _register_inflight(self, url: str, quelle: str, title: str = "", task=None):
+        """Trägt task (Default: aufrufender Task) als den einen schreibenden
+        Download für url ein. Läuft bereits ein anderer lebender Task, wird
+        NICHT registriert und dessen (task, quelle) zurückgegeben – der
+        Aufrufer wartet/adoptiert dann statt selbst zu laden. Deregistrierung
+        macht der Pfad selbst im finally (_inflight_done); der done-Callback
+        ist nur Sicherheitsnetz für Cancels, die das finally umgehen."""
+        existing = self.inflight_download(url)
+        if existing is not None:
+            return existing
+        if self._inflight is None:
+            self._inflight = {}
+        task = task or asyncio.current_task()
+        self._inflight[url] = (task, quelle)
+        task.add_done_callback(lambda t, u=url: self._inflight_done(u, t))
+        return None
+
+    def _inflight_done(self, url: str, task=None):
+        """Entfernt die Registrierung – nur die eigene (task-Identität)."""
+        entry = (self._inflight or {}).get(url)
+        if entry is not None and (task is None or entry[0] is task):
+            self._inflight.pop(url, None)
+
+    # ------------------------------------------------------------------
     # Progressiver Download (wachsende Datei spielt, Download läuft weiter)
     # ------------------------------------------------------------------
 
@@ -574,6 +619,7 @@ class Downloader:
             pass
         task = asyncio.create_task(self._run_progressive(url, info, filename, title))
         self._progressive[url] = task
+        self._register_inflight(url, "progressiv", title, task=task)
         logger.info(f"[Progressiv] Starte Hintergrund-Download: {title}")
         return task
 
@@ -634,6 +680,7 @@ class Downloader:
         finally:
             self._progressive.pop(url, None)
             self._progressive_files.pop(url, None)
+            self._inflight_done(url, asyncio.current_task())
 
     async def _wait_for_buffer(self, filename: Path, task: asyncio.Task, min_buffer_seconds: int = 0) -> bool:
         """Wartet, bis die wachsende Datei genug Startpuffer hat (oder der
@@ -780,8 +827,12 @@ class Downloader:
                 # Schlägt der Download fehl, propagiert die Exception zu play_next
                 # (Fehlerpfad überspringt den Track mit i18n-Meldung).
                 logger.warning(f"[Download-Fallback] Stream schlug zweimal fehl – lade lokal herunter: {title}")
-                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
-                logger.info(f"[Download-Fallback] Fertig: {filename.name}")
+                self._register_inflight(url, "Download-Fallback", title)
+                try:
+                    await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
+                    logger.info(f"[Download-Fallback] Fertig: {filename.name}")
+                finally:
+                    self._inflight_done(url, asyncio.current_task())
                 await self.cleanup_downloads()
             if not filename.exists():
                 # Primärpfad: progressiver Download – yt_dlp lädt sofort, FFmpeg
@@ -839,6 +890,8 @@ class Downloader:
             # (das .part-Rename des Prefetch liefe gegen die offene FFmpeg-Datei).
             logger.info(f"[Prefetch] Übersprungen – läuft bereits progressiv: {title}")
             return
+        if self._register_inflight(url, "Queue-Prefetch", title) is not None:
+            return  # anderer Pfad schreibt diese URL bereits – kein zweiter Writer
         try:
             if url in self._url_cache:
                 info = self._url_cache[url]
@@ -879,6 +932,8 @@ class Downloader:
         except Exception as e:
             # Prefetch-Fehler sind nicht fatal – resolve_track lädt im Zweifelsfall selbst.
             logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
+        finally:
+            self._inflight_done(url, asyncio.current_task())
 
     async def prefetch_autoplay(self, ref_url, ref_title, recently_played, recently_played_titles=()):
         """Sucht + lädt nächsten Autoplay-Song im Hintergrund.
@@ -915,30 +970,42 @@ class Downloader:
             title = chosen.get("title", "Unbekannt")
 
             logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            # extract_info(download=True) lädt die Datei herunter UND gibt das volle
-            # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
-            # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
-            # resolve_track() würden sonst fehlschlagen.
-            full_info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, url, download=True),
-                timeout=120.0,
-            )
-            if full_info:
-                if "entries" in full_info:
-                    full_info = full_info["entries"][0]
-                self._url_cache[url] = full_info
-                self._cache_timestamps[url] = time.time()
-                self._cache_dirty = True
-            logger.info(f"[Autoplay Prefetch] Fertig: {title}")
-            # Der frisch geladene Song hängt noch nicht in der Queue (macht der
-            # Caller) → seine Datei explizit vor dem Cleanup schützen.
-            just_downloaded = None
-            if full_info:
+            existing = self._register_inflight(url, "Autoplay-Prefetch", title)
+            if existing is not None:
+                # Anderer Pfad schreibt diese URL bereits – dessen Ende abwarten
+                # statt parallel zu laden; der Song wird trotzdem eingereiht.
                 try:
-                    just_downloaded = Path(self.ydl.prepare_filename(full_info))
+                    await asyncio.wait_for(asyncio.shield(existing[0]), timeout=120.0)
                 except Exception:
                     pass
-            await self.cleanup_downloads(extra_protected=just_downloaded)
+                return url, title
+            try:
+                # extract_info(download=True) lädt die Datei herunter UND gibt das volle
+                # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
+                # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
+                # resolve_track() würden sonst fehlschlagen.
+                full_info = await asyncio.wait_for(
+                    asyncio.to_thread(self.ydl.extract_info, url, download=True),
+                    timeout=120.0,
+                )
+                if full_info:
+                    if "entries" in full_info:
+                        full_info = full_info["entries"][0]
+                    self._url_cache[url] = full_info
+                    self._cache_timestamps[url] = time.time()
+                    self._cache_dirty = True
+                logger.info(f"[Autoplay Prefetch] Fertig: {title}")
+                # Der frisch geladene Song hängt noch nicht in der Queue (macht der
+                # Caller) → seine Datei explizit vor dem Cleanup schützen.
+                just_downloaded = None
+                if full_info:
+                    try:
+                        just_downloaded = Path(self.ydl.prepare_filename(full_info))
+                    except Exception:
+                        pass
+                await self.cleanup_downloads(extra_protected=just_downloaded)
+            finally:
+                self._inflight_done(url, asyncio.current_task())
             return url, title
 
         except asyncio.TimeoutError:
