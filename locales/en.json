@@ -75,8 +75,6 @@
   "status.next_added": "⏭️ Up next: **{title}**",
   "status.next_with_alts": "⏭️ Up next: **{title}**\n*Not the right one? Choose an alternative:*\n{alts}",
   "status.skipped": "⏭️ Song skipped. Playing the next track...",
-  "status.paused": "⏸️ Song paused.",
-  "status.resumed": "▶️ Song resumed.",
   "status.paused_eph": "⏸️ Paused.",
   "status.paused_at_eph": "⏸️ Paused at {position}.",
   "status.resumed_eph": "▶️ Resumed.",

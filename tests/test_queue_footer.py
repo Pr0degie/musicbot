@@ -9,7 +9,7 @@ from views.queue_view import QueueView
 
 
 def _footer(items, current=None, loop_mode=None):
-    return QueueView(items, current, loop_mode).build_embed().footer.text
+    return QueueView(items, current, loop_mode)._footer_text()
 
 
 def test_footer_all_durations_known():

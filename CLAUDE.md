@@ -22,12 +22,12 @@ Setup → `README.md`, Cookies → `SETUP.md`. Tests: `pytest` (suite in `tests/
 ## Architektur-Landkarte
 
 - `cogs/basic.py` — `!j`/`!l`/`!ping`/`!echo` + `!restart`
-- `cogs/music.py` — Queue, FFmpeg-Playback, EQ, Autoplay; Mixins: `music_radio.py` (Radio), `music_stats.py` (`!score`/`!stats`), `music_queue_io.py` (`!saveq`/`!loadq`/`!lists`)
+- `cogs/music.py` — `MusicCommands`-Kern (Queue, EQ, Autoplay, Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/`_classify_ffmpeg_error`/`_progress_bar`); Mixins: `music_playback.py` (`PlaybackMixin`: `play_next`-Orchestrator + `_handle_queue_empty`/`_build_audio_source`/`_make_after_playing`/`_snapshot_track_state`, Prefetch, Such-/Resolve-Flow → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md)), `music_voice_ui.py` (`VoiceLifecycleMixin` Join/Leave/Idle/Watchdog, `PlaybackUiMixin` Fortschrittsbalken), `music_radio.py` (Radio), `music_stats.py` (`!score`/`!stats`), `music_queue_io.py` (`!saveq`/`!loadq`/`!lists`)
 - `cogs/downloader.py` — alles yt_dlp: fünf Instanzen, `_url_cache`, `resolve_track()`, Prefetch, In-Flight-Registry, `DOWNLOAD_DIR`
 - `cogs/dm_bridge.py` — HTTP-Server, über den "Bot B" (KI-Dungeon-Master) diesen Bot sprechen lässt
 - `cogs/presets.py` — EQ-Filterketten (`EQ_PRESETS`) + FFmpeg-Filter-Notizen
 - `views/music_controls.py` — Playback-Buttons + Stale-Buttons-Fallback; `views/queue_view.py` — paginierte Queue
-- `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text.normalize_title`, `i18n.t`
+- `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text` (`normalize_title`/`parse_time`/`progress_bar`), `ffmpeg` (zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`, in `music.py` via Klassen-Aliase gespiegelt), `i18n.t`
 
 ## Doku
 
