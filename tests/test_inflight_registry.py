@@ -169,6 +169,27 @@ def test_resolve_waits_for_running_autoplay_prefetch(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# d) _start_progressive ist idempotent: zweimal dieselbe URL → derselbe Task
+# ---------------------------------------------------------------------------
+
+def test_start_progressive_twice_returns_same_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    target = tmp_path / "song.webm"
+    writer = CountingWriter(target, write_bytes=PROGRESSIVE_MIN_BYTES + 1024, linger=0.2)
+    dl = make_dl(short_info(), target, writer)
+
+    async def run():
+        task1 = dl._start_progressive(URL, short_info(), target, "Kurz")
+        task2 = dl._start_progressive(URL, short_info(), target, "Kurz")
+        assert task2 is task1              # kein Waisen-Task, kein zweiter Writer
+        await task1
+
+    asyncio.run(run())
+
+    assert writer.calls == [[URL]]         # genau EIN Download
+
+
+# ---------------------------------------------------------------------------
 # e) Leiche: Registry leer + is_incomplete → heutiges Aufräumverhalten
 # ---------------------------------------------------------------------------
 

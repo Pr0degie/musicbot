@@ -602,9 +602,21 @@ class Downloader:
 
     def _start_progressive(self, url: str, info: dict, filename: Path, title: str) -> asyncio.Task:
         """Registriert die Zieldatei als unvollständig (Set + Sidecar) und
-        startet den Hintergrund-Download. Muss auf dem Event-Loop laufen."""
+        startet den Hintergrund-Download. Muss auf dem Event-Loop laufen.
+
+        Idempotent – letzte Verteidigungslinie, falls ein Aufrufer die
+        Registry-Konsultation umgeht: läuft für die URL bereits ein lebender
+        Task (progressiv oder fremd), wird DER zurückgegeben statt ein
+        zweiter Writer auf denselben Dateinamen gestartet (Marker/Sidecar
+        werden dann auch nicht doppelt angelegt)."""
         if self._progressive is None:
             self._progressive = {}
+        existing = self._progressive.get(url)
+        if existing is not None and not existing.done():
+            return existing
+        fremd = self.inflight_download(url)
+        if fremd is not None:
+            return fremd[0]
         if self._progressive_files is None:
             self._progressive_files = {}
         if self._incomplete_files is None:
