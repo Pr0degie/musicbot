@@ -530,6 +530,9 @@ class Downloader:
         ist nur Sicherheitsnetz für Cancels, die das finally umgehen."""
         existing = self.inflight_download(url)
         if existing is not None:
+            # Dauerhaftes Nachweis-Logging: hier hätte vor der Registry ein
+            # zweiter paralleler Download derselben URL gestartet.
+            logger.info(f"[Download] Bereits in Arbeit über {existing[1]} – kein zweiter Start: {title or url}")
             return existing
         if self._inflight is None:
             self._inflight = {}
