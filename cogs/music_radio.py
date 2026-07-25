@@ -107,11 +107,10 @@ class RadioMixin:
                     self.bot.loop,
                 )
 
-        if self.now_playing_msg:
-            try:
-                await self.now_playing_msg.edit(content=None, embed=None, view=None)
-            except Exception:
-                pass
+        # Vorherige Karte (Song oder alter Sender) auf Text zurückbauen – nur die
+        # laufende Quelle behält ihre Karte. Nie leer editieren: das lehnt Discord
+        # ab und die alte Karte bliebe samt Buttons stehen.
+        await self._retire_np_message(self.now_playing_msg, self._np_title)
 
         self._playback_done.clear()
         self.track_start_time = time.monotonic()
@@ -122,6 +121,7 @@ class RadioMixin:
         embed.add_field(name=t("embed.status"), value=t("embed.radio_live"), inline=True)
         embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
         self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
+        self._np_title = name        # Sendername für den späteren Rückbau der Karte
         self.text_channel = ctx.channel
         logger.info(f"[Radio] Stream gestartet: {name} ({url})")
         return True

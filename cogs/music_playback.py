@@ -236,22 +236,17 @@ class PlaybackMixin:
                     except Exception:
                         pass
             else:
-                # Alte Now-Playing-Nachricht auf reinen Text reduzieren – nur der aktuelle
-                # Song behält Buttons. Nach Queue-Ende liegt die Nachricht in _ended_np
-                # (der Cleanup hat now_playing_msg bereits gekappt).
-                old_msg, old_title = None, None
-                if self.now_playing_msg:
-                    old_msg = self.now_playing_msg
-                    old_title = prev_track[1] if prev_track else None
-                elif self._ended_np:
-                    old_msg, old_title = self._ended_np
-                self._ended_np = None
-                if old_msg:
-                    try:
-                        prev_text = f"🎶 {old_title}" if old_title else None
-                        await old_msg.edit(content=prev_text, embed=None, view=None)
-                    except Exception:
-                        pass
+                # Alte Now-Playing-Nachricht(en) auf reinen Text reduzieren – nur der
+                # aktuelle Song behält Karte und Buttons. Nach Queue-Ende liegt die
+                # Nachricht in _ended_np (der Cleanup hat now_playing_msg gekappt);
+                # beide Slots können gleichzeitig belegt sein – dann müssen auch beide
+                # zurückgebaut werden, sonst bliebe eine Karte für immer stehen.
+                old_msg, old_title = self.now_playing_msg, self._np_title
+                ended_np, self._ended_np = self._ended_np, None
+                if old_msg or ended_np:
+                    await self._retire_np_message(old_msg, old_title)
+                    if ended_np:
+                        await self._retire_np_message(*ended_np)
                     if generation != self._track_generation:
                         # Track ist während des awaits gestorben, der Cleanup lief schon –
                         # keinen Zustand des toten Durchlaufs mehr anfassen.
@@ -279,13 +274,11 @@ class PlaybackMixin:
                     # Track ist während des ctx.send gestorben und der Cleanup lief bereits:
                     # Die frisch gesendete Nachricht NICHT als aktiv registrieren (sonst
                     # editiert der _progress_loop sie endlos), nur ihre Buttons entfernen.
-                    try:
-                        await new_msg.edit(content=f"🎶 {title}", embed=None, view=None)
-                    except Exception:
-                        pass
+                    await self._retire_np_message(new_msg, title)
                     return
                 self.now_playing_msg = new_msg
                 self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
+                self._np_title = title           # Titel für den späteren Rückbau der Karte
 
             if generation != self._track_generation:
                 return
@@ -375,12 +368,10 @@ class PlaybackMixin:
         # der nächste Track ihre Buttons entfernen kann (nur der aktuelle Song
         # behält Buttons) – bis dahin bleiben Resume/Autoplay darauf klickbar.
         if self.now_playing_msg is not None:
-            self._ended_np = (
-                self.now_playing_msg,
-                self.last_played[1] if self.last_played else None,
-            )
+            self._ended_np = (self.now_playing_msg, self._np_title)
         self.now_playing_msg = None
         self.now_playing_embed = None
+        self._np_title = None
         self.track_start_time = None
         # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
         # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
@@ -723,14 +714,17 @@ class PlaybackMixin:
                 pass
             self._playback_done.clear()
 
-    async def _extract_info_or_report(self, ctx, query, ydl_instance, *,
+    async def _extract_info_or_report(self, ctx, query, kind, *,
                                       status_key, timeout_key, error_key, log_msg):
         """Ruft yt_dlp-Infos ab und meldet Timeout/Fehler direkt im Channel.
 
         Gemeinsamer Fetch-Teil der Such- und URL-Zweige von !p, !next und !now.
-        Gibt das Info-Dict zurück (kann auch None sein, wenn yt_dlp nichts
-        liefert – damit gehen die Aufrufer wie bisher selbst um), oder
-        _YTDLP_FAILED wenn bereits eine Fehlermeldung gesendet wurde.
+        `kind` wählt die yt_dlp-Instanz ("search"/"url"/"playlist"), aufgelöst
+        erst im Downloader – so greift dort auch der Cookie-Fallback bei
+        Alterssperre/Bot-Check (ADR 0010). Gibt das Info-Dict zurück (kann auch
+        None sein, wenn yt_dlp nichts liefert – damit gehen die Aufrufer wie
+        bisher selbst um), oder _YTDLP_FAILED wenn bereits eine Fehlermeldung
+        gesendet wurde.
 
         Die Status-Nachricht ("Suche läuft..." bzw. "Verarbeite...") wird nach
         Abschluss wieder gelöscht – bei Erfolg wie im Fehlerfall (dann steht
@@ -739,10 +733,7 @@ class PlaybackMixin:
         status_msg = None
         try:
             status_msg = await ctx.send(t(status_key))
-            return await asyncio.wait_for(
-                asyncio.to_thread(ydl_instance.extract_info, query, download=False),
-                timeout=30.0,
-            )
+            return await self.dl.extract_info_async(query, kind)
         except asyncio.TimeoutError:
             await ctx.send(t(timeout_key))
             return _YTDLP_FAILED
@@ -782,7 +773,7 @@ class PlaybackMixin:
         (die Fehlermeldung wurde dann bereits gesendet).
         """
         results = await self._extract_info_or_report(
-            ctx, f"ytsearch3:{eingabe}", self.dl.search_ydl,
+            ctx, f"ytsearch3:{eingabe}", "search",
             status_key="status.searching", timeout_key=timeout_key,
             error_key="error.search_error",
             log_msg=f"[{log_tag}] Fehler bei Suche",
@@ -798,7 +789,14 @@ class PlaybackMixin:
         first = entries[0]
         url = first.get("webpage_url") or first.get("url")
         title = first.get("title", t("misc.unknown_title"))
-        asyncio.create_task(self.dl._start_resolve(url))
+        if self.is_playing:
+            # Läuft schon Musik → nur Metadaten vorwärmen; geladen wird per Prefetch,
+            # wenn der Titel an der Reihe ist (Bandbreite bleibt beim aktuellen Song).
+            asyncio.create_task(self.dl._start_resolve(url))
+        else:
+            # Dieser Treffer startet gleich → Download sofort anstoßen, damit er
+            # parallel zu den folgenden Discord-Nachrichten läuft statt danach.
+            self.dl.prime_first_hit(url, title)
 
         if insert == "evict_or_back":
             evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
@@ -844,7 +842,7 @@ class PlaybackMixin:
         Meldungs-Keys.
         """
         info = await self._extract_info_or_report(
-            ctx, eingabe, self.dl.url_ydl,
+            ctx, eingabe, "url",
             status_key="status.processing_url", timeout_key="error.timeout",
             error_key="error.fetch_error",
             log_msg=f"[{log_tag}] Fehler beim Abrufen von yt_dlp-Infos",

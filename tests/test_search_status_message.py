@@ -10,21 +10,24 @@ from utils.i18n import t
 
 
 class FakeYdl:
-    """Minimaler yt_dlp-Ersatz: liefert ein festes Ergebnis oder wirft."""
+    """Minimaler Downloader-Ersatz: liefert ein festes Ergebnis oder wirft."""
 
     def __init__(self, result=None, exc=None):
         self.result = result
         self.exc = exc
+        self.calls = []
 
-    def extract_info(self, query, download=False):
+    async def extract_info_async(self, query, kind="main", *, timeout=30.0):
+        self.calls.append((query, kind))
         if self.exc:
             raise self.exc
         return self.result
 
 
 def _call(mc, ctx, ydl):
+    mc.dl = ydl
     return mc._extract_info_or_report(
-        ctx, "ytsearch3:test", ydl,
+        ctx, "ytsearch3:test", "search",
         status_key="status.searching", timeout_key="error.search_timeout",
         error_key="error.search_error", log_msg="[test] Fehler bei Suche",
     )

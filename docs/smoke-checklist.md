@@ -9,6 +9,8 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Klick auf einen Alternativen-Button → Alternative spielt
 - [ ] `!p <URL>` → Track wird eingereiht; erneutes `!p` derselben URL → Duplikat-Warnung
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
+- [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (kein Embed, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
+- [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-/Pause-/Resume-Buttons funktionieren; Pause bestätigt ephemer mit Position („Pausiert bei m:ss")
 - [ ] `!eq <preset>` mid-song → aktueller Track startet mit neuem Filter neu
@@ -36,3 +38,11 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Skip während eines progressiven Tracks → nächster Track spielt, der geskippte wird **nicht** wieder vorn eingereiht (`_stop_for_advance`)
 - [ ] Kein Doppel-Download: während ein progressiver Download läuft, denselben Track erneut anstoßen (Loop/`!replay`/`!eq`-Restart) → es startet kein zweiter Download; die INFO-Zeile `[Download] Bereits in Arbeit über <pfad> – kein zweiter Start` bleibt im Normalbetrieb aus (erscheint sie, wurde ein Kollisionsversuch abgewehrt — Ursache prüfen)
 - [ ] Langer Track (> 20 min) → streamt direkt (kein Download startet, `downloads/` wächst nicht)
+
+## Startlatenz & Cookie-Modus (ADR 0010)
+
+- [ ] `!p <Suchbegriff>` bei leerer Queue → Ton nach ~3 s. Im Log steht **kein** `Sleeping 5.00 seconds as required by the site` und der Puffer ist nach ~1 s erreicht (`[Progressiv] Puffer erreicht (… nach …s)`)
+- [ ] Reihenfolge im Log: `[Progressiv] Starte Hintergrund-Download` erscheint **vor** `[Progressiv] Laufenden Download adoptiert` — der Frühstart per `prime_first_hit` greift und `resolve_track` adoptiert ihn (kein zweiter Download)
+- [ ] Alterssperre: bekanntes altersbeschränktes Video per `!p <URL>` → einmal `[Cookies] YouTube verlangt eine angemeldete Session (…)` + `[Cookies] Zweitversuch mit Cookies`, danach spielt der Track
+- [ ] Nach diesem Umschalten laufen Folge-Tracks weiter (im Cookie-Modus, also wieder mit Werbepause — erwartet); erst ein Bot-Neustart geht zurück auf cookielos
+- [ ] `!reloadcookies` → Bestätigung nennt die Cookie-Quelle; danach steht der Cookie-Modus (nächster ungecachter Track wartet die Werbepause ab)

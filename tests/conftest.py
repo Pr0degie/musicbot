@@ -95,6 +95,9 @@ class FakeDownloader:
         self.incomplete_paths = set()
         self.progressive_tasks = {}
         self.blocked = []
+        self.extract_calls = []    # (query, kind) je extract_info_async
+        self.primed = []           # (url, title) je prime_first_hit
+        self.resolved_only = []    # url je _start_resolve (nur Metadaten)
 
     async def resolve_track(self, url, title, force_download=False,
                             min_buffer_seconds=0):
@@ -127,6 +130,21 @@ class FakeDownloader:
     async def wait_progressive_idle(self, timeout=300.0):
         pass
 
+    async def extract_info_async(self, query, kind="main", *, timeout=30.0):
+        """Ruft die passende Fake-Instanz auf – wie der echte Downloader, nur
+        ohne Worker-Thread und ohne Cookie-Fallback."""
+        self.extract_calls.append((query, kind))
+        return getattr(self, self._YDL_KINDS[kind]).extract_info(query, download=False)
+
+    _YDL_KINDS = {"main": "ydl", "search": "search_ydl", "url": "url_ydl",
+                  "playlist": "playlist_ydl", "autoplay": "autoplay_ydl"}
+
+    def prime_first_hit(self, url, title):
+        self.primed.append((url, title))
+
+    async def _start_resolve(self, url):
+        self.resolved_only.append(url)
+
 
 def build_cog(dl=None):
     """MusicCommands ohne __init__ – nur der State, den die Cog-Methoden anfassen.
@@ -157,6 +175,7 @@ def build_cog(dl=None):
     mc.text_channel = None
     mc.now_playing_msg = None
     mc.now_playing_embed = None
+    mc._np_title = None
     mc.track_start_time = None
     mc._np_paused_total = 0.0
     mc._np_paused_at = None

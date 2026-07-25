@@ -33,6 +33,25 @@ PROGRESSIVE_SIDECAR_SUFFIX = ".inprogress"  # Crash-Marker neben der wachsenden 
 METADATA_CACHE_FILE = Path("metadata_cache.json")
 CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
 
+# Marker in yt_dlp-Fehlermeldungen, die nach Authentifizierung verlangen. Nur
+# dann lohnt der Zweitversuch mit Cookies – bei Netzwerk-/Format-Fehlern würde
+# er nur Zeit kosten. Siehe _needs_cookies() → [ADR 0010].
+COOKIE_ERROR_MARKERS = (
+    "sign in to confirm",
+    "confirm you're not a bot",
+    "confirm your age",
+    "age-restricted",
+    "age restricted",
+    "inappropriate for some users",
+    "members-only",
+    "members only",
+    "private video",
+    "login required",
+    "this video is available to this channel's members",
+    "use --cookies",
+    "--cookies-from-browser",
+)
+
 # Nur diese Felder werden nach metadata_cache.json persistiert – ermittelt per
 # grep über alle info.get()/info[...]-Zugriffe plus prepare_filename-Bedarf
 # (outtmpl "%(title)s.%(ext)s"). Volle yt_dlp-Info-Dicts haben ~90 Keys und
@@ -146,6 +165,11 @@ class Downloader:
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
+        # Cookielos starten (ADR 0010): eine eingeloggte YouTube-Session bekommt
+        # Pre-Roll-Werbung, deren Skip-Zeit yt_dlp vor dem ersten Byte abwarten
+        # MUSS (format["available_at"], sonst 403) – das kostet 5-6 s Startlatenz.
+        # Cookies kommen erst, wenn YouTube sie wirklich verlangt.
+        self._cookie_mode = False
         self._url_cache: dict = {}
         self._cache_timestamps: dict[str, float] = {}
         self._pending_resolves: dict[str, asyncio.Task] = {}
@@ -265,10 +289,7 @@ class Downloader:
         """extract_info im Worker-Thread; entpackt Playlist-Wrapper, cached das
         volle Info-Dict in-memory und markiert den Cache als dirty (persistiert
         wird reduziert und gedebounct)."""
-        info = await asyncio.wait_for(
-            asyncio.to_thread(self.ydl.extract_info, url, download=False),
-            timeout=30.0,
-        )
+        info = await self.extract_info_async(url, "main")
         if "entries" in info:
             info = info["entries"][0]
         self._url_cache[url] = info
@@ -300,10 +321,7 @@ class Downloader:
             return
         try:
             logger.info("[Warmup] Starte yt_dlp JS-Player-Vorwärmung im Hintergrund ...")
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.ydl.extract_info, warmup_url, download=False),
-                timeout=25.0,
-            )
+            info = await self.extract_info_async(warmup_url, "main", timeout=25.0)
             if info:
                 if "entries" in info:
                     info = info["entries"][0]
@@ -315,12 +333,79 @@ class Downloader:
             logger.debug(f"[Warmup] Fehlgeschlagen (ignoriert): {e}")
 
     @staticmethod
-    def _cookie_opts() -> dict:
+    def _cookies_configured() -> bool:
+        """Ist überhaupt eine Cookie-Quelle eingerichtet?"""
+        return bool(YDL_COOKIES_FILE or YDL_BROWSER)
+
+    def _cookie_opts(self) -> dict:
+        """Cookie-Optionen für yt_dlp – leer, solange der cookielose Modus
+        aktiv ist (Normalfall, siehe __init__ und ADR 0010)."""
+        if not self._cookie_mode:
+            return {}
         if YDL_COOKIES_FILE:
             return {"cookiefile": YDL_COOKIES_FILE}
         if YDL_BROWSER:
             return {"cookiesfrombrowser": (YDL_BROWSER,)}
         return {}
+
+    @staticmethod
+    def _needs_cookies(exc: BaseException) -> bool:
+        """Verlangt dieser yt_dlp-Fehler nach einer angemeldeten Session?"""
+        msg = str(exc).lower()
+        return any(marker in msg for marker in COOKIE_ERROR_MARKERS)
+
+    def enable_cookie_mode(self, grund: str = "") -> bool:
+        """Schaltet dauerhaft auf Cookie-Authentifizierung um und baut die
+        yt_dlp-Instanzen neu auf. False, wenn schon aktiv oder keine Cookie-
+        Quelle konfiguriert ist (dann bleibt nur der cookielose Versuch).
+
+        Der Metadaten-Cache wird geleert: cookielos extrahierte Einträge
+        stammen aus einer anderen Session, der Zweitversuch soll wirklich
+        frisch mit Cookies auflösen.
+        """
+        if self._cookie_mode or not self._cookies_configured():
+            return False
+        self._cookie_mode = True
+        self._url_cache.clear()
+        self._cache_timestamps.clear()
+        self._pending_resolves.clear()
+        self._init_ydl()
+        logger.warning(f"[Cookies] YouTube verlangt eine angemeldete Session ({grund}) – Cookie-Modus aktiv.")
+        return True
+
+    # Kind → Attributname; erst beim Aufruf aufgelöst, damit nach einem
+    # _init_ydl()/rebuild() nie eine veraltete Instanz benutzt wird.
+    _YDL_KINDS = {
+        "main": "ydl",
+        "search": "search_ydl",
+        "url": "url_ydl",
+        "playlist": "playlist_ydl",
+        "autoplay": "autoplay_ydl",
+    }
+
+    async def extract_info_async(self, query: str, kind: str = "main", *, timeout: float = 30.0):
+        """extract_info im Worker-Thread, mit Cookie-Fallback.
+
+        Scheitert der cookielose Versuch an fehlender Authentifizierung
+        (Alterssperre, Bot-Check, Mitglieder-Video), wird einmal mit Cookies
+        wiederholt; danach bleibt der Cookie-Modus für alle Instanzen aktiv.
+        Timeouts werden nicht wiederholt – der Aufrufer meldet sie selbst.
+        Raises asyncio.TimeoutError nach `timeout` Sekunden.
+        """
+        def _extract():
+            return asyncio.to_thread(
+                getattr(self, self._YDL_KINDS[kind]).extract_info, query, download=False
+            )
+
+        try:
+            return await asyncio.wait_for(_extract(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise
+        except Exception as e:
+            if not (self._needs_cookies(e) and self.enable_cookie_mode(str(e)[:120])):
+                raise
+            logger.info(f"[Cookies] Zweitversuch mit Cookies: {query[:80]}")
+        return await asyncio.wait_for(_extract(), timeout=timeout)
 
     def _build_base_opts(self) -> dict:
         _cookies = self._cookie_opts()
@@ -603,6 +688,59 @@ class Downloader:
         if purged:
             logger.info(f"[Progressiv] {purged} unvollständige Datei(en) aus früherem Lauf entfernt")
 
+    def _may_start_progressive(self, url: str, info: dict) -> bool:
+        """Gates des progressiven Pfads: mp3 konvertiert erst NACH dem Download,
+        m4a/mp4 ist wachsend nicht lesbar (moov-Atom am Dateiende), geblockte
+        URLs sind gerade erst progressiv gescheitert. Einzige Quelle dieser
+        Bedingung – resolve_track und prime_first_hit teilen sie sich."""
+        return (self.audio_format != "mp3"
+                and info.get("ext") in ("webm", "opus")
+                and not self._progressive_is_blocked(url))
+
+    def prime_first_hit(self, url: str, title: str) -> None:
+        """Metadaten auflösen UND den progressiven Download sofort anstoßen.
+
+        Für den ersten Treffer von !p, wenn gerade nichts läuft: der Download
+        beginnt damit schon während die Such-/Statusnachrichten an Discord
+        gehen, statt erst hinter ihnen. play_next adoptiert den laufenden Task
+        später über die In-Flight-Registry (ADR 0002) – ein zweiter Writer
+        entsteht dabei nie.
+        """
+        if url in self._pending_resolves:
+            return
+        info = self._url_cache.get(url)
+        if info is not None:
+            self._maybe_start_progressive(url, info, title)
+            return
+
+        async def _run():
+            try:
+                info = await self._fetch_info(url)
+            except Exception:
+                return          # Fehler meldet play_next dem Nutzer
+            finally:
+                self._pending_resolves.pop(url, None)
+            self._maybe_start_progressive(url, info, title)
+
+        self._pending_resolves[url] = asyncio.create_task(_run())
+
+    def _maybe_start_progressive(self, url: str, info: dict, title: str) -> None:
+        """Startet den progressiven Download, wenn alle Bedingungen stimmen –
+        sonst passiert nichts und resolve_track entscheidet später neu."""
+        if (info.get("duration") or 0) > STREAM_THRESHOLD_SECONDS:
+            return          # langer Track → Stream, kein Download
+        if not self._may_start_progressive(url, info):
+            return
+        if self.progressive_task_for(url) or self.inflight_download(url):
+            return          # es schreibt schon jemand für diese URL
+        try:
+            filename = Path(self.ydl.prepare_filename(info))
+        except Exception:
+            return          # kaputter Cache-Eintrag → resolve_track räumt das auf
+        if filename.exists():
+            return          # schon da (fertig oder Leiche) → resolve_track klärt es
+        self._start_progressive(url, info, filename, title)
+
     def _start_progressive(self, url: str, info: dict, filename: Path, title: str) -> asyncio.Task:
         """Registriert die Zieldatei als unvollständig (Set + Sidecar) und
         startet den Hintergrund-Download. Muss auf dem Event-Loop laufen.
@@ -680,6 +818,11 @@ class Downloader:
             return True
         except Exception as e:
             logger.warning(f"[Progressiv] Download fehlgeschlagen für {title}: {e} – unvollständige Datei wird entfernt")
+            # Lag es an fehlender Authentifizierung, gilt das für alle weiteren
+            # Tracks auch – Cookie-Modus einschalten, der nächste Anlauf (Stream-
+            # Fallback bzw. force_download) läuft dann angemeldet.
+            if self._needs_cookies(e):
+                self.enable_cookie_mode(str(e)[:120])
             if safe_unlink(filename):
                 safe_unlink(self._sidecar_for(filename))
                 self._incomplete_files.discard(filename.resolve())
@@ -893,10 +1036,7 @@ class Downloader:
                 # mp3-Modus konvertiert erst NACH dem Download; m4a/mp4 ist
                 # wachsend nicht lesbar (moov-Atom am Dateiende); geblockte URLs
                 # sind gerade erst progressiv gescheitert.
-                if (not force_download
-                        and self.audio_format != "mp3"
-                        and info.get("ext") in ("webm", "opus")
-                        and not self._progressive_is_blocked(url)):
+                if not force_download and self._may_start_progressive(url, info):
                     _t0 = time.monotonic()
                     task = self._start_progressive(url, info, filename, title)
                     if await self._wait_for_buffer(filename, task, min_buffer_seconds):
@@ -1004,10 +1144,7 @@ class Downloader:
         logger.info(f"[Autoplay Prefetch] Starte Hintergrundsuche für: {ref_title!r}")
 
         try:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.autoplay_ydl.extract_info, fetch_url, download=False),
-                timeout=30.0,
-            )
+            info = await self.extract_info_async(fetch_url, "autoplay")
             entries = (info.get("entries") or []) if info else []
 
             candidates = select_autoplay_candidates(

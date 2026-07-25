@@ -169,6 +169,7 @@ def make_cog(dl):
     mc.text_channel = None
     mc.now_playing_msg = None
     mc.now_playing_embed = None
+    mc._np_title = None
     mc.track_start_time = None
     mc._np_paused_total = 0.0
     mc._np_paused_at = None

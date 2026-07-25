@@ -11,3 +11,4 @@ Rückwirkend angelegt am 2026-07-12 (Datierung aus dem git log der zugehörigen 
 - [0007](0007-track-zustand-vor-play-generationszaehler.md) — Track-Zustand vor `vc.play()` + Generationszähler gegen Races
 - [0008](0008-dm-bridge-blocking-speak-ohne-callback.md) — DM-Bridge: blockierendes `/speak` ohne Rück-Callback
 - [0009](0009-music-cog-mixin-zerlegung.md) — Music-Cog-Mixin-Zerlegung + `play_next`-Orchestrator
+- [0010](0010-cookielos-zuerst-cookie-fallback.md) — Cookielos zuerst, Cookies nur als Fallback (Startlatenz)

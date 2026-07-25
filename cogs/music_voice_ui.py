@@ -157,6 +157,26 @@ class PlaybackUiMixin:
             self._np_paused_total += time.monotonic() - self._np_paused_at
             self._np_paused_at = None
 
+    async def _retire_np_message(self, msg, title=None):
+        """Baut eine Now-Playing-Nachricht auf eine reine Textzeile zurück:
+        Embed und Buttons weg – **nur der aktuelle Song behält seine Karte**.
+
+        Einziger Rückbau-Pfad; jede Stelle, die eine Karte hinter sich lässt
+        (Trackwechsel, Queue-Ende, Radio-Übernahme, 429-Abschaltung), geht hier
+        durch. Der Inhalt darf dabei nie leer werden: eine Nachricht ohne Text,
+        Embed und Anhang lehnt Discord mit 400 ab – der Rückbau schlüge still
+        fehl und die alte Karte bliebe samt Buttons stehen.
+        """
+        if msg is None:
+            return
+        try:
+            await msg.edit(
+                content=f"🎶 {title or t('misc.unknown_title')}",
+                embed=None, view=None,
+            )
+        except Exception:
+            pass   # Nachricht schon weg oder keine Berechtigung – egal
+
     async def _finalize_progress_bar(self):
         """Setzt Balken + Dauer der aktuellen Nachricht ans Ende (100 %).
 
@@ -223,8 +243,15 @@ class PlaybackUiMixin:
             "Live-Updates für diese Nachricht deaktiviert."
         )
         if self.now_playing_msg is msg:
+            # Die Nachricht nicht einfach vergessen: sonst behielte genau diese
+            # Karte für immer Embed und Buttons. Sie wandert in _ended_np, der
+            # nächste Track baut sie zurück. (_ended_np ist hier frei – der
+            # Cleanup füllt es nur, wenn now_playing_msg gesetzt war, und
+            # danach editiert der Progress-Loop nichts mehr.)
+            self._ended_np = (msg, self._np_title)
             self.now_playing_msg = None
             self.now_playing_embed = None
+            self._np_title = None
 
     @_progress_loop.before_loop
     async def _before_progress_loop(self):

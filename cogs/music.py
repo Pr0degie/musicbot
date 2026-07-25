@@ -93,6 +93,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
         self.now_playing_embed = None  # Embed-Referenz für Live-Edit des Fortschrittsbalkens
+        self._np_title = None       # Titel/Sender der aktuellen Karte – für ihren Rückbau zur Textzeile
         self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
         self._np_paused_total = 0.0   # aufsummierte Pausensekunden des aktuellen Songs
         self._np_paused_at = None     # monotonic-Zeitstempel seit Pause-Beginn (None = läuft)
@@ -265,6 +266,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
     @require_admin()
     async def reloadcookies(self, ctx):
         """Lädt die cookies.txt neu ohne Bot-Neustart (nach manuellem Upload auf den Server)."""
+        # Expliziter Wunsch → Cookie-Modus an, auch wenn cookielos gerade läuft (ADR 0010).
+        self.dl.enable_cookie_mode("!reloadcookies")
         self.update_ydl()
         from config import YDL_COOKIES_FILE, YDL_BROWSER
         if YDL_COOKIES_FILE:
@@ -317,10 +320,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             logger.info(f"[Autoplay] Kein YT-Video-ID – Suche per Query: {fetch_url!r}")
 
         try:
-            info = await asyncio.wait_for(
-                asyncio.to_thread(self.dl.autoplay_ydl.extract_info, fetch_url, download=False),
-                timeout=30.0,
-            )
+            info = await self.dl.extract_info_async(fetch_url, "autoplay")
             entries = (info.get("entries") or []) if info else []
 
             candidates = select_autoplay_candidates(
@@ -406,10 +406,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
         # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
         is_playlist = "playlist?" in eingabe or "list=" in eingabe
-        ydl_instance = self.dl.playlist_ydl if is_playlist else self.dl.url_ydl
 
         info = await self._extract_info_or_report(
-            ctx, eingabe, ydl_instance,
+            ctx, eingabe, "playlist" if is_playlist else "url",
             status_key="status.processing", timeout_key="error.processing_timeout",
             error_key="error.url_error",
             log_msg="[p] Fehler beim Abrufen von yt_dlp-Infos",
@@ -446,6 +445,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                 self.queue.appendleft((url, title))
             else:
                 self.queue.append((url, title))
+            if not self.is_playing:
+                # Startet gleich → Download schon während des ctx.send anstoßen.
+                self.dl.prime_first_hit(url, title)
             await ctx.send(t("status.added", title=title))
 
         if not self.is_playing:

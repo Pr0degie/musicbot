@@ -62,7 +62,7 @@ DM_BRIDGE_SECRET=
 |---|---|
 | `DISCORD_TOKEN` | Discord bot token (required) |
 | `YDL_COOKIES_FILE` | Path to an exported `cookies.txt` — takes priority over browser extraction |
-| `YDL_BROWSER` | Browser for live cookie extraction (`firefox`, `chrome`, …) — local only, not on headless servers |
+| `YDL_BROWSER` | Browser for live cookie extraction (`firefox`, `chrome`, …; default `firefox`) — local only, not on headless servers. Only used once cookie mode kicks in (→ section 4) |
 | `LANGUAGE` | Bot language: `en` (default) or `de` |
 | `DM_BRIDGE_HOST` | DM-Bridge HTTP host. `127.0.0.1` (default) = localhost path mode; LAN/Tailscale IP or `0.0.0.0` = remote byte mode |
 | `DM_BRIDGE_PORT` | DM-Bridge HTTP port (default `8765`) |
@@ -70,7 +70,20 @@ DM_BRIDGE_SECRET=
 
 ## 4. YouTube Authentication (Cookies)
 
-YouTube blocks unauthenticated bot requests. Cookie auth is required.
+The bot runs **cookieless by default** and only switches to cookie auth when
+YouTube actually demands it — age-restricted videos, members-only content, or a
+`Sign in to confirm you're not a bot` block. The first such error triggers one
+automatic retry with cookies, and cookie mode then stays on for the rest of the
+process (→ [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md)).
+
+The reason is speed, not convenience: a logged-in session gets served pre-roll
+ads, and yt-dlp must wait out the ad's skip time before the first audio byte
+(the CDN answers `403` before that). That costs 5–6 s on every uncached track —
+cookieless startup is roughly 3 s instead of 13 s, at identical audio quality.
+
+So configuring cookies is **recommended but optional**: they are the safety net
+for the cases above. Without a configured cookie source those videos simply
+fail with YouTube's error message.
 
 ### Server setup (recommended)
 
@@ -92,7 +105,8 @@ Cookies last roughly 1–3 months. When YouTube starts blocking again:
 
 1. Re-export cookies (command above)
 2. Upload via SCP
-3. Run `!reloadcookies` in Discord — reloads without restarting the bot
+3. Run `!reloadcookies` in Discord — reloads without restarting the bot, and
+   forces cookie mode on even if the bot is currently running cookieless
 
 ### Troubleshooting: Browser cookie extraction (`YDL_BROWSER`)
 
