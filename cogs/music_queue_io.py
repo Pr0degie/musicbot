@@ -44,6 +44,11 @@ class QueuePersistenceMixin:
         if not safe_name:
             await ctx.send(t("error.invalid_name"))
             return
+        if safe_name.lower() == "last":
+            # Reserviert: !loadq last lädt die automatisch gesicherte
+            # Session-Queue (last_queue.json) – kein Playlist-Name.
+            await ctx.send(t("error.name_reserved", name=safe_name))
+            return
         tracks = []
         if self.current_track:
             ct_url, ct_title, *_ = self.current_track
@@ -55,9 +60,18 @@ class QueuePersistenceMixin:
 
     @commands.command(name="loadq", usage="!loadq <name>")
     async def loadq(self, ctx, *, name: str):
-        """Lädt eine gespeicherte Queue und hängt sie an die aktuelle an. Verwendung: !loadq <name>"""
+        """Lädt eine gespeicherte Queue und hängt sie an die aktuelle an.
+        Verwendung: !loadq <name>; !loadq last = Queue der letzten Session."""
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
-        path = PLAYLISTS_DIR / f"{safe_name}.json"
+        if safe_name.lower() == "last":
+            # Sondername: die nach jedem Track automatisch gesicherte
+            # Session-Queue (last_queue.json im Arbeitsverzeichnis). Bewusst
+            # KEIN Auto-Restore beim Start – der Bot startet leer, das hier
+            # ist der explizite Weg zurück zur letzten Session.
+            path = Path("last_queue.json")
+            safe_name = "last"
+        else:
+            path = PLAYLISTS_DIR / f"{safe_name}.json"
         if not path.exists():
             await ctx.send(t("error.queue_not_found", name=safe_name))
             return

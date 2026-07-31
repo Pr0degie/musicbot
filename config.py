@@ -23,6 +23,20 @@ DM_BRIDGE_PORT = int(os.getenv("DM_BRIDGE_PORT", "8765"))
 DM_BRIDGE_SECRET = os.getenv("DM_BRIDGE_SECRET", "")
 
 
+def _parse_log_mode(value) -> str:
+    """"quiet" | "debug" – alles andere (auch leer) fällt auf "quiet" zurück."""
+    v = (value or "").strip().lower()
+    return v if v in ("quiet", "debug") else "quiet"
+
+
+# Terminal-Modus: quiet (Default) = nur echte Probleme (WARNING+) im Terminal,
+# debug = volle Diagnose wie bisher. bot.log bekommt IMMER die volle Diagnose.
+# Zur Laufzeit umschaltbar mit !debug on|off (utils/logger.set_console_mode).
+# Wichtig (Invariante): hier wird NIE logging.basicConfig() gerufen – das
+# Logging konfiguriert allein utils/logger.py.
+LOG_MODE = _parse_log_mode(os.getenv("LOG_MODE", "quiet"))
+
+
 # --- Security-Flags -----------------------------------------------------------
 # Defaults erhalten das heutige Verhalten; scharf geschaltet wird bewusst per .env
 # nach dem Live-Test.

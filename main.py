@@ -1,3 +1,5 @@
+import asyncio
+
 import discord
 from cogs.basic import BasicCommands
 from cogs.music import MusicCommands
@@ -46,6 +48,13 @@ class MusicBot(commands.Bot):
 
     async def on_ready(self):
         print(f"Bot ist online als {self.user}")
+        # Einmalig (on_ready feuert bei Reconnects erneut): yt-dlp-Update-Check
+        # als Hintergrund-Task – nur ein Log-Hinweis, kein Auto-Update.
+        if not getattr(self, "_ytdlp_check_started", False):
+            self._ytdlp_check_started = True
+            from cogs.downloader import check_ytdlp_update
+
+            asyncio.create_task(check_ytdlp_update())
 
 
 bot = MusicBot()

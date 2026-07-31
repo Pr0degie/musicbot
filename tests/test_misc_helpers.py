@@ -214,3 +214,53 @@ def test_loadq_unknown_name(playlists_dir):
         assert ctx.texts == [t("error.queue_not_found", name="fehlt")]
 
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# !loadq last / reservierter Name (Session-Queue aus last_queue.json)
+# ---------------------------------------------------------------------------
+
+def test_loadq_last_loads_session_queue(playlists_dir, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "last_queue.json").write_text(
+        json.dumps([[URL_A, "Song A"], [URL_B, "Song B"]]), encoding="utf-8"
+    )
+
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+
+        async def noop(_ctx):
+            pass
+
+        mc.play_next = noop
+
+        await MusicCommands.loadq.callback(mc, ctx, name="last")
+
+        assert list(mc.queue) == [(URL_A, "Song A"), (URL_B, "Song B")]
+        assert ctx.texts == [t("status.queue_loaded", name="last", count=2)]
+
+    asyncio.run(run())
+
+
+def test_loadq_last_without_file_reports_not_found(playlists_dir, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+        await MusicCommands.loadq.callback(mc, ctx, name="last")
+        assert ctx.texts == [t("error.queue_not_found", name="last")]
+
+    asyncio.run(run())
+
+
+def test_saveq_rejects_reserved_name_last(playlists_dir):
+    mc = build_cog()
+    mc.queue.append((URL_A, "Song A"))
+    ctx = FakeCtx()
+
+    asyncio.run(MusicCommands.saveq.callback(mc, ctx, name="last"))
+
+    assert list(playlists_dir.iterdir()) == []
+    assert ctx.texts == [t("error.name_reserved", name="last")]

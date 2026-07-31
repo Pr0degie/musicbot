@@ -32,6 +32,26 @@ class BasicCommands(commands.Cog):
         """Wiederholt die Nachricht des Users. Gut zum Testen, ob der Bot zuhört."""
         await ctx.send(message)
 
+    @commands.command(name="debug", usage="!debug on|off")
+    async def debug(self, ctx, mode: str = None):
+        """Terminal-Diagnose umschalten: on = volle Diagnose, off = nur echte
+        Probleme. Ohne Argument: Status. bot.log ist immer vollständig."""
+        from utils.logger import get_console_mode, set_console_mode
+
+        if mode is None:
+            key = "status.debug_on" if get_console_mode() == "debug" else "status.debug_off"
+            await ctx.send(t(key))
+            return
+        m = mode.strip().lower()
+        if m in ("on", "debug"):
+            set_console_mode("debug")
+            await ctx.send(t("status.debug_on"))
+        elif m in ("off", "quiet"):
+            set_console_mode("quiet")
+            await ctx.send(t("status.debug_off"))
+        else:
+            await ctx.send(t("error.debug_usage"))
+
     @commands.command(name="j")
     async def join(self, ctx):
         """Verbindet den Bot mit dem Voice-Channel des Users (oder wechselt dorthin)."""

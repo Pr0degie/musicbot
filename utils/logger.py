@@ -2,6 +2,8 @@ import logging
 import re
 import sys
 
+from config import LOG_MODE
+
 # ---------------------------------------------------------------------------
 # Kategorie-Erkennung: Präfix [Foo] am Anfang der Message → eigene Farbe
 # ---------------------------------------------------------------------------
@@ -125,6 +127,30 @@ _root = logging.getLogger()
 _root.setLevel(logging.INFO)
 _root.addHandler(_console)
 _root.addHandler(_file)
+
+# ---------------------------------------------------------------------------
+# Terminal-Modi: quiet = nur echte Probleme (WARNING+), debug = volle Diagnose.
+# Betrifft NUR den Console-Handler – bot.log (_file) bleibt immer vollständig.
+# ---------------------------------------------------------------------------
+
+_MODE_LEVELS = {"quiet": logging.WARNING, "debug": logging.INFO}
+_console_mode = "quiet"
+
+
+def set_console_mode(mode: str) -> str:
+    """Schaltet den Terminal-Modus um ("quiet"|"debug", Unbekanntes → "quiet").
+    Gibt den tatsächlich gesetzten Modus zurück."""
+    global _console_mode
+    _console_mode = mode if mode in _MODE_LEVELS else "quiet"
+    _console.setLevel(_MODE_LEVELS[_console_mode])
+    return _console_mode
+
+
+def get_console_mode() -> str:
+    return _console_mode
+
+
+set_console_mode(LOG_MODE)   # Start-Default aus .env
 
 # ---------------------------------------------------------------------------
 # Discord-Logging: auf WARNING reduzieren – unterdrückt Gateway/HTTP-Spam.
