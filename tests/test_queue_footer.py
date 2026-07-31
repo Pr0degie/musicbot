@@ -38,3 +38,15 @@ def test_footer_hours_format():
     assert _footer(items) == t(
         "embed.queue_footer_duration", total=2, duration="1:01:01", loop=t("embed.loop_off")
     )
+
+
+def test_autoplay_preview_line_shown():
+    view = QueueView([("u1", "A", 100)], None, None, autoplay_next_title="Nächster Song")
+    content = view.build_content()
+    assert t("embed.queue_autoplay_next", title="Nächster Song") in content
+    assert "1. A" in content
+
+
+def test_no_autoplay_preview_without_candidate():
+    view = QueueView([("u1", "A", 100)], None, None)
+    assert "🔮" not in view.build_content()

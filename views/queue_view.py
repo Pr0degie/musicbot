@@ -9,11 +9,13 @@ LIST_CHAR_BUDGET = 1500
 
 
 class QueueView(View):
-    def __init__(self, queue_snapshot: list, current_track, loop_mode):
+    def __init__(self, queue_snapshot: list, current_track, loop_mode, autoplay_next_title=None):
         super().__init__(timeout=60)
         self.items = queue_snapshot
         self.current_track = current_track
         self.loop_mode = loop_mode
+        # Titel des vorgeladenen Autoplay-Kandidaten → eigene Vorschau-Zeile
+        self.autoplay_next_title = autoplay_next_title
         self.page = 0
         self._pages = self._paginate()
         self._update_buttons()
@@ -94,6 +96,10 @@ class QueueView(View):
             lines.extend(page_lines)
         else:
             lines.append(t("embed.queue_empty"))
+
+        if self.autoplay_next_title:
+            lines.append("")
+            lines.append(t("embed.queue_autoplay_next", title=self.autoplay_next_title))
 
         lines.append("")
         lines.append(f"*{self._footer_text()}*")

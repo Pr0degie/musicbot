@@ -125,6 +125,7 @@
   "embed.queue_now": "▶ Jetzt",
   "embed.queue_list": "Warteschlange",
   "embed.queue_empty": "*(leer)*",
+  "embed.queue_autoplay_next": "🔮 Als Nächstes (Autoplay): {title}",
   "embed.queue_footer": "{total} Songs gesamt • Loop: {loop}",
   "embed.queue_footer_duration": "{total} Songs gesamt • {duration} • Loop: {loop}",
   "embed.queue_footer_duration_partial": "{total} Songs gesamt • ≥ {duration} ({missing} ohne Angabe) • Loop: {loop}",

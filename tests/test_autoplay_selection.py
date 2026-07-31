@@ -3,10 +3,12 @@
 Die Auswahl-Logik existiert doppelt: in MusicCommands.autoplay() (Sofort-Pfad)
 und in Downloader.prefetch_autoplay() (Hintergrund-Pfad). Beide filtern:
   1. is_video: keine Playlists, keine leeren URLs
-  2. is_seen: kürzlich gespielt (exakte URL, Video-ID, Titel-Wortmenge)
-  3. Fallback-Kaskade: alles gesehen → nur Referenz-Track ausschließen →
-     zur Not jeden Video-Eintrag nehmen
-  4. Pool: bei >1 Kandidaten wird der ERSTE (YouTubes Top-Pick) übersprungen
+  2. is_seen: kürzlich gespielt (exakte URL, Video-ID, bidirektionaler
+     Titel-Overlap, Varianten-Schlagwörter Cover/Live/Remix/…)
+  3. Fallback-Kaskade: alles gesehen → Referenz-Track UND seine Varianten
+     ausschließen → zur Not jeden Video-Eintrag nehmen
+  4. Wahl: gewichtet vorne (4/3/2/1 über die ersten vier Kandidaten) –
+     YouTubes Mix-Ranking ist die Genre-Kohärenz, Platz 1 ist erlaubt
 """
 
 import asyncio
@@ -80,15 +82,17 @@ def run_prefetch(dl, ref_url=REF_URL, ref_title="Ref Song",
     return asyncio.run(run())
 
 
-def pick_first(monkeypatch):
-    """random.choice deterministisch machen und den Pool mitschneiden."""
+def pick_first(monkeypatch, weights_log=None):
+    """random.choices deterministisch machen und den Pool mitschneiden."""
     pools = []
 
-    def fake_choice(pool):
+    def fake_choices(pool, weights=None, k=1):
         pools.append(list(pool))
-        return pool[0]
+        if weights_log is not None:
+            weights_log.append(list(weights or []))
+        return [pool[0]]
 
-    monkeypatch.setattr(random, "choice", fake_choice)
+    monkeypatch.setattr(random, "choices", fake_choices)
     return pools
 
 
@@ -110,23 +114,29 @@ def test_prefetch_filters_playlists_and_empty_urls(monkeypatch, tmp_path):
 
     result = run_prefetch(dl)
 
-    # Playlist + leere URL fliegen raus; Pool überspringt den ersten Kandidaten.
-    assert pools[0] == [entries[3]]
-    assert result == (entries[3]["url"], "Kandidat B")
+    # Playlist + leere URL fliegen raus; gewählt wird gewichtet vorne.
+    assert pools[0] == [entries[2], entries[3]]
+    assert result == (entries[2]["url"], "Kandidat A")
 
 
-def test_prefetch_skips_youtubes_top_pick_when_multiple_candidates(monkeypatch, tmp_path):
+def test_prefetch_weights_front_of_mix_including_top_pick(monkeypatch, tmp_path):
+    """Gewichtete Wahl über die ersten vier Kandidaten – Platz 1 (YouTubes
+    Top-Pick) ist wieder erlaubt, das Mix-Ranking liefert den 'sinnigen
+    Nachfolger'. Gewichte 4/3/2/1."""
     monkeypatch.chdir(tmp_path)
-    pools = pick_first(monkeypatch)
-    entries = [entry("aaaaaaaaaaa", "A"), entry("bbbbbbbbbbb", "B"), entry("ccccccccccc", "C")]
+    weights_log = []
+    pools = pick_first(monkeypatch, weights_log)
+    entries = [entry(f"{c * 11}", c.upper()) for c in "abcde"]
     dl = make_downloader(entries)
 
-    run_prefetch(dl)
+    result = run_prefetch(dl)
 
-    assert pools[0] == entries[1:], "erster Kandidat (Top-Pick) wird nie gewählt"
+    assert pools[0] == entries[:4], "Pool = die ersten vier Kandidaten inkl. Top-Pick"
+    assert weights_log[0] == [4, 3, 2, 1]
+    assert result == (entries[0]["url"], "A"), "Platz 1 ist wählbar"
 
 
-def test_prefetch_single_candidate_is_chosen_despite_skip_rule(monkeypatch, tmp_path):
+def test_prefetch_single_candidate_is_chosen(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     pick_first(monkeypatch)
     dl = make_downloader([entry("aaaaaaaaaaa", "Einziger")])
@@ -161,9 +171,10 @@ def test_prefetch_filters_recently_played_by_video_id(monkeypatch, tmp_path):
     assert result == (fresh["url"], "Neu")
 
 
-def test_prefetch_filters_by_title_word_subset(monkeypatch, tmp_path):
-    """Titel-Filter: Wortmenge des Kandidaten ⊆ Wortmenge eines kürzlich
-    gespielten (normalisierten) Titels → gilt als gesehen."""
+def test_prefetch_filters_by_title_overlap(monkeypatch, tmp_path):
+    """Titel-Filter: bidirektionaler Overlap |A∩B|/min(|A|,|B|) ≥ 0,6 gegen
+    irgendeinen Historien-Titel → gilt als gesehen. (Ersetzt den alten
+    einseitigen Subset-Test, der jede Variante mit Zusatzwort übersah.)"""
     monkeypatch.chdir(tmp_path)
     pick_first(monkeypatch)
     seen = entry("aaaaaaaaaaa", "Take On Me a-ha")
@@ -174,6 +185,59 @@ def test_prefetch_filters_by_title_word_subset(monkeypatch, tmp_path):
     result = run_prefetch(dl, recently_played_titles=[played_title])
 
     assert result == (fresh["url"], "Africa Toto")
+
+
+def test_prefetch_blocks_cover_variant_of_recent_song(monkeypatch, tmp_path):
+    """Interview-Beispiel: 'Toto - Africa' lief gerade → das Cover
+    'Africa (Toto Cover) - Alex Melton' darf Autoplay nicht wählen."""
+    monkeypatch.chdir(tmp_path)
+    pick_first(monkeypatch)
+    cover = entry("aaaaaaaaaaa", "Africa (Toto Cover) - Alex Melton")
+    fresh = entry("bbbbbbbbbbb", "Rosanna Toto")
+    dl = make_downloader([cover, fresh])
+
+    result = run_prefetch(dl, recently_played_titles=[normalize_title("Toto - Africa")])
+
+    assert result == (fresh["url"], "Rosanna Toto")
+
+
+def test_prefetch_blocks_live_remix_and_spedup_variants(monkeypatch, tmp_path):
+    """Alle Varianten-Typen aus dem Interview: Live, Remix, Sped-up/Nightcore
+    desselben Songs werden geblockt; ein anderer Song desselben Künstlers nicht."""
+    monkeypatch.chdir(tmp_path)
+    pick_first(monkeypatch)
+    variants = [
+        entry("aaaaaaaaaaa", "Toto - Africa (Live at Wembley 1982)"),
+        entry("bbbbbbbbbbb", "Toto - Africa (XY Remix)"),
+        entry("ccccccccccc", "Africa - Toto (sped up)"),
+        entry("ddddddddddd", "Africa Nightcore"),
+    ]
+    other_song = entry("eeeeeeeeeee", "Toto - Rosanna")
+    dl = make_downloader(variants + [other_song])
+
+    result = run_prefetch(dl, recently_played_titles=[normalize_title("Toto - Africa")])
+
+    assert result == (other_song["url"], "Toto - Rosanna")
+
+
+def test_cascade_stage2_excludes_variants_of_ref_track(monkeypatch, tmp_path):
+    """Kaskadenstufe 2 (alles gesehen): nicht nur die Video-ID des
+    Referenz-Tracks ausschließen, auch seine Varianten – sonst hebelt die
+    Kaskade den Varianten-Filter wieder aus."""
+    monkeypatch.chdir(tmp_path)
+    pick_first(monkeypatch)
+    ref_entry = entry(REF_ID, "Toto - Africa")
+    cover = entry("aaaaaaaaaaa", "Africa (Toto Cover) - Alex Melton")
+    other = entry("bbbbbbbbbbb", "Toto - Rosanna")
+    dl = make_downloader([ref_entry, cover, other])
+
+    # Alle drei kürzlich gespielt → Stufe 1 leer, Stufe 2 entscheidet.
+    result = run_prefetch(
+        dl, ref_title="Toto - Africa",
+        recently_played=[ref_entry["url"], cover["url"], other["url"]],
+    )
+
+    assert result == (other["url"], "Toto - Rosanna")
 
 
 def test_prefetch_cascade_all_seen_excludes_only_ref(monkeypatch, tmp_path):
@@ -269,8 +333,9 @@ def test_autoplay_queues_front_and_starts_playback(monkeypatch, tmp_path):
 
     async def run():
         pools = pick_first(monkeypatch)
-        chosen = entry("aaaaaaaaaaa", "Autoplay-Wahl")
-        mc = make_autoplay_cog([entry("zzzzzzzzzzz", "Top-Pick"), chosen])
+        top_pick = entry("zzzzzzzzzzz", "Top-Pick")
+        second = entry("aaaaaaaaaaa", "Autoplay-Wahl")
+        mc = make_autoplay_cog([top_pick, second])
         mc.last_played = (REF_URL, "Ref Song", 200)
         ctx = FakeCtx()
 
@@ -284,11 +349,11 @@ def test_autoplay_queues_front_and_starts_playback(monkeypatch, tmp_path):
         await mc.autoplay(ctx)
 
         # Song landet VORNE in der Queue, Marker gesetzt, Wiedergabe startet.
-        assert list(mc.queue) == [(chosen["url"], "Autoplay-Wahl")]
-        assert mc._autoplay_queued_url == chosen["url"]
+        assert list(mc.queue) == [(top_pick["url"], "Top-Pick")]
+        assert mc._autoplay_queued_url == top_pick["url"]
         assert mc.is_playing is True
         assert play_next_calls == [ctx]
-        assert pools[0] == [chosen]  # Top-Pick übersprungen
+        assert pools[0] == [top_pick, second]  # gewichtete Wahl inkl. Top-Pick
 
     asyncio.run(run())
 

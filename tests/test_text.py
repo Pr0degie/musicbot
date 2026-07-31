@@ -52,8 +52,29 @@ def test_special_chars_become_separators():
     assert normalize_title("Don't Stop!!!") == "don stop t"
 
 
-def test_no_dash_falls_back_to_first_segment():
-    assert normalize_title("Just A Title | Context") == normalize_title("Just A Title")
+def test_no_dash_normalizes_whole_title():
+    # Ohne ' - '-Segment wird der GANZE Titel normalisiert – der frühere
+    # Fallback auf segments[0] erzeugte Mini-Wortmengen ("Just A Title"),
+    # gegen die kein Duplikat-Check mehr matchen konnte.
+    assert normalize_title("Just A Title | Context") == "a context just title"
+
+
+def test_variant_keyword_detected_in_brackets():
+    from utils.text import has_variant_keyword
+
+    assert has_variant_keyword("Africa (Toto Cover) - Alex Melton")
+    assert has_variant_keyword("Toto - Africa (Live at Wembley)")
+    assert has_variant_keyword("Africa (sped up)")
+    assert has_variant_keyword("Africa Nightcore")
+    assert not has_variant_keyword("Toto - Africa")
+    assert not has_variant_keyword("Alive - Pearl Jam")   # 'live' nur als ganzes Wort
+
+
+def test_title_core_words_keeps_brackets_drops_variant_keywords():
+    from utils.text import title_core_words
+
+    # Klammer-Inhalt bleibt (Original-Künstler!), Varianten-Schlagwort fliegt.
+    assert title_core_words("Africa (Toto Cover) - Alex Melton") == {"africa", "toto", "alex", "melton"}
 
 
 def test_idempotent():

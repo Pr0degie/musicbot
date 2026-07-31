@@ -21,7 +21,7 @@ from utils.ffmpeg import ffmpeg_header_opts, stderr_tail, classify_ffmpeg_error
 from utils.text import parse_time, progress_bar
 from discord.ext import commands, tasks
 from cogs.downloader import (
-    Downloader, entry_url,
+    Downloader, choose_autoplay_candidate, entry_url,
     select_autoplay_candidates, yt_video_id,
 )
 from cogs.presets import EQ_PRESETS
@@ -324,7 +324,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             entries = (info.get("entries") or []) if info else []
 
             candidates = select_autoplay_candidates(
-                entries, ref_url, self._recently_played, self._recently_played_titles
+                entries, ref_url, self._recently_played, self._recently_played_titles,
+                ref_title=ref_title,
             )
 
             if not candidates:
@@ -332,8 +333,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                 logger.warning("[Autoplay] Keine nutzbaren Einträge im Mix")
                 return
 
-            pool = candidates[1:] if len(candidates) > 1 else candidates
-            chosen = random.choice(pool)
+            chosen = choose_autoplay_candidate(candidates)
             url = entry_url(chosen)
             title = chosen.get("title", t("misc.unknown"))
 
@@ -704,11 +704,22 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         einer festen Songanzahl.
         """
         from views.queue_view import QueueView
+        # Autoplay-Vorschau: der von _prefetch_autoplay eingereihte Song hängt
+        # als letzter Queue-Eintrag – als "🔮 Als Nächstes"-Zeile zeigen statt
+        # als nummerierter Eintrag. Nur wenn er wirklich hinten steht, sonst
+        # verschöbe das Ausblenden die Nummern für !remove/!move.
+        autoplay_next_title = None
+        if (self.autoplay_enabled and self._autoplay_queued_url and self.queue
+                and self.queue[-1][0] == self._autoplay_queued_url):
+            autoplay_next_title = self.queue[-1][1]
         queue_snapshot = [
             (url, title, self.dl._url_cache[url].get("duration") if url in self.dl._url_cache else None)
             for url, title in self.queue
         ]
-        view = QueueView(queue_snapshot, self.current_track, self.loop_mode)
+        if autoplay_next_title is not None:
+            queue_snapshot.pop()
+        view = QueueView(queue_snapshot, self.current_track, self.loop_mode,
+                         autoplay_next_title=autoplay_next_title)
         await ctx.send(content=view.build_content(), view=view)
 
     @commands.command()
