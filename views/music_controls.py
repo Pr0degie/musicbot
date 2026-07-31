@@ -63,6 +63,9 @@ class MusicControlView(View):
             self.ctx.voice_client.resume()
             self.music_cog._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
             self.music_cog.is_playing = True
+            # Pause hatte _stopped_by_user gesetzt – ohne Reset blieben Autoplay,
+            # Progressive-Resume und Watchdog bis zum Songende unterdrückt.
+            self.music_cog._stopped_by_user = False
             await interaction.response.send_message(t("status.resumed_eph"), ephemeral=True)
         elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:
             # Queue vorhanden, aber nichts läuft → starten

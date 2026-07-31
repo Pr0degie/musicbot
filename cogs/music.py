@@ -566,6 +566,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             ctx.voice_client.resume()
             self._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
             self.is_playing = True
+            # Pause hatte _stopped_by_user gesetzt – ohne Reset blieben Autoplay,
+            # Progressive-Resume und Watchdog bis zum Songende unterdrückt.
+            self._stopped_by_user = False
         elif not self.is_playing and self.queue:
             # Edge-Case: Bot im Kanal, Queue nicht leer, aber nichts läuft.
             # Kann passieren wenn der Bot disconnected und reconnectet wurde.

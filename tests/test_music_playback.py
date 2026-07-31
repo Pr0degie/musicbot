@@ -715,3 +715,64 @@ def test_stderr_tail_reads_and_closes():
     # Doppelt lesen (z.B. Fehlerpfad nach after_playing) darf nicht crashen.
     assert MusicCommands._stderr_tail(buf) == ""
 
+
+
+def test_pause_resume_resets_stopped_by_user(monkeypatch, tmp_path):
+    """!x setzt _stopped_by_user, !resume muss es zurücksetzen – sonst bleiben
+    Autoplay, Progressive-Resume und Watchdog bis zum Songende unterdrückt."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+    from cogs.music import MusicCommands as MC
+
+    class PausableVoiceClient(FakeVoiceClient):
+        def __init__(self):
+            super().__init__()
+            self._paused = False
+
+        def is_playing(self):
+            return self._playing and not self._paused
+
+        def is_paused(self):
+            return self._paused
+
+        def pause(self):
+            self._paused = True
+
+        def resume(self):
+            self._paused = False
+
+    async def run():
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        vc = PausableVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.autoplay_enabled = True
+        autoplay_calls = []
+
+        async def fake_autoplay(ctx):
+            autoplay_calls.append(ctx)
+
+        mc.autoplay = fake_autoplay
+        mc.queue.append(("https://www.youtube.com/watch?v=test", "Testsong"))
+
+        await mc.play_next(ctx)
+        assert mc.is_playing is True
+
+        await MC.pause.callback(mc, ctx)
+        assert mc._stopped_by_user is True, "Pause markiert den gewollten Stopp"
+
+        await MC.resume.callback(mc, ctx)
+        assert mc._stopped_by_user is False, "Resume muss _stopped_by_user zurücksetzen"
+        assert mc.is_playing is True
+
+        # Songende: Autoplay muss feuern (Queue leer, Autoplay an).
+        vc.end_track()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if autoplay_calls:
+                break
+        assert autoplay_calls, "nach Pause→Resume muss Autoplay am Songende feuern"
+
+        _cleanup(mc)
+
+    asyncio.run(run())

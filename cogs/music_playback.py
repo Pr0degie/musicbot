@@ -477,7 +477,10 @@ class PlaybackMixin:
             # stderr immer auslesen (schließt den Puffer), loggen nur im Fehlerfall.
             stderr_tail = self._stderr_tail(stderr_buf)
             verdict = self._classify_ffmpeg_error(stderr_tail)
-            if error or elapsed < 2.0:
+            # Gewollte Abbrüche (Skip/!stop/!x in den ersten 2 s) sind kein Fehler –
+            # keine gelbe stderr-Warnung für etwas, das der Nutzer selbst ausgelöst hat.
+            user_abort = suppress_resume or self._stopped_by_user
+            if error or (elapsed < 2.0 and not user_abort):
                 if stderr_tail:
                     logger.warning(f"[FFmpeg] stderr (letzte Zeilen):\n{stderr_tail}")
                 if elapsed < 2.0:

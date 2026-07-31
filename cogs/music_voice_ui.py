@@ -197,7 +197,7 @@ class PlaybackUiMixin:
         except Exception:
             pass
 
-    @tasks.loop(seconds=2)
+    @tasks.loop(seconds=5)   # 5-s-Takt gegen 429-Rate-Limits; 21 Balken-Schritte bleiben
     async def _progress_loop(self):
         """Aktualisiert den Fortschrittsbalken in der aktuellen Now-Playing-Nachricht."""
         msg, embed = self.now_playing_msg, self.now_playing_embed
