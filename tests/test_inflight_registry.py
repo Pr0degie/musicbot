@@ -215,3 +215,113 @@ def test_corpse_without_living_task_is_cleaned_and_redownloaded(tmp_path, monkey
     assert target.stat().st_size == 10 * 1024   # neu geladen, nicht die Leiche
     assert not dl.is_incomplete(target)
     assert writer.calls == [[URL]]
+
+
+# ---------------------------------------------------------------------------
+# f) Cancel des Prefetch-Aufrufers: Worker-Thread schreibt weiter → Registry
+#    muss den Writer behalten, bis der Download wirklich fertig ist
+# ---------------------------------------------------------------------------
+
+def test_prefetch_cancel_keeps_writer_registered_until_thread_done(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    import threading
+    from collections import deque
+
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(), target)
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_download(urls):
+        dl.ydl.download_calls.append(urls)
+        started.set()
+        assert release.wait(timeout=5), "Test-Deadlock: release wurde nie gesetzt"
+        Path(target).write_bytes(b"\0" * 4096)
+
+    dl.ydl.download = slow_download
+
+    async def run():
+        queue = deque([(URL, "Kurz")])
+        outer = asyncio.create_task(dl.prefetch_next(queue, 0))
+        while not started.is_set():          # Worker-Thread schreibt jetzt
+            await asyncio.sleep(0.01)
+        outer.cancel()                       # play_next/!clear/Queue-Umbau
+        await asyncio.gather(outer, return_exceptions=True)
+
+        # Kern von ADR 0002 (Cancel-Pfad): solange der Thread schreibt,
+        # meldet die Registry einen lebenden Writer …
+        assert dl.inflight_download(URL) is not None, \
+            "Cancel darf den Writer nicht deregistrieren, solange der Thread schreibt"
+        # … und ein neuer Prefetch derselben URL startet KEINEN zweiten Download.
+        await dl.prefetch_next(deque([(URL, "Kurz")]), 0)
+        assert len(dl.ydl.download_calls) == 1
+
+        release.set()                        # Download zu Ende laufen lassen
+        entry = dl.inflight_download(URL)
+        assert entry is not None
+        await asyncio.gather(entry[0], return_exceptions=True)
+        assert dl.inflight_download(URL) is None, "nach Thread-Ende muss die Registry leer sein"
+        assert target.exists()
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# g) Registry hält den EINZELNEN Download-Task pro URL, nicht den Sammel-Task:
+#    resolve_track für Song A darf nicht am Download von Song B hängen
+# ---------------------------------------------------------------------------
+
+def test_registry_holds_per_url_task_not_batch_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    import threading
+    from collections import deque
+
+    url_b = "https://www.youtube.com/watch?v=bbbbbbbbbbb"
+    target_a = tmp_path / "a.webm"
+    target_b = tmp_path / "b.webm"
+    info_a = short_info()
+    info_b = {**short_info(), "title": "Zwei", "webpage_url": url_b}
+    dl = make_dl(info_a, target_a)
+    dl._url_cache[url_b] = info_b
+    dl.ydl.prepare_filename = lambda info: str(target_b if info is info_b else target_a)
+    a_started = threading.Event()
+    a_release = threading.Event()
+    b_release = threading.Event()
+
+    def download(urls):
+        dl.ydl.download_calls.append(urls)
+        if urls == [url_b]:
+            assert b_release.wait(timeout=5), "Test-Deadlock: b_release wurde nie gesetzt"
+            target_b.write_bytes(b"\0" * 4096)
+        else:
+            a_started.set()
+            assert a_release.wait(timeout=5), "Test-Deadlock: a_release wurde nie gesetzt"
+            target_a.write_bytes(b"\0" * 4096)
+
+    dl.ydl.download = download
+
+    async def run():
+        queue = deque([(URL, "Kurz"), (url_b, "Zwei")])
+
+        # Sammel-Task wie _prefetch_upcoming: lädt A, dann B (beide event-gesteuert)
+        async def batch():
+            await dl.prefetch_next(queue, 0)
+            await dl.prefetch_next(queue, 1)
+
+        batch_task = asyncio.create_task(batch())
+        while not a_started.is_set():
+            await asyncio.sleep(0.01)
+        # Songwechsel mitten im laufenden Download von A: resolve_track(A) muss
+        # NUR auf den Download von A warten – nicht auf den Sammel-Task, der
+        # danach noch B lädt (der alte Registry-Eintrag war der Sammel-Task).
+        resolve_task = asyncio.create_task(dl.resolve_track(URL, "Kurz"))
+        await asyncio.sleep(0.05)            # resolve_task bis zum Warten laufen lassen
+        a_release.set()                      # A fertig – B hängt weiterhin am Event
+        _, filename, _, _ = await asyncio.wait_for(resolve_task, timeout=2.0)
+        assert filename == target_a
+        assert not target_b.exists(), "resolve_track(A) hat fälschlich auf den Download von B gewartet"
+        b_release.set()
+        await batch_task
+        assert target_b.exists()
+
+    asyncio.run(run())

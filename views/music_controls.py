@@ -161,6 +161,8 @@ class SearchAutoplayView(View):
             if self.music_cog.current_track and self.music_cog.current_track[1] == added_title:
                 # Song läuft gerade → Alternative vorne einreihen und aktuellen überspringen
                 self.music_cog.queue.appendleft((url, title))
+                # Startet gleich → Download sofort anstoßen (wie der !p-Erstreffer)
+                self.music_cog.dl.prime_first_hit(url, title)
                 if self.ctx.voice_client and (
                     self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
                 ):
@@ -178,12 +180,17 @@ class SearchAutoplayView(View):
                         replaced = True
                         break
                 self.music_cog.queue = deque(queue_list)
+                if replaced:
+                    # Queue umgebaut → Prefetch auf die neue URL umlenken
+                    self.music_cog._restart_prefetch()
                 if not replaced:
                     # Song wurde bereits aus der Queue gepoppt – play_next löst ihn gerade auf.
                     # Flag setzen damit play_next den resolvedn Track überspringt und stattdessen
                     # die Alternative (jetzt vorne in der Queue) spielt.
                     self.music_cog._skip_resolving = True
                     self.music_cog.queue.appendleft((url, title))
+                    # Startet gleich → Download sofort anstoßen (wie der !p-Erstreffer)
+                    self.music_cog.dl.prime_first_hit(url, title)
                     # Falls play() bereits gestartet hat bevor current_track gesetzt wurde
                     if self.ctx.voice_client and (
                         self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()

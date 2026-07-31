@@ -77,6 +77,11 @@ class QueuePersistenceMixin:
             self.queue.append((url, title))
         await ctx.send(t("status.queue_loaded", name=safe_name, count=len(tracks)))
         if not self.is_playing:
+            if self.queue:
+                # Startet gleich → Download schon während des ctx.send anstoßen
+                # (Schnellstart wie beim !p-Erstreffer).
+                nxt_url, nxt_title = self.queue[0]
+                self.dl.prime_first_hit(nxt_url, nxt_title)
             self.is_playing = True
             await self.play_next(ctx)
         else:

@@ -162,6 +162,11 @@ class Downloader:
     # Jeder Pfad, der Bytes für eine URL auf die Platte schreibt (Queue-Prefetch,
     # Autoplay-Prefetch, progressiv, Download-Fallback), registriert sich hier.
     _inflight = None             # dict[url → (asyncio.Task, quelle)]
+    # Serialisiert die eigentlichen yt_dlp-Downloads der Prefetch-Tasks:
+    # yt_dlp ist nicht thread-safe, und ein adoptierter (vom Aufrufer
+    # gecancelter, aber weiterlaufender) Download darf nie parallel zu einem
+    # frisch gekickten laufen. Lazy angelegt (Tests via __new__).
+    _prefetch_dl_lock = None
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
@@ -1074,7 +1079,15 @@ class Downloader:
         return info, filename, title, duration
 
     async def prefetch_next(self, queue, idx: int = 0):
-        """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
+        """Lädt Song an Position idx der Queue still im Hintergrund herunter.
+
+        Der eigentliche Download läuft als eigener Task pro URL, der auch in
+        der In-Flight-Registry steht: resolve_track wartet damit nur auf die
+        konkret gebrauchte URL statt auf den Sammel-Task des Aufrufers, und
+        ein Cancel des Aufrufers (play_next, !clear, Queue-Umbau) killt den
+        Worker-Thread nicht mitten im Schreiben – der Download wird adoptiert,
+        läuft zu Ende und deregistriert sich erst dann selbst (ADR 0002).
+        """
         if len(queue) <= idx:
             return
         url, title = queue[idx]  # Peek – nicht aus der Queue entfernen
@@ -1083,8 +1096,25 @@ class Downloader:
             # (das .part-Rename des Prefetch liefe gegen die offene FFmpeg-Datei).
             logger.info(f"[Prefetch] Übersprungen – läuft bereits progressiv: {title}")
             return
-        if self._register_inflight(url, "Queue-Prefetch", title) is not None:
-            return  # anderer Pfad schreibt diese URL bereits – kein zweiter Writer
+        worker = asyncio.create_task(self._prefetch_one(url, title))
+        if self._register_inflight(url, "Queue-Prefetch", title, task=worker) is not None:
+            # Anderer Pfad schreibt diese URL bereits – kein zweiter Writer.
+            # Der Worker hat noch keine Zeile ausgeführt → sauber abbrechen.
+            worker.cancel()
+            return
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            if not worker.done():
+                logger.info(f"[Prefetch] Aufrufer abgebrochen – laufender Download wird adoptiert und läuft zu Ende: {title}")
+            raise
+        except Exception:
+            pass  # Fehler hat _prefetch_one bereits geloggt – Prefetch ist nie fatal
+
+    async def _prefetch_one(self, url: str, title: str):
+        """Der eigentliche Prefetch-Download einer URL (siehe prefetch_next).
+        Deregistriert sich erst im finally – solange der Worker-Thread
+        schreibt, meldet die Registry also einen lebenden Writer."""
         try:
             if url in self._url_cache:
                 info = self._url_cache[url]
@@ -1114,8 +1144,17 @@ class Downloader:
                 safe_unlink(self._sidecar_for(filename))
                 self._incomplete_files.discard(filename.resolve())
             if not filename.exists():
-                logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
-                await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
+                if self._prefetch_dl_lock is None:
+                    self._prefetch_dl_lock = asyncio.Lock()
+                # Lock statt Task-Reihenfolge: auch ein adoptierter Download
+                # (Aufrufer gecancelt, Worker läuft weiter) bleibt so garantiert
+                # der einzige aktive yt_dlp-Download (nicht thread-safe).
+                async with self._prefetch_dl_lock:
+                    if filename.exists():
+                        logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
+                        return
+                    logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
+                    await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
                 logger.info(f"[Prefetch] Fertig: {filename.name}")
                 await self.cleanup_downloads()
             else:

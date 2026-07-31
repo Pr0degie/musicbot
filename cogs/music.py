@@ -739,6 +739,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             queue_list = list(self.queue)
             removed = queue_list.pop(index - 1)
             self.queue = deque(queue_list)
+            self._restart_prefetch()   # alter Prefetch zielt auf die alte Reihenfolge
             await ctx.send(t("status.removed", title=removed[1]))
         else:
             await ctx.send(t("error.invalid_index"))
@@ -784,6 +785,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         entry = queue_list.pop(idx)
         queue_list.insert(0, entry)
         self.queue = deque(queue_list)
+        self._restart_prefetch()   # alter Prefetch zielt auf die alte Reihenfolge
         await ctx.send(t("status.moved_to_front", title=entry[1]))
 
     @commands.command()
@@ -797,6 +799,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             queue_list = list(self.queue)
             random.shuffle(queue_list)
             self.queue = deque(queue_list)
+            self._restart_prefetch()   # alter Prefetch zielt auf die alte Reihenfolge
             await ctx.send(t("status.shuffled"))
 
     @commands.command()

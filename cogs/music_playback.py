@@ -55,9 +55,12 @@ class PlaybackMixin:
         """Lädt bis zu 2 Queue-Songs sequenziell vor – yt_dlp ist nicht
         thread-safe, daher kein paralleles gather. Sequenziell reicht: während
         Song N spielt, werden N+1 und N+2 nacheinander heruntergeladen."""
-        # Bandbreiten-Rücksicht: erst warten, bis kein progressiver Download
-        # mehr läuft – der füttert die laufende Wiedergabe.
-        await self.dl.wait_progressive_idle()
+        # Bandbreiten-Rücksicht: dem progressiven Download des laufenden Songs
+        # eine kurze Startphase lassen, damit der erste Puffer schnell steht.
+        # Hart gekappt: das frühere globale Idle-Warten (bis 300 s) machte den
+        # Queue-Prefetch praktisch tot – der laufende Song lädt fast immer
+        # progressiv, der geparkte Task machte alle _kick_prefetch zu No-Ops.
+        await self.dl.wait_progressive_idle(timeout=15.0)
         await self._prefetch_next(0)
         if len(self.queue) >= 2:
             await self._prefetch_next(1)
@@ -76,6 +79,17 @@ class PlaybackMixin:
             # Schritt frisch, neue Einträge werden also noch mitgenommen.
             return
         self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
+
+    def _restart_prefetch(self):
+        """Nach Queue-Umbau (!shuffle/!move/!remove, Alternativ-Buttons): der
+        laufende Prefetch zielt noch auf die alte Reihenfolge. _kick_prefetch
+        allein reicht nicht (No-Op-Guard bei lebendem Task) → Task abbrechen
+        und neu kicken. Ein bereits schreibender Download-Worker wird dabei
+        nicht gekillt, sondern adoptiert und läuft zu Ende (ADR 0002)."""
+        if self.prefetch_task and not self.prefetch_task.done():
+            self.prefetch_task.cancel()
+            self.prefetch_task = None
+        self._kick_prefetch()
 
     async def _prefetch_autoplay(self, ctx):
         """Sucht und lädt nächsten Autoplay-Song im Hintergrund während der aktuelle läuft."""
