@@ -67,6 +67,10 @@ Der progressive Download ist der Primärpfad für ungecachte Tracks ≤ 20 min; 
 
 **Prefetch-Kick:** Titel, die mitten im Song eingereiht werden (`!p`/`!next`/`!loadq`), starten via `_kick_prefetch()` sofort den Vorlade-Task (`_prefetch_upcoming`, von `play_next` wiederverwendet) — sonst entstünde beim Übergang die volle Extraktions-+Pufferlatenz. Bewusst kein Kick bei `!now` (spielt sofort; ein Prefetch auf denselben Song würde `resolve_track` auf den kompletten Download warten lassen statt progressiv zu starten).
 
+**Kein globales Idle-Warten:** `_prefetch_upcoming` gönnt dem progressiven Download des laufenden Songs nur eine kurze Startphase (`wait_progressive_idle(timeout=15.0)`), dann lädt der Queue-Prefetch sequenziell los. Das frühere unbegrenzte Warten (bis 300 s) parkte den Task praktisch immer — der laufende Song lädt fast immer progressiv — und machte alle `_kick_prefetch`-Aufrufe zu No-Ops.
+
+**Queue-Umbau:** `!shuffle`/`!move`/`!remove` und der Alternativ-Button (Queue-Ersatz) rufen `_restart_prefetch()` — laufenden Sammel-Task canceln (ein bereits schreibender Download-Worker wird adoptiert und läuft zu Ende → [ADR 0002](adr/0002-inflight-registry.md), Cancel-Pfad) und neu kicken, weil der alte Task auf die alte Reihenfolge zielt. `_kick_prefetch` allein wäre wegen seines No-Op-Guards wirkungslos. Die Sequenzialität der Prefetch-Downloads (yt_dlp ist nicht thread-safe) sichert ein Lock um den Download-Aufruf in `_prefetch_one`.
+
 `play_next` detects streams via `isinstance(filename, str)` → adds FFmpeg reconnect options, skips `codec=copy`. Wachsende Dateien (`is_growing` via `dl.is_incomplete`): Wiedergabe- und Resume-Regeln → [ADR 0001](adr/0001-progressiver-download-statt-cdn-stream.md).
 `prefetch_next()` skips download for videos > 20 min.
 
@@ -79,19 +83,21 @@ Cookie config read from `.env` via `update_ydl()`. `cookiefile` takes priority o
 ## Logging
 
 `utils/logger.py` — console + `bot.log`. `config.py` must NOT call `logging.basicConfig()` — silently disables the file handler. Import `logger` from `utils.logger`.
+
+**Terminal-Modi:** `LOG_MODE` aus `.env` (`quiet` Default | `debug`) setzt den Start-Modus des Console-Handlers: `quiet` = nur WARNING+ („nur echte Probleme"), `debug` = volle Diagnose wie früher. `!debug on|off` (`cogs/basic.py`) schaltet zur Laufzeit via `set_console_mode()` um. **`bot.log` bekommt immer die volle Diagnose** — der File-Handler wird nie gefiltert.
 `_VoiceReconnectFilter` (attached to the `discord.voice_state` logger) downgrades the noisy code-1006 reconnect message from ERROR to INFO and strips its traceback — discord.py auto-reconnects on idle channels are expected, so they're logged quietly instead of as a red stack trace.
 
 ## Autoplay
 
-Toggled via `🔁 Autoplay` button. `_prefetch_autoplay` starts at song-begin (only if queue empty): fetches YouTube Mix (`list=RD{video_id}`) via `autoplay_ydl` (max 10 entries), picks randomly from `candidates[1:]` (skips YouTube's top pick which is most personalized), downloads chosen candidate, appends to queue. On song end `play_next` waits up to 60 s for the prefetch task; falls back to `autoplay()` (same lookup, no pre-download) if needed.
+Toggled via `🔁 Autoplay` button. `_prefetch_autoplay` starts at song-begin (only if queue empty): fetches YouTube Mix (`list=RD{video_id}`) via `autoplay_ydl` (max 10 entries), wählt via `choose_autoplay_candidate()` **gewichtet vorne** (Gewichte 4/3/2/1 über die ersten vier gefilterten Kandidaten — YouTubes Mix-Ranking ist die Genre-Kohärenz, Platz 1 ist bewusst wieder erlaubt), downloads chosen candidate, appends to queue. On song end `play_next` waits up to 60 s for the prefetch task; falls back to `autoplay()` (same lookup, no pre-download) if needed. Der aufgelöste Kandidat erscheint in `!q` als Vorschau-Zeile „🔮 Als Nächstes (Autoplay)" statt als nummerierter Eintrag.
 
 Reference track: `current_track` → `last_played`. Autoplay stays on until button pressed again — not one-shot.
 
-Die Kandidatenauswahl (nur Videos, `is_seen`-Filter, Fallback-Kaskade) lebt einmal als Modul-Funktionen in `downloader.py` (`entry_url`, `is_video`, `is_seen`, `select_autoplay_candidates`) und wird von beiden Pfaden genutzt — `MusicCommands.autoplay()` (Sofort-Pfad) und `Downloader.prefetch_autoplay()` (Hintergrund-Pfad).
+Die Kandidatenauswahl (nur Videos, `is_seen`-Filter, Fallback-Kaskade, gewichtete Wahl) lebt einmal als Modul-Funktionen in `downloader.py` (`entry_url`, `is_video`, `is_seen`, `select_autoplay_candidates`, `choose_autoplay_candidate`) und wird von beiden Pfaden genutzt — `MusicCommands.autoplay()` (Sofort-Pfad) und `Downloader.prefetch_autoplay()` (Hintergrund-Pfad). Kaskadenstufe 2 (alles gesehen) schließt neben der Video-ID des Referenz-Tracks auch dessen **Varianten** aus — sonst hebelte die Kaskade den Varianten-Filter wieder aus.
 
 `_autoplay_queued_url`: URL last added by autoplay; cleared when popped by `play_next` or evicted by `_evict_autoplay_song()`.
 
-`_recently_played`: `deque(maxlen=15)` of URLs. `_recently_played_titles`: `deque(maxlen=15)` of normalized titles (via `normalize_title()` — defined in `utils/text.py` (dependency-free, unit-tested), re-exported from `downloader.py` — strips suffixes like "(Official Video)", special chars, lowercase, sorts words alphabetically — so "AHA Take on Me" and "Take on Me AHA" map to the same key). Autoplay filters candidates against both; falls back to filtering only `ref_url` if all candidates are in history.
+`_recently_played`: `deque(maxlen=15)` of URLs. `_recently_played_titles`: `deque(maxlen=15)` of normalized titles via `normalize_title()` (defined in `utils/text.py`, dependency-free/unit-tested, re-exported from `downloader.py`): bevorzugt das `" | "`-Segment mit `" - "` (Artist-Trenner), sonst den **ganzen** Titel; strippt Klammer-Suffixe wie "(Official Video)" und `feat.…`, Sonderzeichen → Trenner, lowercase, Wörter alphabetisch sortiert — "AHA Take on Me" und "Take on Me AHA" ergeben denselben Key. Der Duplikat-Check (`is_seen`) matcht per **bidirektionalem Overlap** `|A∩B|/min(|A|,|B|) ≥ 0,6` gegen die Historie; zusätzlich gelten Kandidaten mit Varianten-Schlagwort im Roh-Titel (`cover|live|remix|sped up|nightcore|slowed|reverb|acoustic|instrumental|karaoke|8d`, auch in Klammern → `has_variant_keyword`/`title_core_words`) als Duplikat, wenn ihre Kern-Wortmenge (inkl. Klammer-Inhalt, dort steht der Original-Künstler) mit einem Historien-Titel überlappt — „Africa (Toto Cover) - Alex Melton" blockt nach „Toto - Africa". Fallback-Kaskade wie oben.
 
 **`!p` with autoplay active** — `_evict_autoplay_song()` cancels prefetch, removes autoplay URL from queue, inserts new song at front (`appendleft`). Playlist additions evict but append at end.
 

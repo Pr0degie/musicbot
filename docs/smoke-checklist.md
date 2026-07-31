@@ -16,16 +16,29 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!eq <preset>` mid-song → aktueller Track startet mit neuem Filter neu
 - [ ] `!next <Suche/URL>` → Track landet vorn in der Queue
 - [ ] `!now <n>` → Queue-Eintrag an Position n rückt nach vorn + aktueller Song wird geskippt
+- [ ] Fortschrittsbalken aktualisiert im **5-Sekunden-Takt** (21 Schritte, Endsprung ans Songende); kein 429-Fallback im Log
+- [ ] Skip/`!stop` in den ersten 2 s eines Tracks → **keine** gelbe FFmpeg-stderr-Warnung im Terminal (nur echte Fehler warnen)
+
+## Übergänge & Prefetch
+
+- [ ] Während Song N läuft: Queue-Songs N+1/N+2 werden wirklich vorgeladen (`[Prefetch] Lade vor` nach spätestens ~15 s Startphase) → Übergang ohne hörbare Lücke
+- [ ] `!shuffle`/`!move`/`!remove` mid-song → Prefetch zielt auf die **neue** Reihenfolge (Log zeigt neuen Titel), Übergang bleibt nahtlos
+- [ ] `!x` (Pause) → `!resume` → Song zu Ende hören: Autoplay feuert am Songende, Balken finalisiert, Watchdog aktiv (das `_stopped_by_user`-Leck ist zu)
 
 ## Autoplay & Radio
 
 - [ ] Autoplay-Button an, Queue leer laufen lassen → Nachfolger aus dem YouTube-Mix spielt automatisch (kein Titel aus `_recently_played`/`_recently_played_titles`)
+- [ ] Autoplay über mehrere Songs: keine Cover-/Live-/Remix-/Sped-up-Variante eines kürzlich gespielten Songs, kein Genre-Bruch („kein Jazz nach Techno"), keine Schleifen
+- [ ] `!q` bei aktivem Autoplay mit vorgeladenem Kandidaten → Vorschau-Zeile „🔮 Als Nächstes (Autoplay): …" statt nummeriertem Eintrag
 - [ ] `!p` während Autoplay → vorgeladener Autoplay-Song wird evicted, neuer Song spielt als Nächstes
 - [ ] `!radio <Nr>` → Sender spielt; `!stop` → Radio aus, Queue bleibt erhalten
 
 ## Persistenz & Neustart
 
 - [ ] `!saveq <name>` / `!lists` / `!loadq <name>` → Roundtrip lädt die Queue unverändert
+- [ ] `!loadq last` → lädt die Queue der letzten Session (`last_queue.json`); `!saveq last` wird abgelehnt (reserviert); Start bleibt bewusst mit leerer Queue
+- [ ] `!debug on`/`!debug off` → Terminal wechselt zwischen voller Diagnose und „nur echte Probleme"; `bot.log` enthält in beiden Modi alles; `!debug` ohne Argument zeigt den Status
+- [ ] Bot-Start mit veraltetem yt-dlp → eine WARNING-Zeile `[yt-dlp] Version … verfügbar` (auch im Quiet-Modus); kein Auto-Update
 - [ ] `!loop`-Zyklus: `None` → `song` → `queue` → `None` (Anzeige + Verhalten am Trackende)
 - [ ] Bot-Neustart → zuletzt gespielte Songs sofort wieder spielfähig (Metadaten-Cache greift, keine Neu-Extraktion nötig)
 - [ ] Buttons einer Now-Playing-Nachricht von **vor** dem Neustart klicken → ephemere Erklärung statt „Interaktion fehlgeschlagen", tote Buttons werden entfernt (ADR 0006)
