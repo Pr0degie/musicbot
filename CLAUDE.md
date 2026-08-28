@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Setup → `README.md`, Cookies → `SETUP.md`. Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). Lint: `ruff check .` (nur E/F/W, line-length 140, Config in `pyproject.toml` — bewusst keine Stilregeln). Start: `start.bat` (Windows-Normalfall) bzw. `python main.py`.
+Setup → `README.md` / `install.bat`, Cookies → `SETUP.md` (je auch `*_DE.md`). Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). Lint: `ruff check .` (nur E/F/W, line-length 140, Config in `pyproject.toml` — bewusst keine Stilregeln). Start: `start.bat` (Windows-Normalfall) bzw. `python main.py`.
 
 **Zielplattform: Windows nativ** (Start via `start.bat`); Linux/macOS bleibt lauffähig → [ADR 0003](docs/adr/0003-windows-native-zielplattform.md).
 
@@ -17,18 +17,19 @@ Setup → `README.md`, Cookies → `SETUP.md`. Tests: `pytest` (suite in `tests/
 - `StaleControlsFallback`: discord.py dispatcht Dynamic Items **zusätzlich** zu Live-Views — die Abgrenzung kommt allein aus dem Template-Regex (negative lookahead auf BOOT_ID), nie die Reihenfolge ändern → [ADR 0006](docs/adr/0006-stale-buttons-dynamicitem.md).
 - Neue `t()`-Keys immer in **beiden** `locales/*.json` anlegen — `tests/test_i18n_keys.py` erzwingt Key- und Platzhalter-Parität.
 - `config.py` ruft nie `logging.basicConfig()` — das deaktiviert still den File-Handler; `logger` aus `utils.logger` importieren. `bot.log` bekommt **immer** die volle Diagnose — Terminal-Modi (`LOG_MODE`/`!debug`) filtern nur den Console-Handler via `set_console_mode()`, und zwar über den `[Tag]` am Zeilenanfang (`_ESSENTIAL_TAGS`/`_QUIET_TAGS`), nie über das Handler-Level — neue INFO-Tags müssen in genau eine der beiden Listen → [architecture.md](docs/architecture.md) → *Logging*.
+- Security-Flags in `config.py` defaulten auf Altverhalten, der Owner bleibt immer durchgelassen → [ADR 0004](docs/adr/0004-security-flags-default-altverhalten.md).
 - Kein blockierendes File-I/O im Event-Loop; wiederkehrende Writes nur gedebounct → [ADR 0005](docs/adr/0005-persistenz-debouncing.md).
 - yt_dlp ist nicht thread-safe — Prefetch-Downloads laufen sequenziell, nie parallel (gesichert durch das Lock in `_prefetch_one`, nicht durch Task-Reihenfolge — auch adoptierte Worker zählen) → [architecture.md](docs/architecture.md) → *Music Playback Flow*.
 - yt_dlp läuft cookielos; Cookies kommen erst, wenn YouTube sie verlangt (eine angemeldete Session bekommt Werbung → 5–6 s Zwangspause vor dem ersten Byte). Extraktionen daher immer über `dl.extract_info_async(query, kind)`, nie direkt auf einer yt_dlp-Instanz → [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md).
 
 ## Architektur-Landkarte
 
-- `cogs/basic.py` — `!j`/`!l`/`!ping`/`!echo` + `!restart` + `!debug` (Terminal-Modi)
-- `cogs/music.py` — `MusicCommands`-Kern (Queue, EQ, Autoplay, Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/`_classify_ffmpeg_error`/`_progress_bar`); Mixins: `music_playback.py` (`PlaybackMixin`: `play_next`-Orchestrator + `_handle_queue_empty`/`_build_audio_source`/`_make_after_playing`/`_snapshot_track_state`, Prefetch, Such-/Resolve-Flow → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md)), `music_voice_ui.py` (`VoiceLifecycleMixin` Join/Leave/Idle/Watchdog, `PlaybackUiMixin` Fortschrittsbalken), `music_radio.py` (Radio), `music_stats.py` (`!score`/`!stats`), `music_queue_io.py` (`!saveq`/`!loadq`/`!loadq last`/`!lists`)
-- `cogs/downloader.py` — alles yt_dlp: fünf Instanzen (`extract_info_async` löst sie per `kind` auf), Cookie-Modus (`enable_cookie_mode`), `_url_cache`, `resolve_track()`, Prefetch (`prime_first_hit` für den Sofortstart), In-Flight-Registry, `DOWNLOAD_DIR`
-- `cogs/dm_bridge.py` — HTTP-Server, über den "Bot B" (KI-Dungeon-Master) diesen Bot sprechen lässt
+- `cogs/basic.py` — `!j`/`!l`/`!ping`/`!echo`/`!help` (→ `views/help_view.py`) + `!restart` + `!debug` (Terminal-Modi)
+- `cogs/music.py` — `MusicCommands`-Kern (Queue, EQ, Autoplay, `!lyrics`, `!format`, Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/`_classify_ffmpeg_error`/`_progress_bar`); Mixins: `music_playback.py` (`PlaybackMixin`: `play_next`-Orchestrator + `_handle_queue_empty`/`_build_audio_source`/`_make_after_playing`/`_snapshot_track_state`, Prefetch, Such-/Resolve-Flow → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md)), `music_voice_ui.py` (`VoiceLifecycleMixin` Join/Leave/Idle/Watchdog, `PlaybackUiMixin` Fortschrittsbalken + `_retire_np_message`), `music_radio.py` (Radio), `music_stats.py` (`!score`/`!stats`), `music_queue_io.py` (`!saveq`/`!loadq`/`!loadq last`/`!lists`)
+- `cogs/downloader.py` — alles yt_dlp: fünf Instanzen (`extract_info_async` löst sie per `kind` auf), Cookie-Modus (`enable_cookie_mode`), `_url_cache`, `resolve_track()`, Prefetch (`prime_first_hit` für den Sofortstart), In-Flight-Registry, `DOWNLOAD_DIR`, yt-dlp-Update-Check gegen PyPI
+- `cogs/dm_bridge.py` — HTTP-Server, über den "Bot B" (KI-Dungeon-Master) diesen Bot sprechen lässt; `!dm` zeigt den Status. Speak blockiert bewusst ohne Callback → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md)
 - `cogs/presets.py` — EQ-Filterketten (`EQ_PRESETS`) + FFmpeg-Filter-Notizen
-- `views/music_controls.py` — Playback-Buttons + Stale-Buttons-Fallback; `views/queue_view.py` — paginierte Queue
+- `views/music_controls.py` — Playback-Buttons + Stale-Buttons-Fallback; `views/queue_view.py` — paginierte Queue; `views/help_view.py` — `!help`
 - `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text` (`normalize_title`/`parse_time`/`progress_bar`), `ffmpeg` (zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`, in `music.py` via Klassen-Aliase gespiegelt), `i18n.t`
 
 ## Doku

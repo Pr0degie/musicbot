@@ -78,7 +78,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self.queue = deque()
 
         self.is_playing = False
-        self.current_track = None   # Aktuell spielender Song (url, title) – für !now
+        self.current_track = None   # Aktuell spielender Song (url, title, duration) – für !now
         self.last_played = None     # Wird von !replay genutzt
         self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
