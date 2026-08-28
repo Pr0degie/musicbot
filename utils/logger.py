@@ -129,20 +129,55 @@ _root.addHandler(_console)
 _root.addHandler(_file)
 
 # ---------------------------------------------------------------------------
-# Terminal-Modi: quiet = nur echte Probleme (WARNING+), debug = volle Diagnose.
+# Terminal-Modi: quiet = wesentliche Ereignisse + alle echten Probleme,
+# debug = volle Diagnose.
 # Betrifft NUR den Console-Handler – bot.log (_file) bleibt immer vollständig.
+#
+# quiet filtert über den [Tag] am Zeilenanfang, nicht über das Handler-Level:
+# Songwechsel, Queue-Zustand und Radio laufen als INFO, ein Level-Filter auf
+# WARNING würde also den kompletten Normalbetrieb verschlucken.
 # ---------------------------------------------------------------------------
 
-_MODE_LEVELS = {"quiet": logging.WARNING, "debug": logging.INFO}
+# Was im Normalbetrieb sichtbar sein soll: was der Bot gerade tut.
+_ESSENTIAL_TAGS = {
+    "Nächster Track", "Wiedergabe", "Queue", "Radio", "Autoplay",
+    "p", "next", "now",                      # Sucheinstiege ([{log_tag}])
+    "Auto-Join", "Auto-Leave", "Auto-Start", "KEINE VERBINDUNG",
+    "play_next", "Voice", "DMBridge",
+    "INIT", "Cookies", "yt-dlp", "restart", "Maintenance",
+}
+
+# Interna der Download-Pipeline: nur in debug interessant. WARNING+ dieser
+# Tags erscheint trotzdem, das regelt der Filter unten.
+_QUIET_TAGS = {
+    "Prefetch", "Autoplay Prefetch", "Progressiv", "Resolve", "Cache",
+    "Warmup", "Stream", "SAVE", "Download", "Download-Fallback",
+    "SafeUnlink", "Score", "Cleanup",
+}
+
+_MODES = ("quiet", "debug")
 _console_mode = "quiet"
+
+
+class _ConsoleModeFilter(logging.Filter):
+    """quiet: WARNING+ immer, INFO nur bei wesentlichen Tags. debug: alles."""
+
+    def filter(self, record):
+        if _console_mode == "debug" or record.levelno >= logging.WARNING:
+            return True
+        m = _CAT_RE.match(record.getMessage())
+        return bool(m) and m.group(1) in _ESSENTIAL_TAGS
+
+
+_console.addFilter(_ConsoleModeFilter())
+_console.setLevel(logging.INFO)
 
 
 def set_console_mode(mode: str) -> str:
     """Schaltet den Terminal-Modus um ("quiet"|"debug", Unbekanntes → "quiet").
     Gibt den tatsächlich gesetzten Modus zurück."""
     global _console_mode
-    _console_mode = mode if mode in _MODE_LEVELS else "quiet"
-    _console.setLevel(_MODE_LEVELS[_console_mode])
+    _console_mode = mode if mode in _MODES else "quiet"
     return _console_mode
 
 

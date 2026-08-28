@@ -99,7 +99,7 @@
   "status.moved_to_front": "⏫ **{title}** nach vorne verschoben.",
   "status.shuffled": "🔀 Warteschlange wurde gemischt.",
   "status.debug_on": "🔧 Terminal-Diagnose: **an** (volle Ausgabe).",
-  "status.debug_off": "🔧 Terminal-Diagnose: **aus** (nur echte Probleme).",
+  "status.debug_off": "🔧 Terminal-Diagnose: **aus** (Wesentliches + Probleme).",
   "status.replaying": "🔁 Wiederhole: **{title}**",
   "status.eq_presets": "🎚️ Verfügbare Presets: {presets}",
   "status.eq_set": "🎚️ Equalizer auf `{preset}` gesetzt.",

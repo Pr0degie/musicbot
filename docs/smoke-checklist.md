@@ -37,7 +37,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 
 - [ ] `!saveq <name>` / `!lists` / `!loadq <name>` → Roundtrip lädt die Queue unverändert
 - [ ] `!loadq last` → lädt die Queue der letzten Session (`last_queue.json`); `!saveq last` wird abgelehnt (reserviert); Start bleibt bewusst mit leerer Queue
-- [ ] `!debug on`/`!debug off` → Terminal wechselt zwischen voller Diagnose und „nur echte Probleme"; `bot.log` enthält in beiden Modi alles; `!debug` ohne Argument zeigt den Status
+- [ ] `!debug on`/`!debug off` → Terminal wechselt zwischen voller Diagnose und „Wesentliches + Probleme" (in `off` erscheinen Songwechsel/Queue weiter, `[Prefetch]`/`[Progressiv]`/`[Resolve]` nicht); `bot.log` enthält in beiden Modi alles; `!debug` ohne Argument zeigt den Status
 - [ ] Bot-Start mit veraltetem yt-dlp → eine WARNING-Zeile `[yt-dlp] Version … verfügbar` (auch im Quiet-Modus); kein Auto-Update
 - [ ] `!loop`-Zyklus: `None` → `song` → `queue` → `None` (Anzeige + Verhalten am Trackende)
 - [ ] Bot-Neustart → zuletzt gespielte Songs sofort wieder spielfähig (Metadaten-Cache greift, keine Neu-Extraktion nötig)

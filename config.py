@@ -29,8 +29,8 @@ def _parse_log_mode(value) -> str:
     return v if v in ("quiet", "debug") else "quiet"
 
 
-# Terminal-Modus: quiet (Default) = nur echte Probleme (WARNING+) im Terminal,
-# debug = volle Diagnose wie bisher. bot.log bekommt IMMER die volle Diagnose.
+# Terminal-Modus: quiet (Default) = wesentliche Ereignisse + alle echten
+# Probleme, debug = volle Diagnose. bot.log bekommt IMMER die volle Diagnose.
 # Zur Laufzeit umschaltbar mit !debug on|off (utils/logger.set_console_mode).
 # Wichtig (Invariante): hier wird NIE logging.basicConfig() gerufen – das
 # Logging konfiguriert allein utils/logger.py.

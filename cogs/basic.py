@@ -34,8 +34,9 @@ class BasicCommands(commands.Cog):
 
     @commands.command(name="debug", usage="!debug on|off")
     async def debug(self, ctx, mode: str = None):
-        """Terminal-Diagnose umschalten: on = volle Diagnose, off = nur echte
-        Probleme. Ohne Argument: Status. bot.log ist immer vollständig."""
+        """Terminal-Diagnose umschalten: on = volle Diagnose, off = wesentliche
+        Ereignisse + Probleme. Ohne Argument: Status. bot.log ist immer
+        vollständig."""
         from utils.logger import get_console_mode, set_console_mode
 
         if mode is None:

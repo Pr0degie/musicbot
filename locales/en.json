@@ -99,7 +99,7 @@
   "status.moved_to_front": "⏫ **{title}** moved to the front.",
   "status.shuffled": "🔀 Queue shuffled.",
   "status.debug_on": "🔧 Terminal diagnostics: **on** (full output).",
-  "status.debug_off": "🔧 Terminal diagnostics: **off** (real problems only).",
+  "status.debug_off": "🔧 Terminal diagnostics: **off** (key events + problems).",
   "status.replaying": "🔁 Replaying: **{title}**",
   "status.eq_presets": "🎚️ Available presets: {presets}",
   "status.eq_set": "🎚️ Equalizer set to `{preset}`.",
