@@ -171,9 +171,11 @@ pip install "yt-dlp[default]"
 start.bat
 ```
 
-Activates the venv (if present) and runs `python main.py`. On `!restart` the
-bot reopens in a new console window; the old window stops at `start.bat`'s
-`pause` and can be closed.
+Activates the venv (if present) and launches `python main.py` in its own
+console window — the `start.bat` window closes immediately. Ctrl+C in the bot
+window is two-stage: press once for the prompt, again within 5 s to shut down
+cleanly (a third press forces the exit). On `!restart` the bot reopens in a new
+console window and the old one closes by itself.
 
 **Linux / macOS:**
 

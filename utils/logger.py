@@ -144,7 +144,7 @@ _ESSENTIAL_TAGS = {
     "p", "next", "now",                      # Sucheinstiege ([{log_tag}])
     "Auto-Join", "Auto-Leave", "Auto-Start", "KEINE VERBINDUNG",
     "play_next", "Voice", "DMBridge",
-    "INIT", "Cookies", "yt-dlp", "restart", "Maintenance",
+    "INIT", "Cookies", "yt-dlp", "restart", "Maintenance", "Shutdown",
 }
 
 # Interna der Download-Pipeline: nur in debug interessant. WARNING+ dieser

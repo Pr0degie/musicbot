@@ -8,12 +8,12 @@
 Der Bot läuft im Normalfall nativ auf Windows (Start via `start.bat`); Linux/macOS bleibt lauffähig. Zwei Windows-Eigenheiten prägen den Code:
 
 - Windows wirft `PermissionError` beim Löschen einer offenen Datei (FFmpeg!) — unter Linux ist unlink-while-open legal.
-- `os.execv` ist auf Windows kein echter exec: das Kind teilt die Konsole mit dem `pause` der `start.bat`, und argv-Quoting bricht bei Pfaden mit Leerzeichen.
+- `os.execv` ist auf Windows kein echter exec: das Kind teilt die Konsole mit der `start.bat` (die damals mit `pause` endete), und argv-Quoting bricht bei Pfaden mit Leerzeichen.
 
 ## Entscheidung
 
 - **Löschungen:** Alle Löschstellen in `cogs/` laufen über `utils/files.py` → `safe_unlink(path)` (True = Datei weg, auch wenn sie nie existierte; Fehlschlag → prozessweite Pending-Delete-Liste + False) — nackte `unlink`/`os.remove` sind in `cogs/` tabu.
-- **`!restart`:** plattformabhängig (`sys.platform`): **Windows** (Normalfall, Start via `start.bat`) → `subprocess.Popen([sys.executable] + sys.argv, creationflags=CREATE_NEW_CONSOLE)` + `os._exit(0)` — sauberer Schnitt in neuem Konsolenfenster, das alte start.bat-Fenster endet an seinem `pause`. Bewusst kein `os.execv` auf Windows (siehe Kontext) und kein erneuter `.bat`-Aufruf (`sys.executable` ist bereits die venv-Python; activate setzt nur PATH). **Linux/macOS** → `os.execv` in-place. Der genommene Pfad wird geloggt.
+- **`!restart`:** plattformabhängig (`sys.platform`): **Windows** (Normalfall, Start via `start.bat`) → `subprocess.Popen([sys.executable] + sys.argv, creationflags=CREATE_NEW_CONSOLE)` + `os._exit(0)` — sauberer Schnitt in neuem Konsolenfenster. (Nachtrag: seit dem zweistufigen Strg+C startet `start.bat` den Bot per `start` in einem **eigenen** Fenster und endet sofort — das alte Fenster schließt sich beim Restart nun von selbst, statt an einem `pause` zu warten. Grund: in einer Batch-Datei fängt cmd.exe jedes Strg+C ab und fragt `Terminate batch job (Y/N)?`.) Bewusst kein `os.execv` auf Windows (siehe Kontext) und kein erneuter `.bat`-Aufruf (`sys.executable` ist bereits die venv-Python; activate setzt nur PATH). **Linux/macOS** → `os.execv` in-place. Der genommene Pfad wird geloggt.
 - **Kein `.part`-Rename** beim progressiven Download (`nopart`) — würde auf Windows an der offenen FFmpeg-Datei scheitern → [ADR 0001](0001-progressiver-download-statt-cdn-stream.md).
 
 ## Konsequenzen

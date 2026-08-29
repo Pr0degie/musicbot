@@ -158,9 +158,11 @@ pip install "yt-dlp[default]"
 start.bat
 ```
 
-Aktiviert das venv (falls vorhanden) und startet `python main.py`. `!restart`
-öffnet beim Neustart ein neues Konsolenfenster; das alte Fenster bleibt am
-`pause` von `start.bat` stehen und kann geschlossen werden.
+Aktiviert das venv (falls vorhanden) und startet `python main.py` in einem
+eigenen Konsolenfenster — das `start.bat`-Fenster schließt sich sofort. Strg+C
+im Bot-Fenster ist zweistufig: einmal drücken fragt nach, ein zweites Mal
+innerhalb von 5 s fährt geordnet herunter (ein drittes bricht hart ab).
+`!restart` öffnet ein neues Konsolenfenster; das alte schließt sich von selbst.
 
 **Linux / macOS:**
 

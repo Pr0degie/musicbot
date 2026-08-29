@@ -30,7 +30,7 @@ Setup → `README.md` / `install.bat`, Cookies → `SETUP.md` (je auch `*_DE.md`
 - `cogs/dm_bridge.py` — HTTP-Server, über den "Bot B" (KI-Dungeon-Master) diesen Bot sprechen lässt; `!dm` zeigt den Status. Speak blockiert bewusst ohne Callback → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md)
 - `cogs/presets.py` — EQ-Filterketten (`EQ_PRESETS`) + FFmpeg-Filter-Notizen
 - `views/music_controls.py` — Playback-Buttons + Stale-Buttons-Fallback; `views/queue_view.py` — paginierte Queue; `views/help_view.py` — `!help`
-- `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text` (`normalize_title`/`parse_time`/`progress_bar`), `ffmpeg` (zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`, in `music.py` via Klassen-Aliase gespiegelt), `i18n.t`
+- `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text` (`normalize_title`/`parse_time`/`progress_bar`), `ffmpeg` (zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`, in `music.py` via Klassen-Aliase gespiegelt), `i18n.t`, `shutdown.install_sigint_handler` (zweistufiges Strg+C)
 
 ## Doku
 

@@ -42,7 +42,8 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!loop`-Zyklus: `None` → `song` → `queue` → `None` (Anzeige + Verhalten am Trackende)
 - [ ] Bot-Neustart → zuletzt gespielte Songs sofort wieder spielfähig (Metadaten-Cache greift, keine Neu-Extraktion nötig)
 - [ ] Buttons einer Now-Playing-Nachricht von **vor** dem Neustart klicken → ephemere Erklärung statt „Interaktion fehlgeschlagen", tote Buttons werden entfernt (ADR 0006)
-- [ ] `!restart` aus laufender `start.bat` → neues Konsolenfenster öffnet sich, altes endet am `pause`; `!score`-Zähler haben den Neustart überlebt (ADR 0003/0005)
+- [ ] `!restart` aus laufendem Bot-Fenster → neues Konsolenfenster öffnet sich, altes schließt sich von selbst; `!score`-Zähler haben den Neustart überlebt (ADR 0003/0005)
+- [ ] Strg+C im Bot-Fenster: 1× fragt nach, nach 5 s ohne Bestätigung „Abbruch – der Bot läuft weiter"; 2× (innerhalb 5 s) fährt herunter, Fenster schließt sich, `bot.log` endet mit `[Shutdown] Bot beendet.`
 
 ## Progressiver Download & Registry (ADR 0001/0002)
 

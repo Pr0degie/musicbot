@@ -6,6 +6,8 @@ from cogs.music import MusicCommands
 from cogs.dm_bridge import DMBridge
 from config import TOKEN
 from discord.ext import commands
+from utils.logger import logger
+from utils.shutdown import install_sigint_handler
 
 
 class MusicBot(commands.Bot):
@@ -58,6 +60,13 @@ class MusicBot(commands.Bot):
 
 
 bot = MusicBot()
+# Strg+C im Terminal: erstes Signal fragt nur nach, das zweite fährt geordnet
+# herunter, ein drittes bricht hart ab (utils/shutdown.py).
+install_sigint_handler(bot)
 # log_handler=None: Logging wird in utils/logger.py konfiguriert –
 # verhindert dass discord.py einen eigenen StreamHandler hinzufügt (doppelte Ausgabe).
 bot.run(TOKEN, log_handler=None)
+# Schlusspunkt in bot.log: run() kehrt nur zurück, wenn der Bot wirklich unten
+# ist. Fehlt diese Zeile nach einem Strg+C, hing das Herunterfahren – steht sie
+# da, kommt alles Weitere im Fenster von start.bat (Terminate batch job/pause).
+logger.info("[Shutdown] Bot beendet.")
