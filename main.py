@@ -4,6 +4,7 @@ import discord
 from cogs.basic import BasicCommands
 from cogs.music import MusicCommands
 from cogs.dm_bridge import DMBridge
+from cogs.voice_listen import VoiceListen
 from config import TOKEN
 from discord.ext import commands
 from utils.logger import logger
@@ -34,6 +35,9 @@ class MusicBot(commands.Bot):
         await self.add_cog(BasicCommands(self))
         await self.add_cog(MusicCommands(self))
         await self.add_cog(DMBridge(self))
+        # Gesprochene Befehle ("yo bot, spiel mal ..."). Standardmäßig aus;
+        # der Cog tut ohne VOICE_CONTROL und ohne !listen on nichts.
+        await self.add_cog(VoiceListen(self))
         # Beantwortet Klicks auf Now-Playing-Buttons aus früheren Bot-Läufen
         # mit einer ephemeren Erklärung statt "Interaktion fehlgeschlagen".
         from views.music_controls import StaleControlsFallback

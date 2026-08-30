@@ -119,6 +119,47 @@ Grundsatz (Flag-Defaults = Altverhalten, `allowed_mentions=none()`-Ausnahme, Own
 - **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` (inline `check_admin()`), `!reloadcookies`, `!format` nur für diese Rolle oder den Owner.
 - **`!loadq`** validiert ohne Flag (nur Fehlerpfad geändert): Datei muss Liste von `[url, titel]`-String-Paaren sein (`_is_valid_playlist` in `music_queue_io.py`), max. `HARD_PLAYLIST_LIMIT` Einträge — sonst i18n-Fehlermeldung statt Traceback. Valide saveq-Dateien laden unverändert.
 
+## Sprachsteuerung ("yo bot, spiel mal ...")
+
+Details und Begründungen → [ADR 0011](adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
+
+**Ein Parser, zwei Eingänge.** `VoiceListen.handle_text()` (`cogs/voice_listen.py`)
+ist die einzige Stelle, durch die ein gesprochener Satz läuft:
+
+```
+Bot B im Voice-Channel?  ──ja──▶  Bot B transkribiert ohnehin
+                                  └─▶ POST /command ──┐
+                                                      ├──▶ handle_text() ──▶ !p / !s / !x / ...
+   ──nein──▶  eigenes Zuhören (voice-recv + Whisper)  ──┘        (geplant)
+```
+
+Sitzt Bot B im Channel, hört dieser Bot **nicht** selbst zu: er transkribiert
+bereits mit `faster-whisper-medium`, ein zweites Modell daneben wäre doppelte
+Arbeit und doppelter VRAM. Erkannt wird er über die konfigurierte
+`DM_BOT_USER_ID`, nie per Heuristik.
+
+**Parser** (`utils/nl_parser.py`, rein und ohne Discord-Import): Weckwort-Regex
+(tolerant gegenüber Whispers Schreibweisen — "Yo, Bot!", "Jo Bott.", "Yobot"),
+dann eine Intent-Tabelle von spezifisch nach generisch. Die Songsuche steht als
+Catch-all ganz unten, weil fast jeder Steuersatz ebenfalls ein Spiel-Verb
+enthält ("mach mal aus", "spiel weiter"). Die Rückgabe ist ein Tupel
+`(weckwort_gefunden, intent)` — ohne Weckwort schweigt der Bot, mit Weckwort
+aber ohne Intent stellt er eine Rückfrage.
+
+**Ausführung:** synthetische Message nach dem Muster aus `views/help_view.py`
+(Referenz-Nachricht kopieren, Autor auf den Sprecher, Inhalt auf den Befehl,
+dann `bot.get_context` + `bot.invoke`). Damit laufen alle bestehenden Checks
+mit — Sprache ist kein zweiter, laxerer Weg in den Bot hinein.
+
+**Flags:** `VOICE_CONTROL` (Master, Default aus — ohne ihn existiert
+`/command` gar nicht), `VOICE_OWN_LISTEN` (eigenes Zuhören, braucht Neustart),
+`DM_BOT_USER_ID`, `VOICE_WAKE_WORDS`, `VOICE_BLOCKED_USER_IDS`. Zusätzlich
+muss `!listen on` zur Laufzeit geschaltet werden; die Nachricht dient als
+Referenz für die Command-Ausführung.
+
+**Logging:** `[Sprachbefehl]` (essential, mit Quellen-Präfix `(bridge)`/`(eigen)`)
+für alles mit Weckwort, `[STT]` (quiet) für Transkripte ohne Weckwort.
+
 ## Key Bot Commands
 
 Full list via `!help`. Non-obvious:

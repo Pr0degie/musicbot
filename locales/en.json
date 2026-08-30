@@ -59,7 +59,6 @@
   "error.leave_failed": "⚠️ Failed to leave: {err}",
   "error.bot_not_in_voice": "🙅 The bot is not in a voice channel.",
   "error.stale_controls": "⚠️ The bot was restarted — these buttons belong to an old message. Use the current now-playing message or start with `!p`.",
-
   "status.format_set": "🔄 Audio format set to **{format}**{note}.",
   "status.format_note": " (takes effect on the next track)",
   "status.autoplay_added": "🔁 Autoplay: **{title}**",
@@ -110,14 +109,12 @@
   "status.joined": "🔊 Connected to: {channel}",
   "status.moved_to": "🔄 Moved to: {channel}",
   "status.left": "Left the voice channel.",
-
   "radio.reconnecting": "📻 Reconnect {count}/3 for **{name}**...",
   "radio.stream_interrupted": "📻 Stream connection permanently lost. Radio stopped.",
   "radio.station_list": "📻 **Known stations** (tip: `!radio <number>`):\n{lines}",
   "radio.station_deleted": "🗑️ Station **{name}** deleted.",
   "radio.station_renamed": "✏️ **{old}** → **{new}**",
   "radio.station_saved": "📻 New station **{name}** saved (no. {num}).",
-
   "embed.duration": "Duration",
   "embed.eq": "EQ",
   "embed.format": "Format",
@@ -147,14 +144,12 @@
   "embed.tasks": "⚙️ asyncio Tasks",
   "embed.cache_files": "💾 Cache files",
   "embed.cache_size": "💾 Cache size",
-
   "button.pause": "⏸️ Pause",
   "button.resume": "▶️ Resume",
   "button.skip": "⏭️ Skip",
   "button.autoplay": "🔁 Autoplay",
   "button.loop": "🔂 Loop",
   "modal.cmd_input_label": "Input",
-
   "misc.unknown": "Unknown",
   "misc.unknown_title": "Unknown title",
   "misc.unnamed_playlist": "Unnamed playlist",
@@ -168,7 +163,6 @@
   "misc.files_count": "{count} files",
   "misc.auto_leave": "👋 Everyone's gone — I'll head out too. See you next time!",
   "misc.idle_leave": "💤 Nothing played for a while — leaving the channel. Call me back with !j.",
-
   "error.url_scheme": "❌ Only http/https URLs are allowed.",
   "error.url_private": "❌ This URL points to a private/internal address and won't be played.",
   "warn.url_suspicious": "⚠️ This URL points to a private/internal address — playing anyway (URL_VALIDATION=warn).",
@@ -176,6 +170,14 @@
   "error.admin_required": "❌ This command is restricted to the admin role (or the owner).",
   "error.playlist_invalid": "❌ **{name}** is not a valid playlist file (expected: list of [URL, title] pairs).",
   "error.playlist_too_large": "❌ **{name}** has too many entries (max. {limit}).",
-
-  "help.text": "🎵 Music\n  !p <url/search>   – Play a song, playlist or search term\n  !next <url/search>   – Play next\n  !baba            – Play Baba playlist\n  !s               – Skip current song\n  !stop            – Stop playback (queue is kept)\n  !x               – Pause\n  !resume          – Resume playback\n  !now <search/url/n> – Play immediately (also queue position n)\n  !seek <time>     – Jump to position (!seek 1:23 or !seek 83)\n  !loop            – Loop mode: off → song → queue → off\n  !replay          – Replay last song\n  !text            – Show lyrics of the current song\n\n📜 Queue\n  !q               – Show queue\n  !shuffle         – Shuffle queue\n  !clear           – Clear queue & stop playback\n  !remove <n>      – Remove song at position n\n  !move <n|title>  – Move song to front (by position or title search)\n  !saveq <name>    – Save current queue under a name\n  !loadq <name>    – Load a saved queue & append it\n  !loadq last      – Load the last session's queue ('last' is reserved as a playlist name)\n  !lists           – Show all saved queues\n  !score           – Top 10 most played songs\n\n🎚️ Audio\n  !eq <preset>     – Set EQ preset (no argument: list)\n                     Presets: bassboost, flat, vocalboost, superbass, punchy, nightcore, karaoke, 8d\n                     EQ change restarts the current song.\n  !format <type>   – Switch audio format: mp3 or webm\n\n🔁 Autoplay\n  Autoplay button   – Automatically plays a related track after each song.\n                     Press the button again to stop.\n\n📻 Radio\n  !radio            – Show station list\n  !radio <nr/name>  – Play station\n  !radio <URL> [name] – Play & save stream\n  !radio delete <nr/name> – Delete station\n  !radio rename <nr/name> <new name> – Rename station\n\n🔊 Voice\n  !j               – Join voice channel\n  !l               – Leave voice channel\n\n  !stats           – RAM, CPU, uptime and cache info\n  !debug on|off    – Toggle terminal diagnostics (bot.log always keeps full detail)\n  !reloadcookies   – Reload cookies.txt (after manual upload to server)\n  !restart         – Restart bot in new terminal (owner only)\n  !help / !        – This overview"
+  "help.text": "🎵 Music\n  !p <url/search>   – Play a song, playlist or search term\n  !next <url/search>   – Play next\n  !baba            – Play Baba playlist\n  !s               – Skip current song\n  !stop            – Stop playback (queue is kept)\n  !x               – Pause\n  !resume          – Resume playback\n  !now <search/url/n> – Play immediately (also queue position n)\n  !seek <time>     – Jump to position (!seek 1:23 or !seek 83)\n  !loop            – Loop mode: off → song → queue → off\n  !replay          – Replay last song\n  !text            – Show lyrics of the current song\n\n📜 Queue\n  !q               – Show queue\n  !shuffle         – Shuffle queue\n  !clear           – Clear queue & stop playback\n  !remove <n>      – Remove song at position n\n  !move <n|title>  – Move song to front (by position or title search)\n  !saveq <name>    – Save current queue under a name\n  !loadq <name>    – Load a saved queue & append it\n  !loadq last      – Load the last session's queue ('last' is reserved as a playlist name)\n  !lists           – Show all saved queues\n  !score           – Top 10 most played songs\n\n🎚️ Audio\n  !eq <preset>     – Set EQ preset (no argument: list)\n                     Presets: bassboost, flat, vocalboost, superbass, punchy, nightcore, karaoke, 8d\n                     EQ change restarts the current song.\n  !format <type>   – Switch audio format: mp3 or webm\n\n🔁 Autoplay\n  Autoplay button   – Automatically plays a related track after each song.\n                     Press the button again to stop.\n\n📻 Radio\n  !radio            – Show station list\n  !radio <nr/name>  – Play station\n  !radio <URL> [name] – Play & save stream\n  !radio delete <nr/name> – Delete station\n  !radio rename <nr/name> <new name> – Rename station\n\n🔊 Voice\n  !j               – Join voice channel\n  !l               – Leave voice channel\n\n  !stats           – RAM, CPU, uptime and cache info\n  !listen on|off   – Spoken commands (“yo bot, play …”)\n  !debug on|off    – Toggle terminal diagnostics (bot.log always keeps full detail)\n  !reloadcookies   – Reload cookies.txt (after manual upload to server)\n  !restart         – Restart bot in new terminal (owner only)\n  !help / !        – This overview",
+  "status.voice_understood": "🎙️ Got it ({user}): {text}",
+  "status.listen_on": "🎙️ I'm listening now. Say “{wake}” followed by your request.",
+  "status.listen_on_bridge": "🎙️ I'm listening now – via {bot}. While it's in the channel I won't load my own speech model.",
+  "status.listen_off": "🔇 Stopped listening.",
+  "status.listen_status_on": "🎙️ Listening: **on** (source: {source})",
+  "status.listen_status_off": "🔇 Listening: **off**",
+  "error.voice_not_understood": "❓ I heard you ({user}), but didn't understand: “{text}”",
+  "error.listen_disabled": "❌ Voice control is off. Set `VOICE_CONTROL=true` in your .env and restart the bot.",
+  "error.listen_usage": "❓ Usage: `!listen on|off`"
 }

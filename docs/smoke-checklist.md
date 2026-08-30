@@ -60,3 +60,20 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Alterssperre: bekanntes altersbeschränktes Video per `!p <URL>` → einmal `[Cookies] YouTube verlangt eine angemeldete Session (…)` + `[Cookies] Zweitversuch mit Cookies`, danach spielt der Track
 - [ ] Nach diesem Umschalten laufen Folge-Tracks weiter (im Cookie-Modus, also wieder mit Werbepause — erwartet); erst ein Bot-Neustart geht zurück auf cookielos
 - [ ] `!reloadcookies` → Bestätigung nennt die Cookie-Quelle; danach steht der Cookie-Modus (nächster ungecachter Track wartet die Werbepause ab)
+
+## Sprachsteuerung (ADR 0011)
+
+Voraussetzung: `VOICE_CONTROL=true` in der `.env`, Bot neu gestartet.
+
+- [ ] `!listen` ohne Argument → meldet "Mithören: **aus**"
+- [ ] `!listen on` → Bestätigung im Chat, `[Voice-Listen] Aktiviert` im Terminal
+- [ ] Bridge-Weg ohne Mikrofon prüfen (eigene User-ID einsetzen):
+      `curl -X POST http://127.0.0.1:8765/command -H "Content-Type: application/json" -d "{\"text\":\"yo bot spiel mal Bohemian Rhapsody\",\"user_id\":\"<ID>\"}"`
+      → Bestätigung im Chat, Song startet, `[Sprachbefehl] (bridge)` im Terminal
+- [ ] Satz ohne Weckwort schicken → HTTP 200 `no_wake_word`, **nichts** im Chat
+- [ ] Unverständlicher Satz mit Weckwort → Rückfrage im Chat, HTTP 200
+- [ ] `!listen off`, dann erneut posten → `disabled`, kein Command
+- [ ] Während die DM-Bridge spricht posten → `dm_speaking`, kein Command
+- [ ] **Regression zur stop()-Falle:** Song läuft, `!s` drücken → Wiedergabe
+      wechselt normal (bei aktivem eigenem Zuhören muss es danach weiterhören)
+- [ ] `!help` zeigt `!listen on|off`
