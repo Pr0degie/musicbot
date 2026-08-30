@@ -11,17 +11,27 @@ from utils.nl_parser import WAKE_DEFAULTS
 
 
 # --- ADR 0004: Defaults erhalten das Altverhalten ---------------------------
+# Geprüft wird das Parsing einer fehlenden Angabe, nicht der geladene Wert:
+# der hängt an der lokalen .env und würde den Test von der Umgebung abhängig
+# machen, statt das Verhalten festzunageln.
 
-def test_sprachsteuerung_ist_standardmaessig_aus():
-    assert config.VOICE_CONTROL is False
+def test_fehlende_angabe_laesst_die_sprachsteuerung_aus():
+    assert config._parse_bool("") is False
+    assert config._parse_bool(None) is False
 
 
-def test_eigenes_zuhoeren_ist_standardmaessig_aus():
-    assert config.VOICE_OWN_LISTEN is False
+@pytest.mark.parametrize("roh", ["1", "true", "TRUE", "yes", "on"])
+def test_uebliche_ja_schreibweisen_schalten_ein(roh):
+    assert config._parse_bool(roh) is True
+
+
+@pytest.mark.parametrize("roh", ["", "0", "false", "nein", "vielleicht", "  "])
+def test_alles_andere_bleibt_aus(roh):
+    assert config._parse_bool(roh) is False
 
 
 def test_ohne_dm_bot_id_keine_weiche():
-    assert config.DM_BOT_USER_ID == 0
+    assert config._parse_user_id("") == 0
 
 
 # --- _parse_id_set ----------------------------------------------------------
@@ -66,6 +76,7 @@ def test_parse_user_id(roh, erwartet):
 # --- Weckwoerter ------------------------------------------------------------
 
 def test_weckwoerter_haben_die_gemeinsamen_defaults():
-    """Muss mit Bot Bs Liste uebereinstimmen - driften sie, reagiert der Bot
-    einfach nicht mehr und niemand weiss warum."""
+    """Muss mit der Liste des DM-Bots uebereinstimmen - driften sie, reagiert
+    der Bot einfach nicht mehr und niemand weiss warum. Die lokale .env setzt
+    VOICE_WAKE_WORDS nicht, hier gilt also der Default."""
     assert config.VOICE_WAKE_WORDS == WAKE_DEFAULTS

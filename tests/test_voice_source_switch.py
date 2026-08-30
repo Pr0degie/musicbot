@@ -199,3 +199,29 @@ def test_zu_leises_segment_erreicht_die_gpu_nicht(monkeypatch):
     run(cog._verarbeite_segment(1, b"\x00\x00" * 48000))   # reine Stille
 
     assert aufrufe == []
+
+
+# --- Hilfe beim Einrichten --------------------------------------------------
+
+def test_fremde_bots_werden_mit_id_gemeldet(monkeypatch):
+    """Ohne DM_BOT_USER_ID greift die Weiche nicht. Statt den Nutzer die ID
+    von Hand suchen zu lassen, nennt der Bot sie - er sieht sie ohnehin."""
+    monkeypatch.setattr(config, "DM_BOT_USER_ID", 0)
+    eigener = FakeMember(42, "MusikBot", bot=True)
+    cog = baue_cog([FakeMember(1, "Tobi"),
+                    FakeMember(DM_BOT_ID, "DungeonMaster", bot=True),
+                    eigener])
+    cog.bot.user = eigener
+
+    fremde = cog._fremde_bots()
+
+    assert [(m.display_name, m.id) for m in fremde] == [("DungeonMaster", DM_BOT_ID)], \
+        "der eigene Bot darf nicht in der Liste stehen"
+
+
+def test_bei_gesetzter_id_wird_nicht_mehr_gemeldet(monkeypatch):
+    monkeypatch.setattr(config, "DM_BOT_USER_ID", DM_BOT_ID)
+    cog = baue_cog([FakeMember(DM_BOT_ID, "DungeonMaster", bot=True)])
+    cog.bot.user = FakeMember(42, "MusikBot", bot=True)
+
+    assert cog._fremde_bots() == []

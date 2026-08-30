@@ -188,6 +188,27 @@ class VoiceListen(commands.Cog):
         await self.bot.invoke(ctx)
         return True
 
+    def _fremde_bots(self):
+        """Andere Bots im Voice-Channel – Einrichtungshilfe.
+
+        Ohne gesetzte DM_BOT_USER_ID greift die Weiche nicht, und der Musikbot
+        würde sein Modell auch dann laden, wenn der DM-Bot mitlauscht. Statt
+        den Nutzer die ID von Hand suchen zu lassen, nennt der Bot sie – er
+        sieht sie ohnehin. Bei gesetzter ID ist nichts mehr zu melden.
+        """
+        if config.DM_BOT_USER_ID:
+            return []
+        eigene_id = getattr(getattr(self.bot, "user", None), "id", None)
+        gefunden = []
+        for vc in getattr(self.bot, "voice_clients", []):
+            kanal = getattr(vc, "channel", None)
+            if not kanal:
+                continue
+            for m in kanal.members:
+                if getattr(m, "bot", False) and m.id != eigene_id:
+                    gefunden.append(m)
+        return gefunden
+
     # --- Eigenes Zuhören ----------------------------------------------------
 
     def _voice_client(self):
@@ -386,6 +407,14 @@ class VoiceListen(commands.Cog):
 
         logger.info(f"[Voice-Listen] Aktiviert in #{getattr(ctx.channel, 'name', '?')}.")
         await ctx.send(t("status.listen_on", wake=config.VOICE_WAKE_WORDS[0]))
+
+        # Einrichtungshilfe: ohne DM_BOT_USER_ID läuft das eigene Modell auch
+        # dann, wenn der DM-Bot mitlauscht. Die ID gleich mitliefern.
+        for fremd in self._fremde_bots():
+            logger.info(f"[Voice-Listen] Fremder Bot im Channel: "
+                        f"{fremd.display_name} (ID {fremd.id})")
+            await ctx.send(t("status.listen_hint_dm_bot",
+                             bot=fremd.display_name, id=fremd.id))
 
         # Ohne DM-Bot im Channel selbst zuhören – hier ohne Karenz, weil der
         # Einschaltbefehl eine ausdrückliche Ansage ist.

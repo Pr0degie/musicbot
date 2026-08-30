@@ -183,5 +183,6 @@
   "status.listen_source_bridge": "🔀 Der DM-Bot ist da – ich höre ab jetzt über ihn mit und gebe mein Sprachmodell frei.",
   "status.listen_source_own": "🔀 Der DM-Bot ist weg – ich höre ab jetzt selbst mit (Modell `{model}`).",
   "error.listen_no_model": "❌ Sprachmodell konnte nicht geladen werden: {err}",
-  "status.listen_loading": "⏳ Lade Sprachmodell `{model}` … (einmalig, dauert kurz)"
+  "status.listen_loading": "⏳ Lade Sprachmodell `{model}` … (einmalig, dauert kurz)",
+  "status.listen_hint_dm_bot": "💡 **{bot}** ist auch im Channel. Wenn das dein DM-Bot ist, trag `DM_BOT_USER_ID={id}` in die .env ein – dann lade ich kein eigenes Sprachmodell, solange er mithört."
 }

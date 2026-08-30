@@ -183,5 +183,6 @@
   "status.listen_source_bridge": "🔀 The DM bot is here – I'll listen through it from now on and free my speech model.",
   "status.listen_source_own": "🔀 The DM bot is gone – I'm listening myself from now on (model `{model}`).",
   "error.listen_no_model": "❌ Could not load the speech model: {err}",
-  "status.listen_loading": "⏳ Loading speech model `{model}` … (one-off, takes a moment)"
+  "status.listen_loading": "⏳ Loading speech model `{model}` … (one-off, takes a moment)",
+  "status.listen_hint_dm_bot": "💡 **{bot}** is in the channel too. If that's your DM bot, set `DM_BOT_USER_ID={id}` in your .env – then I won't load my own speech model while it's listening."
 }
