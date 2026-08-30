@@ -52,6 +52,9 @@ class _ColorFormatter(logging.Formatter):
         "Auto-Leave":        "\033[2m",
         "Score":             "\033[2m",
         "Voice":             "\033[2m",  # dim – Reconnect/Watchdog-Hinweise unaufdringlich
+        "Voice-Listen":      "\033[2m",
+        "Sprachbefehl":      "\033[92m",  # grün wie Wiedergabe – es ist ein Wiedergabe-Auslöser
+        "STT":               "\033[36m",
     }
 
     _GRAY = "\033[90m"
@@ -145,6 +148,7 @@ _ESSENTIAL_TAGS = {
     "Auto-Join", "Auto-Leave", "Auto-Start", "KEINE VERBINDUNG",
     "play_next", "Voice", "DMBridge",
     "INIT", "Cookies", "yt-dlp", "restart", "Maintenance", "Shutdown",
+    "Sprachbefehl", "Voice-Listen",          # gesprochene Befehle
 }
 
 # Interna der Download-Pipeline: nur in debug interessant. WARNING+ dieser
@@ -153,6 +157,7 @@ _QUIET_TAGS = {
     "Prefetch", "Autoplay Prefetch", "Progressiv", "Resolve", "Cache",
     "Warmup", "Stream", "SAVE", "Download", "Download-Fallback",
     "SafeUnlink", "Score", "Cleanup",
+    "STT",                                   # Transkripte ohne Weckwort
 }
 
 _MODES = ("quiet", "debug")

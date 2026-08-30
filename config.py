@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 
+from utils.nl_parser import WAKE_DEFAULTS
+
 # Lade Umgebungsvariablen
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -84,3 +86,45 @@ def _parse_max_mb(value) -> int:
 # Dateien (mtime) gelöscht, bis das Limit eingehalten ist – niemals Dateien
 # zu Songs in Queue/current_track oder die gerade abgespielte Datei.
 DOWNLOADS_MAX_MB = _parse_max_mb(os.getenv("DOWNLOADS_MAX_MB", "0"))
+
+
+# --- Sprachsteuerung ("yo bot, spiel mal ...") ------------------------------
+
+def _parse_user_id(value) -> int:
+    """Discord-User-ID als int; leer oder ungültig → 0 (= Funktion aus)."""
+    v = str(value or "").strip()
+    return int(v) if v.isdigit() else 0
+
+
+def _parse_id_set(value) -> frozenset:
+    """Kommagetrennte Discord-User-IDs → frozenset[int]; Müll wird verworfen."""
+    teile = (t.strip() for t in str(value or "").split(","))
+    return frozenset(int(t) for t in teile if t.isdigit())
+
+
+def _parse_csv(value, default: tuple) -> tuple:
+    """Kommagetrennte Liste → tuple; leer → default."""
+    teile = tuple(t.strip() for t in str(value or "").split(",") if t.strip())
+    return teile or default
+
+
+# Master-Flag für beide Eingänge (Bot-B-Bridge und eigenes Zuhören).
+# false (Default) = exakt heutiges Verhalten, /command existiert nicht.
+VOICE_CONTROL = _parse_bool(os.getenv("VOICE_CONTROL", "false"))
+
+# Nur der eigene Zuhör-Weg (discord-ext-voice-recv + lokales Whisper).
+# Entscheidet die Voice-Client-Klasse beim connect() – Änderung braucht einen
+# Neustart. false (Default) = Bot B liefert die Sätze über die DM-Bridge.
+VOICE_OWN_LISTEN = _parse_bool(os.getenv("VOICE_OWN_LISTEN", "false"))
+
+# Discord-User-ID von "Bot B" (KI-Dungeon-Master). Sitzt er im selben
+# Voice-Channel, hört dieser Bot NICHT selbst zu – ein zweites Whisper daneben
+# wäre doppelte Arbeit und doppelter VRAM. 0/leer = keine Weiche.
+DM_BOT_USER_ID = _parse_user_id(os.getenv("DM_BOT_USER_ID", ""))
+
+# Weckwörter. Müssen mit Bot Bs Liste übereinstimmen – driften sie
+# auseinander, reagiert der Bot einfach nicht mehr und niemand weiß warum.
+VOICE_WAKE_WORDS = _parse_csv(os.getenv("VOICE_WAKE_WORDS", ""), WAKE_DEFAULTS)
+
+# User-IDs, deren Sprachbefehle ignoriert werden. Gilt für beide Eingänge.
+VOICE_BLOCKED_USER_IDS = _parse_id_set(os.getenv("VOICE_BLOCKED_USER_IDS", ""))
