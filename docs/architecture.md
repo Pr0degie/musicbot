@@ -130,7 +130,7 @@ ist die einzige Stelle, durch die ein gesprochener Satz läuft:
 Bot B im Voice-Channel?  ──ja──▶  Bot B transkribiert ohnehin
                                   └─▶ POST /command ──┐
                                                       ├──▶ handle_text() ──▶ !p / !s / !x / ...
-   ──nein──▶  eigenes Zuhören (voice-recv + Whisper)  ──┘        (geplant)
+   ──nein──▶  eigenes Zuhören (voice-recv + Whisper)  ──┘
 ```
 
 Sitzt Bot B im Channel, hört dieser Bot **nicht** selbst zu: er transkribiert
@@ -156,6 +156,21 @@ mit — Sprache ist kein zweiter, laxerer Weg in den Bot hinein.
 `DM_BOT_USER_ID`, `VOICE_WAKE_WORDS`, `VOICE_BLOCKED_USER_IDS`. Zusätzlich
 muss `!listen on` zur Laufzeit geschaltet werden; die Nachricht dient als
 Referenz für die Command-Ausführung.
+
+**Eigenes Zuhören** (`VOICE_OWN_LISTEN=true`, Neustart nötig): `SpeechSink`
+(`cogs/voice_sink.py`) puffert dekodiertes PCM pro Sprecher in
+`SpeakerBuffers` (`utils/speech_buffer.py`). Ein Segment gilt als fertig,
+wenn 800 ms kein Paket mehr kam — bewusst über die Paketlücke statt über die
+`speaking`-Events, die Clients unzuverlässig setzen. `_flush_loop` (200 ms)
+holt fertige Segmente ab, ein Rauschgate bei −50 dBFS verwirft Tastaturklicks
+vor der GPU, `utils/pcm.py` rechnet 48 kHz Stereo auf 16 kHz Mono float32 um
+(Faktor exakt 3, reine numpy-Mittelung), und `utils/stt.py` transkribiert in
+`asyncio.to_thread`.
+
+**Die Weiche:** Betritt der DM-Bot den Channel, wird sofort abgeschaltet und
+das Modell aus dem VRAM freigegeben. Geht er, wird erst nach 10 s Karenz
+wieder geladen — asymmetrisch, weil Abschalten gratis ist und Anschalten
+~20 s Ladezeit und 2,5 GB VRAM kostet.
 
 **Logging:** `[Sprachbefehl]` (essential, mit Quellen-Präfix `(bridge)`/`(eigen)`)
 für alles mit Weckwort, `[STT]` (quiet) für Transkripte ohne Weckwort.

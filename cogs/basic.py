@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 
 from utils.i18n import t
+from utils.voice import connect_voice
 
 
 class BasicCommands(commands.Cog):
@@ -62,7 +63,7 @@ class BasicCommands(commands.Cog):
             if ctx.voice_client is None:
                 # Bot ist noch nicht verbunden → frisch einsteigen
                 try:
-                    await channel.connect()
+                    await connect_voice(channel)
                     await ctx.send(t("status.joined", channel=channel.name))
                 except discord.errors.ConnectionClosed as e:
                     # Verbindung wurde vom Server abgelehnt oder unterbrochen.

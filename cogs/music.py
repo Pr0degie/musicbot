@@ -14,7 +14,7 @@ import aiohttp
 
 import psutil
 from utils.logger import logger
-from utils.voice import stop_playback
+from utils.voice import connect_voice, stop_playback
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
 from utils.checks import require_same_voice, require_admin
@@ -364,7 +364,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(t("error.no_voice"))
             return False
         try:
-            await ctx.author.voice.channel.connect()
+            await connect_voice(ctx.author.voice.channel)
             logger.info(f"[Auto-Join] Verbunden mit: {ctx.author.voice.channel.name}")
         except Exception as e:
             await ctx.send(t("error.connect_failed", err=f"{type(e).__name__}: {str(e)[:100]}"))

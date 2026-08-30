@@ -38,8 +38,8 @@ Satz läuft. Davor gibt es zwei Quellen:
    im Voice-Channel, hört zu und transkribiert bereits mit
    `Systran/faster-whisper-medium`. Er reicht den Rohtext samt Sprecher-ID
    herüber.
-2. **Eigenes Zuhören** (geplant) über `discord-ext-voice-recv` plus lokales
-   Whisper — für den Fall, dass Bot B nicht im Channel sitzt.
+2. **Eigenes Zuhören** über `discord-ext-voice-recv` plus lokales Whisper —
+   für den Fall, dass Bot B nicht im Channel sitzt.
 
 Der ausschlaggebende Fund: auf der Maschine liegt bereits ein vollständiger
 `faster-whisper-medium`-Cache (1,45 GB). Ein zweites Whisper im selben Channel
@@ -54,7 +54,24 @@ Der Bridge-Weg wurde zuerst gebaut, weil er **keine einzige neue Abhängigkeit**
 braucht und die Voice-Verbindung nicht anfasst. Das eigene Zuhören hängt
 dagegen an `discord-ext-voice-recv`, das ausdrücklich experimentell ist und
 seit Juni 2025 kein Release hatte. Fällt es aus, funktioniert die
-Sprachsteuerung trotzdem.
+Sprachsteuerung trotzdem — `voice_client_cls()` fällt dann still auf den
+normalen `VoiceClient` zurück.
+
+### Spike-Ergebnis (2026-08-30)
+
+Vor dem Bau geprüft, beides grün:
+
+- `voice_recv 0.5.2a179` importiert gegen discord.py 2.7.1, `VoiceRecvClient`
+  ist eine Unterklasse von `discord.VoiceClient` und hat `stop_playing()`,
+  `stop_listening()`, `is_listening()`. **`stop()` ruft nachweislich beides**
+  — der Umbau aus Punkt 4 war nicht vorsorglich, sondern nötig.
+- `WhisperModel("medium", device="cuda", compute_type="float16")` lädt in
+  1,9 s aus dem vorhandenen Cache; kein `add_dll_directory` nötig, weil die
+  CUDA-Bibliotheken durch den DM-Bot bereits auf dem System liegen. Die
+  Kaskade in `utils/stt.py` bleibt als Netz für andere Maschinen.
+- Ende-zu-Ende mit vier per Windows-TTS erzeugten deutschen Sätzen, in
+  Discords Format (48 kHz Stereo) durch Segmentierung, Resampling, Whisper
+  und Parser: vier von vier korrekt, ~0,2 s Transkription pro Satz.
 
 ### 3. Ausführung über eine synthetische Message, nicht über `ctx.invoke`
 

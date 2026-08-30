@@ -179,5 +179,9 @@
   "status.listen_status_off": "🔇 Mithören: **aus**",
   "error.voice_not_understood": "❓ Ich hab dich gehört ({user}), aber nicht verstanden: „{text}“",
   "error.listen_disabled": "❌ Sprachsteuerung ist aus. Setze `VOICE_CONTROL=true` in der .env und starte den Bot neu.",
-  "error.listen_usage": "❓ Verwendung: `!listen on|off`"
+  "error.listen_usage": "❓ Verwendung: `!listen on|off`",
+  "status.listen_source_bridge": "🔀 Der DM-Bot ist da – ich höre ab jetzt über ihn mit und gebe mein Sprachmodell frei.",
+  "status.listen_source_own": "🔀 Der DM-Bot ist weg – ich höre ab jetzt selbst mit (Modell `{model}`).",
+  "error.listen_no_model": "❌ Sprachmodell konnte nicht geladen werden: {err}",
+  "status.listen_loading": "⏳ Lade Sprachmodell `{model}` … (einmalig, dauert kurz)"
 }

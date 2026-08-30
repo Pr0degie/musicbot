@@ -77,3 +77,16 @@ Voraussetzung: `VOICE_CONTROL=true` in der `.env`, Bot neu gestartet.
 - [ ] **Regression zur stop()-Falle:** Song läuft, `!s` drücken → Wiedergabe
       wechselt normal (bei aktivem eigenem Zuhören muss es danach weiterhören)
 - [ ] `!help` zeigt `!listen on|off`
+
+### Eigenes Zuhören (VOICE_OWN_LISTEN=true, Neustart nötig)
+
+- [ ] `!j`, dann `!listen on` → "Lade Sprachmodell medium", danach Bestätigung
+- [ ] `nvidia-smi` zeigt ~2,5 GB mehr belegten Speicher
+- [ ] "yo bot spiel mal Bohemian Rhapsody" sprechen → Bestätigung + Song
+- [ ] Normal weiterreden ohne Weckwort → nichts im Chat, `[STT]`-Zeilen nur in bot.log
+- [ ] Song läuft, `!s` drücken → danach **weiterhin** auf Sprache reagieren
+      (das ist die stop()-Falle: `stop()` würde auch das Zuhören beenden)
+- [ ] DM-Bot in den Channel holen → Meldung über Quellenwechsel, `nvidia-smi`
+      zeigt den Speicher wieder frei
+- [ ] DM-Bot verlässt den Channel → nach ~10 s lädt das Modell wieder
+- [ ] `!listen off` → Zuhören endet, Modell wird freigegeben

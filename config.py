@@ -128,3 +128,34 @@ VOICE_WAKE_WORDS = _parse_csv(os.getenv("VOICE_WAKE_WORDS", ""), WAKE_DEFAULTS)
 
 # User-IDs, deren Sprachbefehle ignoriert werden. Gilt für beide Eingänge.
 VOICE_BLOCKED_USER_IDS = _parse_id_set(os.getenv("VOICE_BLOCKED_USER_IDS", ""))
+
+
+def _parse_choice(value, erlaubt: set, default: str) -> str:
+    """Whitelist-Auswahl; alles Unbekannte → Default."""
+    v = str(value or "").strip().lower()
+    return v if v in erlaubt else default
+
+
+def _parse_int_bounded(value, lo: int, hi: int, default: int) -> int:
+    """Ganzzahl innerhalb der Grenzen; sonst Default."""
+    v = str(value or "").strip()
+    return int(v) if v.isdigit() and lo <= int(v) <= hi else default
+
+
+# Whisper-Modell für das eigene Zuhören. medium teilt sich den Cache mit dem
+# DM-Bot, muss also nicht erneut heruntergeladen werden.
+VOICE_STT_MODEL = _parse_choice(os.getenv("VOICE_STT_MODEL", ""),
+                                {"tiny", "base", "small", "medium", "large-v3"}, "medium")
+VOICE_STT_DEVICE = _parse_choice(os.getenv("VOICE_STT_DEVICE", ""), {"cuda", "cpu"}, "cuda")
+VOICE_STT_COMPUTE = _parse_choice(os.getenv("VOICE_STT_COMPUTE", ""),
+                                  {"float16", "int8_float16", "int8", "float32"}, "float16")
+
+# CPU-Fallback bewusst aus: wer parallel spielt, will keine stille CPU-Last,
+# sondern eine sichtbare Fehlermeldung.
+VOICE_STT_ALLOW_CPU = _parse_bool(os.getenv("VOICE_STT_ALLOW_CPU", "false"))
+
+# Segmentierung: nach wie viel Stille eine Äußerung als beendet gilt, und die
+# Grenzen, ab denen sie verworfen bzw. zwangsweise geschnitten wird.
+VOICE_SILENCE_MS = _parse_int_bounded(os.getenv("VOICE_SILENCE_MS", ""), 200, 5000, 800)
+VOICE_MIN_MS = _parse_int_bounded(os.getenv("VOICE_MIN_MS", ""), 200, 5000, 700)
+VOICE_MAX_MS = _parse_int_bounded(os.getenv("VOICE_MAX_MS", ""), 2000, 30000, 12000)
