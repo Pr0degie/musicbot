@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import ipaddress
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -9,12 +10,17 @@ from aiohttp import web
 import discord
 from discord.ext import commands
 
+import config
 from utils.files import safe_unlink
 from utils.logger import logger
+from utils.voice import stop_playback
 from config import DM_BRIDGE_HOST, DM_BRIDGE_PORT, DM_BRIDGE_SECRET
 
 # Cap on an uploaded WAV (bytes mode). A spoken sentence is well under this; it's just a guard.
 _MAX_WAV_BYTES = 25 * 1024 * 1024
+
+# Ein gesprochener Satz ist winzig; die Grenze ist nur ein Riegel.
+_MAX_COMMAND_BYTES = 4 * 1024
 
 
 def _peer_is_loopback(request) -> bool:
@@ -57,6 +63,9 @@ class DMBridge(commands.Cog):
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
         app.router.add_post("/speak", self._handle_speak)
+        if config.VOICE_CONTROL:
+            app.router.add_post("/command", self._handle_command)
+            logger.info("[DMBridge] /command aktiv – Sprachbefehle von Bot B.")
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, DM_BRIDGE_HOST, DM_BRIDGE_PORT)
@@ -72,6 +81,51 @@ class DMBridge(commands.Cog):
 
     async def _handle_health(self, request):
         return web.json_response({"status": "ok", "bot": str(self.bot.user)})
+
+    async def _handle_command(self, request):
+        """Nimmt einen von Bot B transkribierten Satz entgegen ("yo bot, spiel ...").
+
+        Bot B sitzt ohnehin im Voice-Channel und transkribiert; statt hier ein
+        zweites Whisper danebenzustellen, reicht er den Rohtext samt Sprecher-ID
+        herüber. Geparst wird ausschließlich hier – nur so bleiben die Regeln
+        an einem Ort.
+
+        Anders als /speak antwortet dieser Endpunkt sofort und meldet
+        Fachliches (nicht verstanden, kein Weckwort, gesperrt) als HTTP 200 mit
+        einem "status"-Feld: Bot B soll darauf nie einen Retry aufbauen.
+        """
+        if DM_BRIDGE_SECRET and not _peer_is_loopback(request):
+            sent = request.headers.get("X-DM-Secret", "")
+            if not hmac.compare_digest(sent, DM_BRIDGE_SECRET):
+                return web.json_response({"error": "unauthorized"}, status=401)
+
+        roh = await request.text()
+        if len(roh) > _MAX_COMMAND_BYTES:
+            return web.json_response({"error": "too large"}, status=413)
+        try:
+            data = json.loads(roh)
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"error": "invalid json"}, status=400)
+
+        text = (data.get("text") or "").strip()
+        if not text:
+            return web.json_response({"error": "missing text"}, status=400)
+        # Ohne Sprecher-ID gäbe es kein Member – und damit kein ctx.author.voice.
+        user_id = data.get("user_id")
+        if not user_id:
+            return web.json_response({"error": "missing user_id"}, status=400)
+
+        listen = self.bot.get_cog("VoiceListen")
+        if listen is None or not listen.enabled:
+            return web.json_response({"status": "ignored", "reason": "disabled"})
+
+        ergebnis = await listen.handle_text(
+            text,
+            user_id=user_id,
+            guild_id=data.get("guild_id"),
+            source=data.get("source") or "bridge",
+        )
+        return web.json_response(ergebnis)
 
     async def _handle_speak(self, request):
         """Spielt eine von Bot B gelieferte Audiodatei im Voice-Channel ab.
@@ -175,7 +229,7 @@ class DMBridge(commands.Cog):
     async def _play_file(self, vc, path):
         """Spielt eine Datei ab und wartet bis zum Ende (Muster wie _play_radio_stream)."""
         # dm_speaking signalisiert dem Music-Cog, dass wir gerade den Voice-Client besitzen:
-        # sein after_playing-Callback ruft sonst bei JEDEM Track-Ende (auch dem durch vc.stop()
+        # sein after_playing-Callback ruft sonst bei JEDEM Track-Ende (auch dem durch den Stopp
         # unten ausgelösten) play_next → vc.play(nächster Track) auf und besetzt den Client wieder
         # bevor wir unsere WAV starten → "Already playing audio.". Das Flag lässt play_next bei
         # Aktivierung sofort aussteigen. finally: nie hängen lassen, sonst läuft nie wieder Musik.
@@ -184,7 +238,7 @@ class DMBridge(commands.Cog):
             # Im DM-Modus soll keine Musik parallel laufen. Falls doch etwas spielt
             # oder pausiert ist, wird es gestoppt (DM-Session läuft mit leerer Queue).
             if vc.is_playing() or vc.is_paused():
-                vc.stop()
+                stop_playback(vc)
                 await asyncio.sleep(0.2)  # Event-Loop-Fenster: das unterdrückte play_next läuft hier
 
             done = asyncio.Event()

@@ -4,6 +4,7 @@ from collections import deque
 import discord
 from discord.ui import Button, View
 from utils.logger import logger
+from utils.voice import stop_playback
 from utils.i18n import t
 
 # Prozessweiter Marker in jeder Button-custom_id: unterscheidet Buttons dieses
@@ -91,7 +92,7 @@ class MusicControlView(View):
         if self.music_cog.is_radio:
             self.music_cog._stop_radio()
             if self.ctx.voice_client and self.ctx.voice_client.is_playing():
-                self.ctx.voice_client.stop()
+                stop_playback(self.ctx.voice_client)
             await interaction.response.send_message(t("status.radio_stopped"), ephemeral=True)
             if self.music_cog.queue:
                 self.music_cog.is_playing = True
@@ -166,7 +167,7 @@ class SearchAutoplayView(View):
                 if self.ctx.voice_client and (
                     self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
                 ):
-                    self.ctx.voice_client.stop()
+                    stop_playback(self.ctx.voice_client)
                 await interaction.response.edit_message(
                     content=t("status.switching_to", title=title), view=None
                 )
@@ -195,7 +196,7 @@ class SearchAutoplayView(View):
                     if self.ctx.voice_client and (
                         self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
                     ):
-                        self.ctx.voice_client.stop()
+                        stop_playback(self.ctx.voice_client)
                 await interaction.response.edit_message(
                     content=t("status.switching_to", title=title), view=None
                 )

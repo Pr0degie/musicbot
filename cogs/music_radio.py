@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands
 
 from utils.logger import logger
+from utils.voice import stop_playback
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
 from utils.checks import check_admin
@@ -254,7 +255,7 @@ class RadioMixin:
         # Immer warten bis FFmpeg wirklich fertig ist – egal ob Radio oder Song lief.
         if ctx.voice_client and ctx.voice_client.is_playing():
             if was_radio:
-                ctx.voice_client.stop()
+                stop_playback(ctx.voice_client)
             else:
                 # Musik weicht dem Radio → absichtlicher Stopp: kein Seek-Resume
                 # einer noch wachsenden Datei in after_playing.

@@ -14,6 +14,7 @@ import aiohttp
 
 import psutil
 from utils.logger import logger
+from utils.voice import stop_playback
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
 from utils.checks import require_same_voice, require_admin
@@ -463,7 +464,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         if self.is_radio:
             self._stop_radio()
             if ctx.voice_client and ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
+                stop_playback(ctx.voice_client)
             await ctx.send(t("status.radio_stopped"))
         elif ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             self.is_playing = False
@@ -534,7 +535,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         if self.is_radio:
             self._stop_radio()
             if ctx.voice_client and ctx.voice_client.is_playing():
-                ctx.voice_client.stop()
+                stop_playback(ctx.voice_client)
             await ctx.send(t("status.radio_stopped"), delete_after=20)
             if self.queue:
                 self.is_playing = True

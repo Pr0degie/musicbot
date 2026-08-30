@@ -19,7 +19,7 @@ cogs/music.py verbliebenen Klassen-Aliase self._ffmpeg_header_opts/
 _stderr_tail/_classify_ffmpeg_error/_progress_bar.
 
 Die ADR-0007-Sequenzierung (Track-Zustand vor vc.play(), Generationscheck nach
-jedem Post-Play-await, _stop_for_advance als einziger vc.stop()-Pfad für Musik,
+jedem Post-Play-await, _stop_for_advance als einziger Stopp-Pfad für Musik,
 Retry-Reset NACH dem Progressive-Resume-Block in after_playing) ist hier
 unverändert erhalten – nichts an der Reihenfolge wurde umgestellt.
 """
@@ -32,6 +32,7 @@ import time
 import discord
 
 from utils.logger import logger
+from utils.voice import stop_playback
 from utils.i18n import t
 from cogs.downloader import normalize_title
 from views.music_controls import MusicControlView, SearchAutoplayView
@@ -104,12 +105,16 @@ class PlaybackMixin:
             logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
 
     def _stop_for_advance(self, voice_client):
-        """vc.stop() für absichtliche Wiedergabe-Wechsel (Skip, !now, !eq, !seek,
+        """Wiedergabe-Stopp für absichtliche Wechsel (Skip, !now, !eq, !seek,
         !stop, !clear, Auto-Leave). Setzt das One-Shot-Flag _suppress_resume,
         damit after_playing den Stopp nicht als vorzeitiges Dateiende einer
-        wachsenden Datei missdeutet und den Track wieder vorn einreiht."""
+        wachsenden Datei missdeutet und den Track wieder vorn einreiht.
+
+        Stoppt über utils.voice.stop_playback, nicht über vc.stop(): bei
+        aktiver Sprachsteuerung würde ein rohes stop() auch den Audio-Empfang
+        beenden."""
         self._suppress_resume = True
-        voice_client.stop()
+        stop_playback(voice_client)
 
     async def _resolve_track(self, url: str, title: str, force_download: bool = False):
         """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
@@ -724,7 +729,7 @@ class PlaybackMixin:
             return
         self._stop_radio()
         if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+            stop_playback(ctx.voice_client)
             try:
                 await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
             except asyncio.TimeoutError:
