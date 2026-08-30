@@ -831,7 +831,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
     async def eq(self, ctx, preset: str = None):
         """Setzt einen EQ-Preset oder listet verfügbare Presets auf."""
         if not preset:
-            presets = ", ".join(self.eq_presets.keys())
+            presets = ", ".join(f"**{name}**" if name == self.equalizer else name for name in self.eq_presets)
             await ctx.send(t("status.eq_presets", presets=presets))
             return
         if preset.lower() in self.eq_presets:
