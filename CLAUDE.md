@@ -42,3 +42,4 @@ Setup → `README.md` / `install.bat`, Cookies → `SETUP.md` (je auch `*_DE.md`
 - [`docs/architecture.md`](docs/architecture.md) — Playback-Flow, Cache, Autoplay, Radio, Security-Flags, DM-Bridge, Voice-Resilienz im Detail
 - [`docs/adr/`](docs/adr/README.md) — nummerierte Entscheidungen (das Warum)
 - [`docs/smoke-checklist.md`](docs/smoke-checklist.md) — manuelle End-to-End-Checkliste
+- [`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md) — Schritt-für-Schritt-Anleitung für den ersten Praxistest der Sprachsteuerung
