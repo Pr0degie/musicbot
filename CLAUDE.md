@@ -1,45 +1,45 @@
 # CLAUDE.md
 
-Setup → `README.md` / `install.bat`, Cookies → `SETUP.md` (je auch `*_DE.md`). Tests: `pytest` (suite in `tests/`, dev deps in `requirements-dev.txt`). Lint: `ruff check .` (nur E/F/W, line-length 140, Config in `pyproject.toml` — bewusst keine Stilregeln). Start: `start.bat` (Windows-Normalfall) bzw. `python main.py`.
+Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Tests `pytest` (dev deps
+`requirements-dev.txt`), Lint `ruff check .` (nur E/F/W, Config `pyproject.toml`). Start `start.bat` bzw.
+`python main.py`. **Zielplattform Windows nativ**, Linux/macOS bleibt lauffähig → [ADR 0003](docs/adr/0003-windows-native-zielplattform.md).
 
-**Zielplattform: Windows nativ** (Start via `start.bat`); Linux/macOS bleibt lauffähig → [ADR 0003](docs/adr/0003-windows-native-zielplattform.md).
+## Fehlersuche — zuerst das, nicht bot.log greppen
+
+1. `curl http://127.0.0.1:8765/debug` — Live-Zustand (Voice-Client lebt? `poller_dead`, Gateway-Stille, Track, Queue).
+2. `python tools/logsummary.py` — letzter Lauf als Zeitleiste; `bot.log.1` = vorheriger Lauf, `--list` alle.
+3. Hänger: `py-spy dump --pid <pid>`. Details → [logging.md](docs/architecture/logging.md) → *Fehlersuche*.
 
 ## Invarianten — niemals brechen
 
-- Queue speichert 2-Tupel `(url, title)`; `current_track` ist ein 3-Tupel `(url, title, duration_seconds)`. Beim Re-Add in die Queue (Loop-Mode, `!eq`-Restart, `!replay`) immer entpacken: `url, title, *_ = self.current_track`.
-- Keine nackten `unlink`/`os.remove` in `cogs/` — immer `utils/files.py` → `safe_unlink` → [ADR 0003](docs/adr/0003-windows-native-zielplattform.md).
-- Pro URL maximal ein schreibender Download; lebendig vs. Leiche entscheidet allein die `_inflight`-Registry, nie eine Datei-Heuristik. Eine wachsende progressive Datei nie unlinken/neu starten — den laufenden Task adoptieren. Registriert wird pro URL der **einzelne** Download-Task (nie ein Sammel-Task); ein Cancel des Aufrufers adoptiert einen bereits schreibenden Worker (Shield), deregistriert wird erst nach Thread-Ende → [ADR 0002](docs/adr/0002-inflight-registry.md).
-- `vc.stop()` auf Musik-Quellen nur via `_stop_for_advance()` (Radio-Quellen nicht) → [ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md).
-- Kein direktes `voice_client.stop()` mehr — jeder Wiedergabe-Stopp läuft über `utils/voice.py` → `stop_playback()`, weil `VoiceRecvClient.stop()` auch den Audio-Empfang beendet (ein `!s` würde sonst still die Sprachsteuerung abschalten). Erzwungen von `tests/test_no_raw_vc_stop.py` → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
-- Gesprochene Befehle laufen **ausschließlich** durch `VoiceListen.handle_text()` — ein Parser, zwei Eingänge (`POST /command` vom DM-Bot und eigenes Zuhören). Sitzt der DM-Bot im Voice-Channel, läuft **kein** eigenes Sprachmodell. Ausgeführt wird über eine synthetische Message, nie über `ctx.invoke`, damit alle Checks mitlaufen; `ctx.author` muss ein echtes `Member` sein (nur daran hängt `.voice`) → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
-- In `after_playing` läuft der Retry-/Resume-Marker-Reset **nach** dem Progressive-Resume-Block (sonst griffe dessen Kappe nie) → [architecture.md](docs/architecture.md) → *Race-Schutz & Stream-Retry*.
-- Track-Zustand komplett **vor** `vc.play()` setzen; nach jedem Post-Play-await `_track_generation` prüfen, sonst überschreiben späte Zuweisungen den Cleanup → [ADR 0007](docs/adr/0007-track-zustand-vor-play-generationszaehler.md).
-- Wachsende Dateien immer transkodieren, nie `codec=copy` → [ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md).
-- Now-Playing-Karte (Embed + Buttons) nur beim aktuellen Song: jede hinterlassene Nachricht über `_retire_np_message` zur Textzeile `🎶 Titel` zurückbauen, nie leer editieren (Discord lehnt eine Nachricht ohne Text/Embed/Anhang mit 400 ab → Karte bliebe still stehen) → [architecture.md](docs/architecture.md) → *Music Playback Flow*.
-- `StaleControlsFallback`: discord.py dispatcht Dynamic Items **zusätzlich** zu Live-Views — die Abgrenzung kommt allein aus dem Template-Regex (negative lookahead auf BOOT_ID), nie die Reihenfolge ändern → [ADR 0006](docs/adr/0006-stale-buttons-dynamicitem.md).
-- Neue `t()`-Keys immer in **beiden** `locales/*.json` anlegen — `tests/test_i18n_keys.py` erzwingt Key- und Platzhalter-Parität.
-- `config.py` ruft nie `logging.basicConfig()` — das deaktiviert still den File-Handler; `logger` aus `utils.logger` importieren. `bot.log` bekommt **immer** die volle Diagnose — Terminal-Modi (`LOG_MODE`/`!debug`) filtern nur den Console-Handler via `set_console_mode()`, und zwar über den `[Tag]` am Zeilenanfang (`_ESSENTIAL_TAGS`/`_QUIET_TAGS`), nie über das Handler-Level — neue INFO-Tags müssen in genau eine der beiden Listen → [architecture.md](docs/architecture.md) → *Logging*.
-- Security-Flags in `config.py` defaulten auf Altverhalten, der Owner bleibt immer durchgelassen → [ADR 0004](docs/adr/0004-security-flags-default-altverhalten.md).
-- Kein blockierendes File-I/O im Event-Loop; wiederkehrende Writes nur gedebounct → [ADR 0005](docs/adr/0005-persistenz-debouncing.md). Das gilt auch für die GPU: Modell-Laden und Transkription laufen ausnahmslos über `asyncio.to_thread`.
-- Verbindungsaufbau nur über `utils/voice.py` → `connect_voice()`; die Empfangs-Client-Klasse lässt sich nur beim `connect()` setzen, nicht nachrüsten → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
-- yt_dlp ist nicht thread-safe — Prefetch-Downloads laufen sequenziell, nie parallel (gesichert durch das Lock in `_prefetch_one`, nicht durch Task-Reihenfolge — auch adoptierte Worker zählen) → [architecture.md](docs/architecture.md) → *Music Playback Flow*.
-- yt_dlp läuft cookielos; Cookies kommen erst, wenn YouTube sie verlangt (eine angemeldete Session bekommt Werbung → 5–6 s Zwangspause vor dem ersten Byte). Extraktionen daher immer über `dl.extract_info_async(query, kind)`, nie direkt auf einer yt_dlp-Instanz → [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md).
+- Queue = 2-Tupel `(url, title)`, `current_track` = 3-Tupel; beim Re-Add `url, title, *_ = self.current_track`.
+- Kein nacktes `unlink`/`os.remove` in `cogs/` → `utils/files.safe_unlink` ([ADR 0003](docs/adr/0003-windows-native-zielplattform.md)).
+- Pro URL ein schreibender Download; lebendig/tot entscheidet nur die `_inflight`-Registry (Einzel-Task, Shield,
+  Deregistrierung nach Thread-Ende), wachsende Datei nie unlinken → [ADR 0002](docs/adr/0002-inflight-registry.md).
+- Musik-`vc.stop()` nur via `_stop_for_advance()` ([ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md));
+  jeder Wiedergabe-Stopp über `utils/voice.stop_playback()` (erzwingt `tests/test_no_raw_vc_stop.py`).
+- Verbindungsaufbau nur über `utils/voice.connect_voice()` (Klasse nur beim connect setzbar; liefert
+  `SafeVoiceRecvClient`, fixt den voice_recv-Crash beim Channel-Verlassen) → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
+- Gesprochene Befehle nur durch `VoiceListen.handle_text()`; synthetische Message statt `ctx.invoke`, `ctx.author`
+  echtes `Member`; DM-Bot im Channel → kein eigenes Sprachmodell → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
+- `after_playing`: Marker-Reset **nach** dem Progressive-Resume-Block → [playback.md](docs/architecture/playback.md).
+- Track-Zustand komplett vor `vc.play()`, nach jedem Post-Play-await `_track_generation` prüfen → [ADR 0007](docs/adr/0007-track-zustand-vor-play-generationszaehler.md).
+- Wachsende Dateien transkodieren, nie `codec=copy` → [ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md).
+- Now-Playing-Karte nur beim aktuellen Song; Altes via `_retire_np_message` zur Textzeile, nie leer editieren → [playback.md](docs/architecture/playback.md).
+- `StaleControlsFallback`: Abgrenzung nur über den Template-Regex (BOOT_ID-Lookahead) → [ADR 0006](docs/adr/0006-stale-buttons-dynamicitem.md).
+- Neue `t()`-Keys in **beiden** `locales/*.json` (erzwingt `tests/test_i18n_keys.py`).
+- Logging: nie `logging.basicConfig()`; `logger` aus `utils.logger`; `bot.log` immer vollständig, Terminal filtert
+  per `[Tag]` — neuer INFO-Tag in genau eine von `_ESSENTIAL_TAGS`/`_QUIET_TAGS` → [logging.md](docs/architecture/logging.md).
+- Security-Flags defaulten auf Altverhalten, Owner immer durch → [ADR 0004](docs/adr/0004-security-flags-default-altverhalten.md).
+- Kein blockierendes I/O im Event-Loop (auch GPU: `asyncio.to_thread`), wiederkehrende Writes gedebounct → [ADR 0005](docs/adr/0005-persistenz-debouncing.md).
+- yt_dlp nicht thread-safe: Prefetch sequenziell, gesichert durch das Lock in `_prefetch_one` → [playback.md](docs/architecture/playback.md).
+- yt_dlp cookielos zuerst; Extraktion nur über `dl.extract_info_async(query, kind)` → [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md).
 
-## Architektur-Landkarte
+## Landkarte
 
-- `cogs/basic.py` — `!j`/`!l`/`!ping`/`!echo`/`!help` (→ `views/help_view.py`) + `!restart` + `!debug` (Terminal-Modi)
-- `cogs/music.py` — `MusicCommands`-Kern (Queue, EQ, Autoplay, `!lyrics`, `!format`, Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/`_classify_ffmpeg_error`/`_progress_bar`); Mixins: `music_playback.py` (`PlaybackMixin`: `play_next`-Orchestrator + `_handle_queue_empty`/`_build_audio_source`/`_make_after_playing`/`_snapshot_track_state`, Prefetch, Such-/Resolve-Flow → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md)), `music_voice_ui.py` (`VoiceLifecycleMixin` Join/Leave/Idle/Watchdog, `PlaybackUiMixin` Fortschrittsbalken + `_retire_np_message`), `music_radio.py` (Radio), `music_stats.py` (`!score`/`!stats`), `music_queue_io.py` (`!saveq`/`!loadq`/`!loadq last`/`!lists`)
-- `cogs/downloader.py` — alles yt_dlp: fünf Instanzen (`extract_info_async` löst sie per `kind` auf), Cookie-Modus (`enable_cookie_mode`), `_url_cache`, `resolve_track()`, Prefetch (`prime_first_hit` für den Sofortstart), In-Flight-Registry, `DOWNLOAD_DIR`, yt-dlp-Update-Check gegen PyPI
-- `cogs/dm_bridge.py` — HTTP-Server, über den "Bot B" (KI-Dungeon-Master) diesen Bot sprechen lässt; `!dm` zeigt den Status. Speak blockiert bewusst ohne Callback → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md)
-- `cogs/voice_listen.py` — `VoiceListen`: Sprachsteuerung („yo bot, spiel mal …"). `handle_text()` ist der gemeinsame Eingang beider Quellen, `!listen on|off` der Schalter (Default aus) → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md)
-- `cogs/voice_sink.py` — `SpeechSink`: die einzige Datei mit `voice_recv`-Import auf Modulebene (erst beim Einschalten geladen)
-- `cogs/presets.py` — EQ-Filterketten (`EQ_PRESETS`) + FFmpeg-Filter-Notizen
-- `views/music_controls.py` — Playback-Buttons + Stale-Buttons-Fallback; `views/queue_view.py` — paginierte Queue; `views/help_view.py` — `!help`
-- `utils/` — `logger`, `files.safe_unlink`, `checks`, `url_check`, `text` (`normalize_title`/`parse_time`/`progress_bar`), `ffmpeg` (zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`, in `music.py` via Klassen-Aliase gespiegelt), `i18n.t`, `shutdown.install_sigint_handler` (zweistufiges Strg+C), `voice` (`stop_playback`/`connect_voice`/`voice_client_cls`), `nl_parser` (Weckwort + Intent-Tabelle), `pcm` (48k-Stereo → 16k-Mono für Whisper), `speech_buffer` (Segmentierung pro Sprecher), `stt` (faster-whisper-Grenze)
-
-## Doku
-
-- [`docs/architecture.md`](docs/architecture.md) — Playback-Flow, Cache, Autoplay, Radio, Security-Flags, DM-Bridge, Voice-Resilienz im Detail
-- [`docs/adr/`](docs/adr/README.md) — nummerierte Entscheidungen (das Warum)
-- [`docs/smoke-checklist.md`](docs/smoke-checklist.md) — manuelle End-to-End-Checkliste
-- [`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md) — Schritt-für-Schritt-Anleitung für den ersten Praxistest der Sprachsteuerung
+Modul-Übersicht und Themen-Dateien → [`docs/architecture.md`](docs/architecture.md) (Index), Entscheidungen →
+[`docs/adr/`](docs/adr/README.md), manuelle Tests → [`docs/smoke-checklist.md`](docs/smoke-checklist.md),
+[`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md). Größte Dateien: `cogs/downloader.py`
+(yt_dlp, Cache, Prefetch, In-Flight), `cogs/music.py` + Mixins `music_playback.py` / `music_voice_ui.py`
+(Voice-Lifecycle, Reparatur, Watchdog) / `music_radio.py` / `music_stats.py` / `music_queue_io.py` → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md).
+`cogs/dm_bridge.py` = HTTP-Server für den DM-Bot (`/speak`, `/command`, `/health`, `/debug`) → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md).

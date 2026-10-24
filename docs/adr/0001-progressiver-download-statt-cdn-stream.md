@@ -5,7 +5,7 @@
 
 ## Kontext
 
-YouTube-CDN lehnt FFmpegs HTTP-Client oft mit 403 ab (auch mit frischer URL + `http_headers`) — yt_dlps eigener Client nie. Die zuvor gebaute Stream-Retry-Kaskade (ein Retry mit frischer URL, danach ein letzter Anlauf als lokaler Download — Details in `docs/architecture.md` → *Race-Schutz & Stream-Retry*) ist dadurch heute nur noch Fallback.
+YouTube-CDN lehnt FFmpegs HTTP-Client oft mit 403 ab (auch mit frischer URL + `http_headers`) — yt_dlps eigener Client nie. Die zuvor gebaute Stream-Retry-Kaskade (ein Retry mit frischer URL, danach ein letzter Anlauf als lokaler Download — Details in `docs/architecture/playback.md` → *Race-Schutz & Stream-Retry*) ist dadurch heute nur noch Fallback.
 
 ## Entscheidung
 

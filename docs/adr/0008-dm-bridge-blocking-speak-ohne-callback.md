@@ -15,4 +15,4 @@ Ein separater „Bot B" (AI dungeon master) soll diesen Bot über HTTP sprechen 
 ## Konsequenzen
 
 - The `bot.dm_speaking` flag tells the music cog it doesn't own the voice client right now: `play_next()` checks it and exits early so the `after_playing` callback can't restart music mid-DM-speech.
-- Transportmodi, Auth und Endpoints → `docs/architecture.md` → *DM-Bridge*.
+- Transportmodi, Auth und Endpoints → `docs/architecture.md` → *Cogs & Module* (`cogs/dm_bridge.py`).

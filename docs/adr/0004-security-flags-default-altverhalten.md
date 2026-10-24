@@ -13,7 +13,7 @@ Alle einschränkenden Änderungen hängen an `.env`-Flags, deren **Default das a
 
 **Owner-Garantie:** `is_owner()` gewinnt in beiden Checks (`require_same_voice()`, `check_admin()`) immer — der Owner kann sich durch keine Flag-Kombination aussperren.
 
-Die einzelnen Flags (`URL_VALIDATION`, `REQUIRE_SAME_VOICE`, `ADMIN_ROLE_ID`) und die flaglose `!loadq`-Validierung → `docs/architecture.md` → *Security*.
+Die einzelnen Flags (`URL_VALIDATION`, `REQUIRE_SAME_VOICE`, `ADMIN_ROLE_ID`) und die flaglose `!loadq`-Validierung → `docs/architecture/security.md`.
 
 ## Konsequenzen
 
