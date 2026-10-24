@@ -15,7 +15,7 @@ pre-download) if needed. Der aufgelöste Kandidat erscheint in `!q` als Vorschau
 Reference track: `current_track` → `last_played`. Autoplay stays on until button pressed again — not one-shot.
 
 Die Kandidatenauswahl (nur Videos, `is_seen`-Filter, Fallback-Kaskade, gewichtete Wahl) lebt einmal als
-Modul-Funktionen in `downloader.py` (`entry_url`, `is_video`, `is_seen`, `select_autoplay_candidates`,
+Modul-Funktionen in `utils/autoplay.py` (`entry_url`, `is_video`, `is_seen`, `select_autoplay_candidates`,
 `choose_autoplay_candidate`) und wird von beiden Pfaden genutzt — `MusicCommands.autoplay()` (Sofort-Pfad) und
 `Downloader.prefetch_autoplay()` (Hintergrund-Pfad). Kaskadenstufe 2 (alles gesehen) schließt neben der
 Video-ID des Referenz-Tracks auch dessen **Varianten** aus — sonst hebelte die Kaskade den Varianten-Filter

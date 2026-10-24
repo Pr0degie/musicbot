@@ -51,6 +51,8 @@ Four cogs loaded at startup, all responses in German.
   `_classify_ffmpeg_error`/`_progress_bar`, damit bestehende Aufrufer und Tests unverändert bleiben.
 - **`utils/voice.py`** — `stop_playback`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,
   `SafeVoiceRecvClient`), `dead_voice_poller`; **`utils/diagnostics.py`** — `snapshot()` für `GET /debug`.
+- **`utils/autoplay.py`** — zustandslose Autoplay-Kandidatenauswahl (→ [autoplay-radio.md](architecture/autoplay-radio.md));
+  **`utils/ytdlp_update.py`** — `check_ytdlp_update()`, einmaliger PyPI-Vergleich nach `on_ready`.
 - **`utils/shutdown.py`** — `install_sigint_handler(bot)`, in `main.py` vor `bot.run()` registriert: Strg+C im
   Terminal ist zweistufig. 1× fragt nur nach (Fenster `CONFIRM_WINDOW` = 5 s, danach meldet ein
   `loop.call_later`-Timer „Abbruch“ und entschärft), 2× fährt geordnet über `bot.close()` herunter (entlädt

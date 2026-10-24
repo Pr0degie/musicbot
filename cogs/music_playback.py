@@ -34,7 +34,7 @@ import discord
 from utils.logger import logger
 from utils.voice import stop_playback
 from utils.i18n import t
-from cogs.downloader import normalize_title
+from utils.text import normalize_title
 from views.music_controls import MusicControlView, SearchAutoplayView
 
 # Max. Seek-Resumes pro Track, wenn FFmpeg die wachsende Datei eines progressiven

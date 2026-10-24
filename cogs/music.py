@@ -21,10 +21,8 @@ from utils.checks import require_same_voice, require_admin
 from utils.ffmpeg import ffmpeg_header_opts, stderr_tail, classify_ffmpeg_error
 from utils.text import parse_time, progress_bar
 from discord.ext import commands, tasks
-from cogs.downloader import (
-    Downloader, choose_autoplay_candidate, entry_url,
-    select_autoplay_candidates, yt_video_id,
-)
+from cogs.downloader import Downloader
+from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
 from cogs.presets import EQ_PRESETS
 from cogs.music_radio import RadioMixin
 from cogs.music_stats import StatsMixin

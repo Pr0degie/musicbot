@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from utils import logger as ulog
-from cogs.downloader import _version_tuple
+from utils.ytdlp_update import _version_tuple
 
 _ROOT = Path(__file__).resolve().parent.parent
 

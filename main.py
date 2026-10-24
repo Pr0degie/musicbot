@@ -62,7 +62,7 @@ class MusicBot(commands.Bot):
         # als Hintergrund-Task – nur ein Log-Hinweis, kein Auto-Update.
         if not getattr(self, "_ytdlp_check_started", False):
             self._ytdlp_check_started = True
-            from cogs.downloader import check_ytdlp_update
+            from utils.ytdlp_update import check_ytdlp_update
 
             asyncio.create_task(check_ytdlp_update())
 
