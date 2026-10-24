@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import yt_dlp
@@ -69,6 +70,24 @@ PERSISTED_CACHE_FIELDS = (
     "title", "ext", "duration", "url", "webpage_url",
     "thumbnail", "uploader", "http_headers",
 )
+
+
+@dataclass
+class _Resolution:
+    """Zwischenstand eines resolve_track-Aufrufs, von Phase zu Phase gereicht."""
+    url: str
+    info: dict
+    filename: Path | None = None
+    force_download: bool = False
+    min_buffer_seconds: int = 0
+
+    @property
+    def title(self):
+        return self.info.get("title", "Unbekannter Titel")
+
+    @property
+    def duration(self):
+        return self.info.get("duration", 0)
 
 
 class Downloader:
@@ -838,7 +857,36 @@ class Downloader:
         Tracks über STREAM_THRESHOLD_SECONDS bleiben trotzdem Streams.
         Returns: (info, filename, title, duration)
         Raises asyncio.TimeoutError wenn extract_info > 30 s dauert.
+
+        Vier Phasen, jede liefert ein Ergebnis oder reicht weiter:
+        _resolve_metadata → _adopt_inflight → _clear_corpse → _acquire_file.
         """
+        r = await self._resolve_metadata(url, title)
+        if r.filename is None:
+            # Langer Track → direkt streamen, kein lokaler Download nötig
+            return self._stream_result(r, f"[Stream] {r.title} ({r.duration//60} min) wird gestreamt – kein Download")
+        r.force_download, r.min_buffer_seconds = force_download, min_buffer_seconds
+        result = await self._adopt_inflight(r)
+        if result is None:
+            result = self._clear_corpse(r)
+        if result is None:
+            result = await self._acquire_file(r)
+        return result
+
+    def _stream_result(self, r, message):
+        """Ergebnis "als CDN-Stream spielen" – die aktive Quelle ist dann keine Datei."""
+        logger.info(message)
+        self.last_resolved_file = None
+        return r.info, r.info.get("url") or r.url, r.title, r.duration
+
+    def _file_result(self, r):
+        self.last_resolved_file = r.filename
+        return r.info, r.filename, r.title, r.duration
+
+    async def _resolve_metadata(self, url, title):
+        """Phase 1: Metadaten (Cache, laufender Prefetch-Resolve oder frisch)
+        und Zieldatei. filename bleibt None für Tracks über
+        STREAM_THRESHOLD_SECONDS."""
         if url in self._url_cache:
             info = self._url_cache[url]
             logger.info(f"[Resolve] Metadaten aus Cache: {title}")
@@ -855,48 +903,41 @@ class Downloader:
             else:
                 info = await self._fetch_info(url)
 
-        title = info.get("title", "Unbekannter Titel")
-        duration = info.get("duration", 0)
-
-        if duration > STREAM_THRESHOLD_SECONDS:
-            # Langer Track → direkt streamen, kein lokaler Download nötig
-            audio_url = info.get("url") or url
-            logger.info(f"[Stream] {title} ({duration//60} min) wird gestreamt – kein Download")
-            self.last_resolved_file = None  # aktive Quelle ist ein Stream, keine Datei
-            return info, audio_url, title, duration
-
+        r = _Resolution(url, info)
+        if r.duration > STREAM_THRESHOLD_SECONDS:
+            return r
         try:
-            filename = Path(self.ydl.prepare_filename(info))
+            r.filename = Path(self.ydl.prepare_filename(info))
             # Sofort als tabu markieren (nicht erst beim Return): der Song ist
             # bereits aus der Queue gepoppt und damit nicht mehr über den
             # protected_provider geschützt – ein parallel fertig werdender
             # Prefetch könnte sonst per Cleanup genau diese Datei löschen.
-            self.last_resolved_file = filename
+            self.last_resolved_file = r.filename
         except Exception as e:
             # Fallback-Garantie: Ein aus der Datei geladener reduzierter (oder
             # sonst kaputter) Cache-Eintrag darf nie zum Fehler beim User werden.
             # Eintrag verwerfen und frisch extrahieren – exakt der Kaltstart-Pfad.
-            logger.warning(f"[Cache] Eintrag für {title!r} unbrauchbar ({type(e).__name__}: {e}) – verworfen, extrahiere frisch")
+            logger.warning(f"[Cache] Eintrag für {r.title!r} unbrauchbar ({type(e).__name__}: {e}) – verworfen, extrahiere frisch")
             self.invalidate(url)
-            info = await self._fetch_info(url)
-            title = info.get("title", "Unbekannter Titel")
-            duration = info.get("duration", 0)
-            if duration > STREAM_THRESHOLD_SECONDS:
-                audio_url = info.get("url") or url
-                logger.info(f"[Stream] {title} ({duration//60} min) wird gestreamt – kein Download")
-                self.last_resolved_file = None
-                return info, audio_url, title, duration
-            filename = Path(self.ydl.prepare_filename(info))
-            self.last_resolved_file = filename
+            r = _Resolution(url, await self._fetch_info(url))
+            if r.duration > STREAM_THRESHOLD_SECONDS:
+                return r
+            r.filename = Path(self.ydl.prepare_filename(r.info))
+            self.last_resolved_file = r.filename
+        return r
 
-        # In-Flight-Registry zuerst: schreibt bereits irgendein Pfad Bytes für
-        # diese URL? Lebendig vs. Leiche entscheidet NUR die Registry (bzw.
-        # _progressive), nie eine Datei-Heuristik.
-        # a) progressiv (Loop-Mode, !replay, !eq-Restart re-queuen den aktuellen
-        #    Track) → adoptieren: am laufenden Task/der wachsenden Datei
-        #    teilnehmen statt sie als fertig oder als Leiche zu missdeuten.
-        # b) Queue-/Autoplay-Prefetch o. Ä. → Task abwarten, danach normaler
-        #    Datei-Check.
+    async def _adopt_inflight(self, r):
+        """Phase 2: In-Flight-Registry zuerst – schreibt bereits irgendein Pfad
+        Bytes für diese URL? Lebendig vs. Leiche entscheidet NUR die Registry
+        (bzw. _progressive), nie eine Datei-Heuristik.
+
+        a) progressiv (Loop-Mode, !replay, !eq-Restart re-queuen den aktuellen
+           Track) → adoptieren: am laufenden Task/der wachsenden Datei
+           teilnehmen statt sie als fertig oder als Leiche zu missdeuten.
+        b) Queue-/Autoplay-Prefetch o. Ä. → Task abwarten, danach normaler
+           Datei-Check. None = weiter mit der nächsten Phase.
+        """
+        url, title, filename = r.url, r.title, r.filename
         prog_task = self.progressive_task_for(url)
         entry = None if prog_task is not None else self.inflight_download(url)
         if entry is not None:
@@ -909,12 +950,11 @@ class Downloader:
                 except Exception:
                     pass  # gescheitert → unten normaler Datei-Check, ggf. selbst laden
         if prog_task is not None:
-            if await self._wait_for_buffer(filename, prog_task, min_buffer_seconds):
+            if await self._wait_for_buffer(filename, prog_task, r.min_buffer_seconds):
                 logger.info(f"[Progressiv] Laufenden Download adoptiert: {title}")
-                self.last_resolved_file = filename
-                return info, filename, title, duration
+                return self._file_result(r)
             if not prog_task.done():
-                if force_download:
+                if r.force_download:
                     # Letzter Anlauf nach zwei toten Streams: der lebende Task
                     # IST der Download – zu Ende warten, Datei-Check unten.
                     try:
@@ -925,16 +965,17 @@ class Downloader:
                     # Task lebt, puffert nur zu langsam → Stream-Fallback; der
                     # Download läuft weiter und wird Cache. KEIN unlink, kein
                     # Neustart: die wachsende Datei ist keine Leiche.
-                    audio_url = info.get("url") or url
-                    logger.info(f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
-                    self.last_resolved_file = None
-                    return info, audio_url, title, duration
+                    return self._stream_result(
+                        r, f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
             # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln
             # (Aufräumen hat _run_progressive selbst erledigt).
+        return None
 
-        # Leiche eines früheren Fehlschlags (unlink scheiterte, weil FFmpeg die
-        # Datei noch offen hatte): existiert, ist aber unvollständig, und die
-        # Registry kennt keinen lebenden Task mehr → wegräumen.
+    def _clear_corpse(self, r):
+        """Phase 3: Leiche eines früheren Fehlschlags (unlink scheiterte, weil
+        FFmpeg die Datei noch offen hatte): existiert, ist aber unvollständig,
+        und die Registry kennt keinen lebenden Task mehr → wegräumen."""
+        filename = r.filename
         if filename.exists() and self.is_incomplete(filename):
             _resolved = filename.resolve()
             if safe_unlink(filename):
@@ -943,11 +984,14 @@ class Downloader:
             else:
                 # Datei blockiert → als Stream ausweichen; der nächste Bot-Start
                 # räumt sie via _purge_stale_progressive weg.
-                audio_url = info.get("url") or url
-                logger.info(f"[Stream] Unvollständige Datei blockiert – starte als Stream: {title}")
-                self.last_resolved_file = None
-                return info, audio_url, title, duration
+                return self._stream_result(
+                    r, f"[Stream] Unvollständige Datei blockiert – starte als Stream: {r.title}")
+        return None
 
+    async def _acquire_file(self, r):
+        """Phase 4: vorhandene Datei nehmen, sonst letzter Anlauf
+        (force_download), progressiver Download oder CDN-Stream."""
+        url, info, title, filename, force_download = r.url, r.info, r.title, r.filename, r.force_download
         if not filename.exists():
             if force_download:
                 # Läuft (noch/inzwischen) ein lebender Download für die URL,
@@ -982,7 +1026,7 @@ class Downloader:
                 if not force_download and self._may_start_progressive(url, info):
                     _t0 = time.monotonic()
                     task = self._start_progressive(url, info, filename, title)
-                    if await self._wait_for_buffer(filename, task, min_buffer_seconds):
+                    if await self._wait_for_buffer(filename, task, r.min_buffer_seconds):
                         try:
                             _kb = filename.stat().st_size // 1024
                         except OSError:
@@ -991,8 +1035,7 @@ class Downloader:
                             f"[Progressiv] Puffer erreicht ({_kb} KB nach {time.monotonic() - _t0:.1f}s) "
                             f"– Wiedergabe startet: {title}"
                         )
-                        self.last_resolved_file = filename
-                        return info, filename, title, duration
+                        return self._file_result(r)
                     # Task NICHT canceln: bei bloßem Timeout darf er fertigladen
                     # (Datei wird Cache); war er gescheitert, hat _run_progressive
                     # bereits aufgeräumt.
@@ -1005,16 +1048,14 @@ class Downloader:
                             f"– Fallback auf CDN-Stream: {title}"
                         )
                 # Fallback: direkter CDN-Stream (früherer Primärpfad).
-                audio_url = info.get("url") or url
-                logger.info(f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
-                self.last_resolved_file = None
-                return info, audio_url, title, duration
+                return self._stream_result(r, f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
             else:
                 logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
         else:
             logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
 
-        return info, filename, title, duration
+        # Bewusst ohne erneutes last_resolved_file: das setzte schon Phase 1.
+        return r.info, r.filename, r.title, r.duration
 
     async def prefetch_next(self, queue, idx: int = 0):
         """Lädt Song an Position idx der Queue still im Hintergrund herunter.
