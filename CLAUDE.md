@@ -15,7 +15,7 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 - Queue = 2-Tupel `(url, title)`, `current_track` = 3-Tupel; beim Re-Add `url, title, *_ = self.current_track`.
 - Kein nacktes `unlink`/`os.remove` in `cogs/` → `utils/files.safe_unlink` ([ADR 0003](docs/adr/0003-windows-native-zielplattform.md)).
 - Pro URL ein schreibender Download; lebendig/tot entscheidet nur die `_inflight`-Registry (Einzel-Task, Shield,
-  Deregistrierung nach Thread-Ende), wachsende Datei nie unlinken → [ADR 0002](docs/adr/0002-inflight-registry.md).
+  Deregistrierung nach Thread-Ende, `cogs/downloader_progressive.py`), wachsende Datei nie unlinken → [ADR 0002](docs/adr/0002-inflight-registry.md).
 - Musik-`vc.stop()` nur via `_stop_for_advance()` ([ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md));
   jeder Wiedergabe-Stopp über `utils/voice.stop_playback()` (erzwingt `tests/test_no_raw_vc_stop.py`).
 - Verbindungsaufbau nur über `utils/voice.connect_voice()` (Klasse nur beim connect setzbar; liefert
@@ -40,6 +40,7 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 Modul-Übersicht und Themen-Dateien → [`docs/architecture.md`](docs/architecture.md) (Index), Entscheidungen →
 [`docs/adr/`](docs/adr/README.md), manuelle Tests → [`docs/smoke-checklist.md`](docs/smoke-checklist.md),
 [`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md). Größte Dateien: `cogs/downloader.py`
-(yt_dlp, Cache, Prefetch, In-Flight), `cogs/music.py` + Mixins `music_playback.py` / `music_voice_ui.py`
+(yt_dlp, Cache, `resolve_track`-Phasen, Prefetch) + Mixin `downloader_progressive.py` (In-Flight-Registry,
+progressiver Download), `cogs/music.py` + Mixins `music_playback.py` / `music_voice_ui.py`
 (Voice-Lifecycle, Reparatur, Watchdog) / `music_radio.py` / `music_stats.py` / `music_queue_io.py` → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md).
 `cogs/dm_bridge.py` = HTTP-Server für den DM-Bot (`/speak`, `/command`, `/health`, `/debug`) → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md).

@@ -34,8 +34,13 @@ Four cogs loaded at startup, all responses in German.
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!lists`, `PLAYLISTS_DIR`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
   `playlist_ydl`, `autoplay_ydl` — all via `self.dl.*`), `_url_cache`, `resolve_track()`, `prefetch_next()`,
-  `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`. Invariante „pro URL maximal ein schreibender Download"
-  mit In-Flight-Registry `_inflight` → [ADR 0002](adr/0002-inflight-registry.md).
+  `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`. `resolve_track()` läuft in vier Phasen:
+  `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`.
+- **`cogs/downloader_progressive.py`** — `ProgressiveDownloadMixin` (Basis von `Downloader`): In-Flight-Registry
+  `_inflight` („pro URL maximal ein schreibender Download" → [ADR 0002](adr/0002-inflight-registry.md)),
+  progressiver Download (`_start_progressive`, `_run_progressive`, `_wait_for_buffer`, `prime_first_hit`) und
+  die Konstanten `STREAM_THRESHOLD_SECONDS`/`PROGRESSIVE_*` (von `downloader.py` re-exportiert). Zustand in
+  `Downloader.__init__`; `_purge_stale_progressive` bleibt im Downloader (braucht `DOWNLOAD_DIR`).
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET`
   in `config.py`) so a separate "Bot B" (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
   empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for

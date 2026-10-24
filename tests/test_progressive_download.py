@@ -154,7 +154,7 @@ def test_buffer_timeout_falls_back_to_stream_without_cancel(tmp_path, monkeypatc
     """Download schreibt zu langsam → Stream-Fallback; der Task läuft weiter
     (Datei darf im Hintergrund fertig werden und wird Cache)."""
     monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
-    monkeypatch.setattr(dlmod, "PROGRESSIVE_WAIT_TIMEOUT", 0.2)
+    monkeypatch.setattr("cogs.downloader_progressive.PROGRESSIVE_WAIT_TIMEOUT", 0.2)
     target = tmp_path / "zaeh.webm"
     dl = make_dl(short_info(), target,
                  WriterYdl(target, write_bytes=PROGRESSIVE_MIN_BYTES + 1024, linger=0.0))
