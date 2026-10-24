@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import sys
 
@@ -122,7 +123,10 @@ _console = logging.StreamHandler(sys.stdout)
 _console.setFormatter(_ColorFormatter())
 
 # Datei: plain, vollständig – bleibt maschinenlesbar und frei von ANSI-Codes
-_file = logging.FileHandler("bot.log", encoding="utf-8")
+# MUSICBOT_LOG_FILE: nur für die Testsuite (tests/conftest.py) – sonst landen
+# Testsongs, Fake-Channels und simulierte Fehler im echten bot.log und
+# verfälschen jede spätere Fehlersuche.
+_file = logging.FileHandler(os.environ.get("MUSICBOT_LOG_FILE", "bot.log"), encoding="utf-8")
 _file.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
 # Root-Logger mit beiden Handlern

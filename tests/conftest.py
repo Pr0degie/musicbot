@@ -7,13 +7,25 @@ Methoden tatsächlich berühren. Die Tests dokumentieren das IST-Verhalten
 """
 
 import asyncio
+import os
+import tempfile
 import types
 from collections import deque
 
-import pytest
+# Muss vor dem ersten Import von utils.logger stehen (kommt über cogs.music
+# unten): Tests schreiben sonst ins echte bot.log. Ein Lauf überschreibt das
+# Test-Log des vorigen – zum Nachsehen bei roten Tests reicht der letzte.
+TEST_LOG_FILE = os.path.join(tempfile.gettempdir(), "musicbot-tests.log")
+try:
+    os.remove(TEST_LOG_FILE)
+except OSError:
+    pass
+os.environ["MUSICBOT_LOG_FILE"] = TEST_LOG_FILE
 
-from cogs.music import MusicCommands
-from cogs.presets import EQ_PRESETS
+import pytest  # noqa: E402 – erst nach MUSICBOT_LOG_FILE
+
+from cogs.music import MusicCommands  # noqa: E402
+from cogs.presets import EQ_PRESETS  # noqa: E402
 
 
 class FakeMessage:

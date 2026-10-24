@@ -143,3 +143,13 @@ def test_version_tuple_for_update_check():
     assert _version_tuple("2026.7.15") < _version_tuple("2026.10.1")
     assert _version_tuple("kaputt.version") is None
     assert _version_tuple(None) is None
+
+
+def test_tests_schreiben_nicht_ins_echte_bot_log():
+    """Sonst stehen Testsongs und simulierte Fehler zwischen echten Vorfällen."""
+    import os
+
+    from tests.conftest import TEST_LOG_FILE
+
+    assert os.path.abspath(ulog._file.baseFilename) == os.path.abspath(TEST_LOG_FILE)
+    assert os.path.basename(ulog._file.baseFilename) != "bot.log"
