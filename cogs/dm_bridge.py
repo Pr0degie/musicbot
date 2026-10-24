@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils.diagnostics import snapshot
 from utils.files import safe_unlink
 from utils.logger import logger
 from utils.voice import stop_playback
@@ -62,11 +63,14 @@ class DMBridge(commands.Cog):
                 logger.info(f"[DMBridge] Alte Temp-WAV entfernt: {stale.name}")
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/debug", self._handle_debug)
         app.router.add_post("/speak", self._handle_speak)
         if config.VOICE_CONTROL:
             app.router.add_post("/command", self._handle_command)
             logger.info("[DMBridge] /command aktiv – Sprachbefehle von Bot B.")
-        self._runner = web.AppRunner(app)
+        # access_log=None: sonst landet jeder /health- und /debug-Abruf als
+        # aiohttp.access-Zeile in bot.log.
+        self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         site = web.TCPSite(self._runner, DM_BRIDGE_HOST, DM_BRIDGE_PORT)
         await site.start()
@@ -81,6 +85,16 @@ class DMBridge(commands.Cog):
 
     async def _handle_health(self, request):
         return web.json_response({"status": "ok", "bot": str(self.bot.user)})
+
+    async def _handle_debug(self, request):
+        """Zustands-Schnappschuss für die Fehlersuche (utils/diagnostics.py).
+
+        Nur von dieser Maschine – auch mit Secret nicht von außen: der
+        Schnappschuss nennt Channel, Queue und Bot-Interna.
+        """
+        if not _peer_is_loopback(request):
+            return web.json_response({"error": "forbidden"}, status=403)
+        return web.json_response(snapshot(self.bot), dumps=lambda o: json.dumps(o, ensure_ascii=False, indent=1))
 
     async def _handle_command(self, request):
         """Nimmt einen von Bot B transkribierten Satz entgegen ("yo bot, spiel ...").
