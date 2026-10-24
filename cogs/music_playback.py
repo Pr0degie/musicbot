@@ -278,24 +278,7 @@ class PlaybackMixin:
                         # Track ist während des awaits gestorben, der Cleanup lief schon –
                         # keinen Zustand des toten Durchlaufs mehr anfassen.
                         return
-                duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
-                if " - " in title:
-                    _artist, _song = title.split(" - ", 1)
-                    embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
-                elif info.get("uploader"):
-                    embed_title = f"🎵 {title} – {info.get('uploader')}"
-                else:
-                    embed_title = f"🎵 {title}"
-                embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
-                _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
-                if _bar:
-                    embed.description = _bar
-                embed.set_thumbnail(url=info.get("thumbnail"))
-                embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
-                embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-                embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
-                if info.get("uploader"):
-                    embed.set_footer(text=info.get("uploader"))
+                embed = self._build_np_embed(info, title, duration)
                 new_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
                 if generation != self._track_generation:
                     # Track ist während des ctx.send gestorben und der Cleanup lief bereits:
@@ -310,62 +293,83 @@ class PlaybackMixin:
             if generation != self._track_generation:
                 return
 
-            # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
-            # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
-            # Im Hintergrund-Thread, damit der Event-Loop nicht blockiert wird.
-            self._songs_played += 1
-            if self._songs_played % 50 == 0:
-                logger.info(f"[Maintenance] {self._songs_played} Songs gespielt – yt_dlp-Instanzen werden neu erstellt.")
-                _keep = {url for url, _ in self.queue}
-                if self.current_track:
-                    _keep.add(self.current_track[0])
-                _fmt = self.audio_format
-                asyncio.create_task(asyncio.to_thread(self.dl.rebuild, _fmt, _keep))
-
-            # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
-            # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
-            if self.prefetch_task and not self.prefetch_task.done():
-                self.prefetch_task.cancel()
-            if self.queue:
-                self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
-
-            # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
-            if self.autoplay_enabled and not self.queue:
-                if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-                    self._autoplay_prefetch_task.cancel()
-                self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
+            self._schedule_background_work(ctx)
 
         except asyncio.TimeoutError:
-            self._stderr_tail(stderr_buf)   # Puffer schließen falls schon angelegt
-            self._recently_played.append(url)
-            self._recently_played_titles.append(normalize_title(title))
-            if ctx.voice_client and ctx.voice_client.is_connected():
-                try:
-                    await ctx.send(t("error.track_timeout", title=title))
-                except Exception:
-                    pass
-                asyncio.create_task(self.play_next(ctx))
-            else:
-                logger.warning("[play_next] TimeoutError – Voice client weg, kein Retry.")
-                self.is_playing = False
+            await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_timeout", "TimeoutError")
             return
         except Exception:
             logger.exception("[Fehler bei play_next]")
-            self._stderr_tail(stderr_buf)   # Puffer schließen falls schon angelegt
-            self._recently_played.append(url)
-            self._recently_played_titles.append(normalize_title(title))
-            if ctx.voice_client and ctx.voice_client.is_connected():
-                try:
-                    await ctx.send(t("error.track_error", title=title))
-                except Exception:
-                    pass
-                # Fehlerhaften Track überspringen – create_task statt direkter Rekursion,
-                # damit bei vielen schlechten URLs der Call-Stack nicht überfüllt wird.
-                asyncio.create_task(self.play_next(ctx))
-            else:
-                logger.warning("[play_next] Exception – Voice client weg, kein Retry.")
-                self.is_playing = False
+            await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_error", "Exception")
             return
+
+    def _build_np_embed(self, info, title, duration):
+        """Now-Playing-Embed eines frisch gestarteten Tracks (synchron, ohne Nebenwirkung)."""
+        duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
+        if " - " in title:
+            _artist, _song = title.split(" - ", 1)
+            embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
+        elif info.get("uploader"):
+            embed_title = f"🎵 {title} – {info.get('uploader')}"
+        else:
+            embed_title = f"🎵 {title}"
+        embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
+        _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
+        if _bar:
+            embed.description = _bar
+        embed.set_thumbnail(url=info.get("thumbnail"))
+        embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
+        embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
+        embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
+        if info.get("uploader"):
+            embed.set_footer(text=info.get("uploader"))
+        return embed
+
+    def _schedule_background_work(self, ctx):
+        """Nach einem erfolgreichen Start: Wartung, Prefetch, Autoplay-Prefetch.
+        Synchron – nur Tasks anstoßen; der Generationscheck davor bleibt im
+        Orchestrator (ADR 0007/0009)."""
+        # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
+        # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
+        # Im Hintergrund-Thread, damit der Event-Loop nicht blockiert wird.
+        self._songs_played += 1
+        if self._songs_played % 50 == 0:
+            logger.info(f"[Maintenance] {self._songs_played} Songs gespielt – yt_dlp-Instanzen werden neu erstellt.")
+            _keep = {url for url, _ in self.queue}
+            if self.current_track:
+                _keep.add(self.current_track[0])
+            _fmt = self.audio_format
+            asyncio.create_task(asyncio.to_thread(self.dl.rebuild, _fmt, _keep))
+
+        # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
+        # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
+        if self.prefetch_task and not self.prefetch_task.done():
+            self.prefetch_task.cancel()
+        if self.queue:
+            self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
+
+        # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
+        if self.autoplay_enabled and not self.queue:
+            if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+                self._autoplay_prefetch_task.cancel()
+            self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
+
+    async def _skip_broken_track(self, ctx, url, title, stderr_buf, error_key, kind):
+        """Track ließ sich nicht starten: merken (kein Autoplay-Rückfall darauf),
+        melden und den nächsten anstoßen – create_task statt Rekursion, damit
+        viele kaputte URLs den Call-Stack nicht füllen."""
+        self._stderr_tail(stderr_buf)   # Puffer schließen falls schon angelegt
+        self._recently_played.append(url)
+        self._recently_played_titles.append(normalize_title(title))
+        if ctx.voice_client and ctx.voice_client.is_connected():
+            try:
+                await ctx.send(t(error_key, title=title))
+            except Exception:
+                pass
+            asyncio.create_task(self.play_next(ctx))
+        else:
+            logger.warning(f"[play_next] {kind} – Voice client weg, kein Retry.")
+            self.is_playing = False
 
     async def _handle_queue_empty(self, ctx):
         """Leere-Queue-Fall aus play_next: Cleanup, _ended_np-Übergabe, Idle-Timer,
