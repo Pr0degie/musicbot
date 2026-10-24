@@ -126,7 +126,36 @@ _console.setFormatter(_ColorFormatter())
 # MUSICBOT_LOG_FILE: nur für die Testsuite (tests/conftest.py) – sonst landen
 # Testsongs, Fake-Channels und simulierte Fehler im echten bot.log und
 # verfälschen jede spätere Fehlersuche.
-_file = logging.FileHandler(os.environ.get("MUSICBOT_LOG_FILE", "bot.log"), encoding="utf-8")
+LOG_FILE = os.environ.get("MUSICBOT_LOG_FILE", "bot.log")
+LOG_KEEP_RUNS = 10
+
+
+def rotate_on_start(path: str, keep: int) -> None:
+    """Jeder Bot-Start beginnt ein frisches Log; die letzten `keep` Läufe
+    bleiben als <path>.1 (vorheriger Lauf) … <path>.<keep> erhalten.
+
+    Bewusst beim Start statt RotatingFileHandler: unter Windows scheitert das
+    Umbenennen, solange irgendein Programm die Datei offen hat – mitten im
+    Lauf hieße das bei jeder Zeile "--- Logging error ---". Hier scheitert es
+    höchstens einmal (Editor offen, oder !restart: der alte Prozess hält die
+    Datei noch), dann wird wie früher einfach angehängt.
+    """
+    try:
+        if os.path.getsize(path) == 0:
+            return
+    except OSError:
+        return   # gibt es noch nicht
+    try:
+        for i in range(keep - 1, 0, -1):
+            if os.path.exists(f"{path}.{i}"):
+                os.replace(f"{path}.{i}", f"{path}.{i + 1}")
+        os.replace(path, f"{path}.1")
+    except OSError:
+        pass
+
+
+rotate_on_start(LOG_FILE, LOG_KEEP_RUNS)
+_file = logging.FileHandler(LOG_FILE, encoding="utf-8")
 _file.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 
 # Root-Logger mit beiden Handlern

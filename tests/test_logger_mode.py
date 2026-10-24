@@ -153,3 +153,22 @@ def test_tests_schreiben_nicht_ins_echte_bot_log():
 
     assert os.path.abspath(ulog._file.baseFilename) == os.path.abspath(TEST_LOG_FILE)
     assert os.path.basename(ulog._file.baseFilename) != "bot.log"
+
+
+def test_start_rotiert_und_behaelt_die_letzten_laeufe(tmp_path):
+    log = tmp_path / "bot.log"
+    for lauf in range(1, 5):          # vier Bot-Starts mit je einem Log
+        ulog.rotate_on_start(str(log), keep=2)
+        log.write_text(f"lauf {lauf}", encoding="utf-8")
+    assert log.read_text(encoding="utf-8") == "lauf 4"
+    assert (tmp_path / "bot.log.1").read_text(encoding="utf-8") == "lauf 3"
+    assert (tmp_path / "bot.log.2").read_text(encoding="utf-8") == "lauf 2"
+    assert not (tmp_path / "bot.log.3").exists()
+
+
+def test_start_ohne_oder_mit_leerem_log_rotiert_nicht(tmp_path):
+    log = tmp_path / "bot.log"
+    ulog.rotate_on_start(str(log), keep=3)       # gibt es noch nicht
+    log.write_text("", encoding="utf-8")
+    ulog.rotate_on_start(str(log), keep=3)       # leer → kein bot.log.1
+    assert not (tmp_path / "bot.log.1").exists()

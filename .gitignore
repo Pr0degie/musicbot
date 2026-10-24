@@ -187,4 +187,5 @@ metadata_cache.json
 cookies.txt
 *.cookies
 bot.log
+bot.log.*
 playlists/
