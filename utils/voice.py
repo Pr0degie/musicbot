@@ -23,19 +23,68 @@ def stop_playback(voice_client) -> None:
     (getattr(voice_client, "stop_playing", None) or voice_client.stop)()
 
 
+_safe_recv_cls = None
+
+
+def _make_safe_recv_cls(base):
+    """VoiceRecvClient mit repariertem `_remove_ssrc`.
+
+    voice_recv (0.5.2a179) greift beim Abmelden eines Users (Voice-Opcode 13,
+    jemand verlässt den Channel) ohne Prüfung auf `self._reader.speaking_timer`
+    zu. `_reader` gibt es aber nur, solange zugehört wird – ohne `!listen on`
+    wirft das AttributeError, und zwar im Websocket-Poller von discord.py. Der
+    stirbt daran still: 60 s später "stopped responding", kein Reconnect, der
+    Player sendet ins Leere (Discord zeigt den grünen Ring, kein Ton).
+    `_add_ssrc` daneben prüft `if self._reader:` – hier fehlt genau das.
+    """
+    class SafeVoiceRecvClient(base):
+        def _remove_ssrc(self, *, user_id):
+            if self._reader:
+                return super()._remove_ssrc(user_id=user_id)
+            ssrc = self._id_to_ssrc.pop(user_id, None)
+            if ssrc:
+                self._ssrc_to_id.pop(ssrc, None)
+
+    return SafeVoiceRecvClient
+
+
 def _recv_client_cls():
     """VoiceRecvClient, falls das Empfangs-Paket vorhanden ist – sonst None.
 
     Import bewusst erst hier: das Paket ist experimentell, und ohne es soll der
     Bot exakt wie vorher laufen.
     """
+    global _safe_recv_cls
     try:
         from discord.ext import voice_recv
-        return voice_recv.VoiceRecvClient
     except Exception as e:
         logger.warning(f"[Voice-Listen] discord-ext-voice-recv nicht nutzbar: "
                        f"{type(e).__name__}: {str(e)[:120]} – eigenes Zuhören entfällt.")
         return None
+    if _safe_recv_cls is None:
+        _safe_recv_cls = _make_safe_recv_cls(voice_recv.VoiceRecvClient)
+    return _safe_recv_cls
+
+
+def dead_voice_poller(voice_client):
+    """Beschreibung, falls die Sprachverbindung tot ist, obwohl sie als
+    verbunden gilt – sonst None.
+
+    discord.py hält die Voice-Verbindung mit einer einzigen Task am Leben
+    ("Voice websocket poller"). Stirbt die an einer Exception, merkt das
+    niemand: is_connected() bleibt True, der Player sendet weiter. Erst beim
+    Herunterfahren erscheint "Task exception was never retrieved".
+
+    Liest discord.py-Interna (`_connection._runner`) – fehlen sie in einer
+    anderen Version, kommt None zurück und alles bleibt wie bisher.
+    """
+    runner = getattr(getattr(voice_client, "_connection", None), "_runner", None)
+    if runner is None or not runner.done() or not voice_client.is_connected():
+        return None
+    if runner.cancelled():
+        return "abgebrochen"
+    exc = runner.exception()   # markiert sie auch als abgeholt
+    return f"{type(exc).__name__}: {exc}" if exc else "ohne Fehler beendet"
 
 
 def voice_client_cls():

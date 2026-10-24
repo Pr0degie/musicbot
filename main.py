@@ -21,11 +21,15 @@ class MusicBot(commands.Bot):
         # wir haben unseren eigenen mit deutschem Text in basic.py.
         # allowed_mentions=none(): der Bot gibt Fremd-Content wieder (YouTube-Titel,
         # !echo, Lyrics) – ein "@everyone" darin darf nie tatsächlich pingen.
+        # enable_debug_events: liefert on_socket_raw_receive – daran misst der
+        # Music-Cog, wie lange das Gateway vor einem Reconnect still war
+        # (Voice-Reparatur nach Abbruch, cogs/music_voice_ui.py).
         super().__init__(
             command_prefix="!",
             intents=intents,
             help_command=None,
             allowed_mentions=discord.AllowedMentions.none(),
+            enable_debug_events=True,
         )
 
     async def setup_hook(self):

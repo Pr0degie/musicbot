@@ -148,6 +148,13 @@ class PlaybackMixin:
             # unterbrochenen Durchlaufs dürfen keinen Zustand mehr schreiben.
             self._track_generation += 1
             return
+        # Voice-Reparatur baut gerade die Verbindung neu auf (music_voice_ui.py) –
+        # das after_playing des alten Clients darf nicht den nächsten Song
+        # starten; die Reparatur ruft play_next danach selbst auf.
+        if self._voice_healing:
+            logger.info("[play_next] Voice-Reparatur läuft – Auto-Advance unterdrückt.")
+            self._track_generation += 1
+            return
         if not self.queue:
             # Kompletter Leere-Queue-Fall (Cleanup, _ended_np, Idle-Timer,
             # Autoplay-Handoff) → _handle_queue_empty. Die dortigen await-Grenzen
@@ -241,6 +248,7 @@ class PlaybackMixin:
             # Kompletten Track-Zustand synchron VOR vc.play() setzen (ADR 0007);
             # gibt Generationszähler + Loop-Repeat-Flag + vorherigen Track zurück.
             generation, is_loop_repeat, prev_track = self._snapshot_track_state(ctx, url, title, duration)
+            self._current_seek_offset = seek_offset
 
             ctx.voice_client.play(source, after=after_playing)
             logger.info(f"[Wiedergabe] Starte: {title}")

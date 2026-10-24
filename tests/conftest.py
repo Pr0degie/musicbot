@@ -199,6 +199,8 @@ def build_cog(dl=None):
     if mc._playback_done:
         mc._playback_done.set()
     mc._seek_offset = 0
+    mc._current_seek_offset = 0
+    mc._voice_healing = False
     mc._play_counts = {}
     mc.dl = dl if dl is not None else FakeDownloader()
     # echtes _record_play schreibt play_counts.json – hier nur zählen

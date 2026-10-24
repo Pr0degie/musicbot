@@ -158,6 +158,17 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
 
         # Seek-Offset in Sekunden für den nächsten play_next()-Aufruf.
         self._seek_offset: int = 0
+        # Startposition des laufenden Tracks (der konsumierte _seek_offset) –
+        # die Voice-Reparatur braucht sie, um an der Hörposition fortzusetzen.
+        self._current_seek_offset: int = 0
+
+        # Voice-Reparatur nach Gateway-Abbruch (music_voice_ui.py).
+        self._gw_last_recv = time.monotonic()  # letztes Paket vom Gateway
+        self._gw_zombie = False                # Gateway war vor dem Reconnect tot still
+        self._gw_ready_seen = False            # erstes on_ready ist kein Reconnect
+        self._heal_candidates = {}             # guild_id → Voice-Client vor dem Abbruch
+        self._heal_task = None
+        self._voice_healing = False            # True während des Neuaufbaus → play_next pausiert
 
         self._start_time = time.monotonic()
         self._process = psutil.Process()

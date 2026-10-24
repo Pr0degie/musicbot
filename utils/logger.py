@@ -158,6 +158,7 @@ _QUIET_TAGS = {
     "Warmup", "Stream", "SAVE", "Download", "Download-Fallback",
     "SafeUnlink", "Score", "Cleanup",
     "STT",                                   # Transkripte ohne Weckwort
+    "Gateway",                               # Discord trennt etwa stündlich routinemäßig
 }
 
 _MODES = ("quiet", "debug")
@@ -197,6 +198,12 @@ set_console_mode(LOG_MODE)   # Start-Default aus .env
 # Zum Debuggen von Discord-Verbindungsproblemen auskommentieren:
 logging.getLogger("discord").setLevel(logging.WARNING)
 logging.getLogger("discord.http").setLevel(logging.WARNING)
+# Ausnahme Verbindungsaufbau: Resume vs. neue Sitzung, Voice-Close-Codes und
+# Voice-Reconnects sind die einzige Spur, wenn nach einem Netz-Abbruch der Ton
+# fehlt. Ins Terminal kommen sie im quiet-Modus trotzdem nicht – ohne [Tag]
+# filtert der Console-Handler INFO weg, bot.log bekommt alles.
+for _name in ("discord.gateway", "discord.client", "discord.voice_state"):
+    logging.getLogger(_name).setLevel(logging.INFO)
 # logging.getLogger("discord").setLevel(logging.DEBUG)
 # logging.getLogger("discord.http").setLevel(logging.DEBUG)
 # ---------------------------------------------------------------------------

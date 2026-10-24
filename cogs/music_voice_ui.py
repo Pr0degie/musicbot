@@ -25,9 +25,26 @@ from discord.ext import commands, tasks
 
 from utils.logger import logger
 from utils.i18n import t
+from utils.voice import connect_voice, dead_voice_poller, stop_playback
+
+# Ab so vielen Sekunden Funkstille gilt ein Gateway-Reconnect als echter
+# Abbruch. Discord schickt alle ~41 s ein Heartbeat-ACK, discord.py gibt nach
+# 60 s Stille auf ("Shard ID None has stopped responding"). Die Schwelle liegt
+# dazwischen: Den routinemäßigen Reconnect, den Discord etwa stündlich
+# verlangt, erreicht sie nie – der läuft ohne Tonausfall und soll das bleiben.
+GATEWAY_ZOMBIE_SECONDS = 50
+# Bestätigung des Voice-Abmeldens: ein verwaister Client (nach neuer Gateway-
+# Sitzung) bekommt sie nie – discord.py würde sonst 30 s darauf warten.
+HEAL_DISCONNECT_TIMEOUT = 5.0
 
 
 class VoiceLifecycleMixin:
+    # Klassen-Defaults: play_next liest beide auch auf Instanzen, die nicht
+    # über __init__ gebaut wurden (Tests mit __new__).
+    _voice_healing = False
+    _current_seek_offset = 0
+    _heal_task = None
+
     async def _auto_leave(self, voice_client):
         """Verlässt den Channel nach AUTO_LEAVE_SECONDS wenn kein User mehr drin ist."""
         await asyncio.sleep(self.AUTO_LEAVE_SECONDS)
@@ -82,7 +99,17 @@ class VoiceLifecycleMixin:
         stehen (Queue voll, doch is_playing False). Hängt dieser Zustand über
         zwei Ticks (~60 s) an, wird der nächste Song neu gestartet. Zwei Ticks,
         damit normale Track-Übergänge (Sekundenbereich) nicht fälschlich greifen.
+
+        Zusätzlich: Ist die Sprachverbindung selbst tot (Poller-Task von
+        discord.py gestorben), wird sie neu aufgebaut – siehe dead_voice_poller.
         """
+        if not (self._heal_task and not self._heal_task.done()):
+            for dead_vc in list(getattr(self.bot, "voice_clients", [])):
+                grund = dead_voice_poller(dead_vc)
+                if grund:
+                    logger.warning(f"[Voice] Sprachverbindung tot ({grund}) – baue neu auf.")
+                    self._schedule_voice_heal([dead_vc], "nach totem Voice-Poller")
+                    return
         ctx = self._last_ctx
         vc = ctx.voice_client if ctx else None
         stuck = (
@@ -111,6 +138,141 @@ class VoiceLifecycleMixin:
     @_voice_watchdog.before_loop
     async def _before_voice_watchdog(self):
         await self.bot.wait_until_ready()
+
+    # --- Voice-Reparatur nach Gateway-Abbruch --------------------------------
+    #
+    # Fällt die Verbindung zu Discord kurz weg, baut discord.py das Gateway
+    # selbst wieder auf – die Sprachverbindung bleibt aber als Zombie zurück:
+    # sie gilt als verbunden, der Player "spielt", es kommt kein Ton an. Nach
+    # einer komplett neuen Sitzung (statt Resume) leert discord.py sogar die
+    # Liste der Voice-Clients, der alte läuft verwaist weiter. Der Watchdog
+    # oben sieht davon nichts, weil formal ja gespielt wird.
+
+    @commands.Cog.listener()
+    async def on_socket_raw_receive(self, _msg):
+        """Jedes Gateway-Paket (auch das Heartbeat-ACK) – für die Stille-Messung."""
+        self._gw_last_recv = time.monotonic()
+
+    @commands.Cog.listener()
+    async def on_disconnect(self):
+        """Merkt sich, ob das Gateway vorher tot still war und welche Voice-
+        Clients es gab. Feuert bei jedem Fehlversuch erneut – deshalb nur
+        ergänzen, nie überschreiben: nach einer neuen Sitzung ist die Liste
+        der Voice-Clients bereits leer."""
+        silent = time.monotonic() - self._gw_last_recv
+        if silent >= GATEWAY_ZOMBIE_SECONDS:
+            self._gw_zombie = True
+        for vc in self.bot.voice_clients:
+            self._heal_candidates.setdefault(vc.guild.id, vc)
+        logger.info(f"[Gateway] Verbindung getrennt ({silent:.0f}s ohne Paket).")
+
+    @commands.Cog.listener()
+    async def on_resumed(self):
+        zombie, self._gw_zombie = self._gw_zombie, False
+        candidates, self._heal_candidates = self._heal_candidates, {}
+        logger.info("[Gateway] Sitzung fortgesetzt.")
+        if zombie and candidates:
+            self._schedule_voice_heal(candidates.values(), "nach Gateway-Abbruch")
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        first, self._gw_ready_seen = not self._gw_ready_seen, True
+        self._gw_zombie = False
+        candidates, self._heal_candidates = self._heal_candidates, {}
+        if first:
+            return
+        # Neue Sitzung: discord.py hat seine Voice-Clients vergessen – jeder
+        # alte ist verwaist, egal wie lange das Gateway vorher still war.
+        logger.info("[Gateway] Neue Sitzung nach Reconnect.")
+        if candidates:
+            self._schedule_voice_heal(candidates.values(), "nach neuer Gateway-Sitzung")
+
+    def _schedule_voice_heal(self, old_vcs, reason):
+        if self._heal_task and not self._heal_task.done():
+            return
+        self._heal_task = asyncio.create_task(self._heal_voice(list(old_vcs), reason))
+
+    async def _heal_voice(self, old_vcs, reason):
+        # Spricht der DM gerade, dessen Wiedergabe nicht abschneiden – sie ist
+        # auf dem Zombie-Client ohnehin stumm und endet von selbst.
+        for _ in range(120):
+            if not getattr(self.bot, "dm_speaking", False):
+                break
+            await asyncio.sleep(0.5)
+        for old_vc in old_vcs:
+            try:
+                await self._heal_one(old_vc, reason)
+            except Exception as e:
+                logger.warning(f"[Voice] Neuaufbau {reason} fehlgeschlagen: {type(e).__name__}: {e}")
+
+    async def _heal_one(self, old_vc, reason):
+        """Alte Verbindung abbauen, neu verbinden, an der Hörposition weiterspielen."""
+        channel = self.bot.get_channel(old_vc.channel.id)   # frisches Objekt aus dem Cache
+        if channel is None:
+            logger.warning(f"[Voice] Neuaufbau {reason} nicht möglich – Channel nicht mehr da.")
+            return
+
+        was_active = old_vc.is_playing() or old_vc.is_paused()
+        was_paused = old_vc.is_paused()
+        radio = (self.radio_stream_url, self.radio_station_name) if self.is_radio else None
+        restart_track = False
+
+        self._voice_healing = True
+        try:
+            if radio:
+                # after_radio startet ohne is_radio keinen eigenen Reconnect.
+                self.is_radio = False
+                if was_active:
+                    stop_playback(old_vc)
+            elif was_active and self.current_track:
+                # Wie !seek: Track mit Position vorn einreihen, dann stoppen.
+                url, title, *_ = self.current_track
+                pos = self._current_seek_offset + (self._elapsed_seconds() or 0)
+                self._seek_offset = max(0, int(pos) - 1)   # 1 s Überlappung
+                self.current_track = None   # kein Doppel-Insert durch die Loop-Logik
+                self.queue.appendleft((url, title))
+                restart_track = True
+                self._stop_for_advance(old_vc)
+            if was_active:
+                # after_playing einmal durchlaufen lassen – sein play_next
+                # prallt am Reparatur-Flag ab.
+                try:
+                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    pass
+                await asyncio.sleep(0.2)
+
+            for vc in {old_vc, channel.guild.voice_client} - {None}:
+                try:
+                    await asyncio.wait_for(vc.disconnect(force=True), timeout=HEAL_DISCONNECT_TIMEOUT)
+                except Exception:
+                    pass
+            # Brach das Abmelden im Timeout ab, steht der alte Client noch in
+            # discord.pys Liste – connect() würde "Already connected" werfen.
+            stale = channel.guild.voice_client
+            if stale is not None:
+                stale.cleanup()
+            await connect_voice(channel)
+        finally:
+            self._voice_healing = False
+
+        logger.info(f"[Voice] Sprachverbindung {reason} neu aufgebaut: {channel.name}")
+        self.bot.dispatch("voice_rebuilt")   # VoiceListen hängt den Empfänger neu an
+
+        ctx = self._last_ctx
+        if ctx is None:
+            return
+        if radio:
+            await self._play_radio_stream(ctx, *radio)
+        elif restart_track or (self.queue and self.is_playing):
+            self.is_playing = True
+            await self.play_next(ctx)
+            vc = ctx.voice_client
+            if was_paused and vc and vc.is_playing():
+                vc.pause()
+                self._mark_paused()
+                self.is_playing = False
+                self._stopped_by_user = True
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):

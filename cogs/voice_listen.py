@@ -353,6 +353,17 @@ class VoiceListen(commands.Cog):
             self._reeval_task.cancel()
         self._reeval_task = asyncio.create_task(self._reevaluate())
 
+    @commands.Cog.listener()
+    async def on_voice_rebuilt(self):
+        """Der Music-Cog hat die Sprachverbindung nach einem Gateway-Abbruch neu
+        aufgebaut (music_voice_ui.py). Der Empfänger hing am alten Client –
+        ohne Neu-Anhängen wäre die Sprachsteuerung still aus."""
+        if not self._own_listening:
+            return
+        await self._stop_own_listening()
+        if await self._start_own_listening():
+            logger.info("[Voice-Listen] Empfänger an neue Sprachverbindung gehängt.")
+
     async def cog_unload(self):
         # Sonst überlebt der Empfangs-Thread ein !restart.
         if self._reeval_task and not self._reeval_task.done():
