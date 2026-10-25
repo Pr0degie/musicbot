@@ -303,11 +303,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(t("error.invalid_format"))
 
     async def autoplay(self, ctx):
-        """Sucht einen zum letzten Song passenden Track und spielt ihn einmalig.
+        """Sucht einen zum letzten Song passenden Track und reiht ihn ein.
 
         Nutzt den Titel des zuletzt gespielten Songs als Suchbasis, damit das
-        Ergebnis thematisch passt. Autoplay deaktiviert sich danach selbst –
-        für dauerhafte Wiederholung gibt es !loop.
+        Ergebnis thematisch passt. Autoplay bleibt an, bis es per Button wieder
+        ausgeschaltet wird – es ist kein One-Shot.
         """
         # Referenz-Track: aktueller Song wenn vorhanden, sonst letzter gespielter
         ref_url = None

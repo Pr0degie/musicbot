@@ -167,7 +167,10 @@ class SearchAutoplayView(View):
                 if self.ctx.voice_client and (
                     self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
                 ):
-                    stop_playback(self.ctx.voice_client)
+                    # Über _stop_for_advance, nicht roh: sonst hielte after_playing den
+                    # Stopp einer wachsenden Datei für ein vorzeitiges Dateiende und
+                    # reihte den alten Song wieder VOR die Alternative.
+                    self.music_cog._stop_for_advance(self.ctx.voice_client)
                 await interaction.response.edit_message(
                     content=t("status.switching_to", title=title), view=None
                 )
@@ -196,7 +199,7 @@ class SearchAutoplayView(View):
                     if self.ctx.voice_client and (
                         self.ctx.voice_client.is_playing() or self.ctx.voice_client.is_paused()
                     ):
-                        stop_playback(self.ctx.voice_client)
+                        self.music_cog._stop_for_advance(self.ctx.voice_client)
                 await interaction.response.edit_message(
                     content=t("status.switching_to", title=title), view=None
                 )
