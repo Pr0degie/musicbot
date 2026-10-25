@@ -24,3 +24,5 @@ Erschwernis: `play_next` ist race-kritisch (ADR 0007). Der komplette Track-Zusta
 - **`play_next`-Untermethoden dürfen await-Grenzen nicht verschieben.** Ein synchroner Block darf nur in eine synchrone Methode wandern (normaler Call); ein bereits awaiteter Block nur in eine async-Methode, die an exakt derselben Stelle awaitet wird. Die drei Post-Play-Generationschecks bleiben im Orchestrator an ihren Positionen.
 - **Neue Post-Play-Schritte gehören in den Orchestrator, nicht in die Untermethoden** — nur dort ist der Generationscheck nach dem vorangehenden await sichtbar und erzwingbar.
 - Die Untermethoden sind bewusst dünn und ohne eigene Race-Logik: `_snapshot_track_state` und `_build_audio_source` bleiben synchron, `_make_after_playing` erzeugt nur die Closure (kein Event-Loop-Kontakt).
+
+**Stand 2026-10-25:** `play_next` delegiert zusätzlich an `_build_np_embed` (synchron, Now-Playing-Embed), `_schedule_background_work` (synchron, Wartung/Prefetch/Autoplay-Prefetch, nach dem letzten Generationscheck) und `_skip_broken_track` (async, aus den `except`-Zweigen). Die drei Post-Play-Generationschecks stehen weiterhin im Orchestrator.

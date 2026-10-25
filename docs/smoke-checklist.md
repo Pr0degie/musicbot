@@ -39,6 +39,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!loadq last` → lädt die Queue der letzten Session (`last_queue.json`); `!saveq last` wird abgelehnt (reserviert); Start bleibt bewusst mit leerer Queue
 - [ ] `!debug on`/`!debug off` → Terminal wechselt zwischen voller Diagnose und „Wesentliches + Probleme" (in `off` erscheinen Songwechsel/Queue weiter, `[Prefetch]`/`[Progressiv]`/`[Resolve]` nicht); `bot.log` enthält in beiden Modi alles; `!debug` ohne Argument zeigt den Status
 - [ ] Bot-Start mit veraltetem yt-dlp → eine WARNING-Zeile `[yt-dlp] Version … verfügbar` (auch im Quiet-Modus); kein Auto-Update
+- [ ] Bot-Start mit `.env`, der Keys aus `.env.example` fehlen → eine Zeile `[Config] n Einstellung(en) nicht in .env – laufen auf Default: …` (auch im Quiet-Modus); bei vollständiger `.env` keine
 - [ ] `!loop`-Zyklus: `None` → `song` → `queue` → `None` (Anzeige + Verhalten am Trackende)
 - [ ] Bot-Neustart → zuletzt gespielte Songs sofort wieder spielfähig (Metadaten-Cache greift, keine Neu-Extraktion nötig)
 - [ ] Buttons einer Now-Playing-Nachricht von **vor** dem Neustart klicken → ephemere Erklärung statt „Interaktion fehlgeschlagen", tote Buttons werden entfernt (ADR 0006)
@@ -60,6 +61,13 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Alterssperre: bekanntes altersbeschränktes Video per `!p <URL>` → einmal `[Cookies] YouTube verlangt eine angemeldete Session (…)` + `[Cookies] Zweitversuch mit Cookies`, danach spielt der Track
 - [ ] Nach diesem Umschalten laufen Folge-Tracks weiter (im Cookie-Modus, also wieder mit Werbepause — erwartet); erst ein Bot-Neustart geht zurück auf cookielos
 - [ ] `!reloadcookies` → Bestätigung nennt die Cookie-Quelle; danach steht der Cookie-Modus (nächster ungecachter Track wartet die Werbepause ab)
+
+## Voice-Reparatur & Diagnose
+
+- [ ] **Regression „Ton weg nach Channel-Verlassen“:** `VOICE_CONTROL=true` + `VOICE_OWN_LISTEN=true`, `!listen` aus, Musik läuft → zweite Person kommt in den Channel, spricht, geht wieder → Musik läuft weiter. Stirbt die Verbindung doch: binnen ~30 s `[Voice] Sprachverbindung tot (…) – baue neu auf`, im Chat „🔌 Verbindung zu Discord war kurz weg – neu verbunden, weiter bei m:ss: **Titel**“, Song setzt an der Hörposition fort
+- [ ] Netz ~2 min trennen (WLAN aus/an) während Musik läuft → nach Rückkehr `[Voice] Sprachverbindung … neu aufgebaut: <Channel>` + dieselbe Chat-Meldung, Song läuft an der Hörposition weiter (kein stummes „verbunden“)
+- [ ] `curl http://127.0.0.1:8765/debug` (nur von localhost) → JSON-Schnappschuss; bei laufender Musik `voice_clients[].poller_dead` = `null`, `connected`/`playing` = `true`, `music.track` = laufender Song
+- [ ] `python tools/logsummary.py` → Zeitleiste des letzten Laufs (Start, Songs, Warnungen, Gateway/Voice); `bot.log` beginnt mit jedem Start frisch, `python tools/logsummary.py bot.log.1` zeigt den vorherigen Lauf
 
 ## Sprachsteuerung (ADR 0011)
 

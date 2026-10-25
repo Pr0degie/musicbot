@@ -15,15 +15,17 @@ in Tests) → [ADR 0004](../adr/0004-security-flags-default-altverhalten.md). Di
 - **`REQUIRE_SAME_VOICE`** = `false` (Default) | `true` — Wiedergabe-steuernde Commands (`!s`, `!stop`,
   `!clear`, `!eq`, `!seek`, `!now`, `!remove`, `!move`, `!shuffle`) erfordern denselben Voice-Channel wie der
   Bot (`utils/checks.py` → `require_same_voice()`). Bot nicht in Voice → kein Check.
-- **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` (inline
-  `check_admin()`), `!reloadcookies`, `!format` nur für diese Rolle oder den Owner.
+- **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` und `!listen` (inline
+  `check_admin()`), `!reloadcookies`, `!format` (`require_admin()`) nur für diese Rolle oder den Owner.
 - **`!loadq`** validiert ohne Flag (nur Fehlerpfad geändert): Datei muss Liste von `[url,
   titel]`-String-Paaren sein (`_is_valid_playlist` in `music_queue_io.py`), max. `HARD_PLAYLIST_LIMIT`
   Einträge — sonst i18n-Fehlermeldung statt Traceback. Valide saveq-Dateien laden unverändert.
 
 ## YouTube Authentication (Cookies)
 
-Cookie config read from `.env` via `update_ydl()`. `cookiefile` takes priority over `cookiesfrombrowser`.
+Cookie config read from `.env` in `config.py` (`YDL_COOKIES_FILE`, `YDL_BROWSER` — Default `firefox`) and
+applied per yt_dlp instance by `Downloader._cookie_opts()`; `update_ydl()` only rebuilds the instances (e.g. after
+`!reloadcookies`, so a new `cookies.txt` is read). `cookiefile` takes priority over `cookiesfrombrowser`.
 Details → `SETUP.md`.
 
 **Cookielos im Normalbetrieb** (`_cookie_mode = False`): Eine angemeldete YouTube-Session bekommt

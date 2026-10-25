@@ -8,7 +8,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ## Features
 
 - Play YouTube links, playlists and search terms
-- Control buttons directly in Discord: ⏸️ ▶️ ⏭️ 🔁
+- Control buttons directly in Discord: ⏸️ ▶️ ⏭️ 🔁 🔂
 - Autoplay: finds the next song automatically when queue runs out
 - Equalizer presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audio format: `webm` (default, lossless) or `mp3`
@@ -16,7 +16,8 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 - Queue management with save/load, shuffle and loop mode
 - Short songs are cached; long songs (>20 min) start instantly via stream
 - Auto-leave: bot leaves voice when all users go, or after 2 h of inactivity
-- Voice stability: reconnect watchdog recovers playback after Discord drops (code 1006)
+- Voice stability: reconnect watchdog recovers playback after Discord drops (code 1006); after a network outage the bot rebuilds the voice connection itself and posts a note in chat
+- Voice control ("yo bot, play …") — optional, off by default (`VOICE_CONTROL`, `!listen`)
 
 ---
 
@@ -26,7 +27,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 
 | Command | Description |
 |---|---|
-| `!p <url/search>` | Play music — YouTube URL, playlist or titel search  |
+| `!p <url/search>` | Play music — YouTube URL, playlist or title search |
 | `!next <url/search>` | Queue a song as next |
 | `!s` | Skip |
 | `!x` | Pause |
@@ -47,6 +48,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!loop` | Loop mode: off → song → queue → off |
 | `!saveq <name>` | Save current queue |
 | `!loadq <name>` | Load saved queue |
+| `!loadq last` | Load the queue of the last session |
 | `!lists` | List all saved queues |
 
 **Audio & Radio**
@@ -70,9 +72,12 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | `!baba` | Play Baba playlist |
 | `!text` | Fetch song lyrics |
 | `!stats` | Bot stats (RAM, CPU, cache) |
+| `!help` / `!h` | Command overview (paginated) |
 | `!j` / `!l` | Join / leave voice channel |
 | `!dm` | Show DM-bridge status (AI dungeon master audio output) |
 | `!reloadcookies` | Reload `cookies.txt` without restarting |
+| `!listen on\|off` | Voice control on/off (requires `VOICE_CONTROL=true`) |
+| `!debug on\|off` | Terminal output: full diagnostics or essentials only (`bot.log` is always complete) |
 | `!restart` | Restart bot (owner only) — new console window on Windows, in-place on Linux |
 
 ---
@@ -83,28 +88,32 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ├── main.py                    # Entry point
 ├── config.py                  # Load environment variables
 ├── cogs/
-│   ├── music.py               # Core: queue, FFmpeg playback, EQ, autoplay
+│   ├── music.py               # Core: queue, EQ, autoplay, !text, !format
+│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg sources, prefetch, search/resolve
+│   ├── music_voice_ui.py      # Join/leave/idle, watchdog, voice repair, progress bar
 │   ├── music_radio.py         # RadioMixin: internet radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
-│   ├── downloader.py          # yt_dlp instances, download cache, streaming
+│   ├── downloader.py          # yt_dlp instances, cookie mode, download cache, streaming
+│   ├── downloader_progressive.py # Progressive download (playback starts while downloading)
 │   ├── presets.py             # EQ filter chains
-│   ├── basic.py               # !j, !l, !ping, !echo, !help
-│   └── dm_bridge.py           # HTTP audio-output bridge for AI dungeon master (localhost path + remote byte mode)
+│   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart
+│   ├── dm_bridge.py           # HTTP audio-output bridge for AI dungeon master (localhost path + remote byte mode)
+│   ├── voice_listen.py        # Voice control (!listen)
+│   └── voice_sink.py          # Audio receive for own listening (voice_recv)
 ├── views/
-│   ├── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay)
-│   └── queue_view.py          # Paginated queue view
-├── utils/
-│   ├── logger.py              # Logging (console + bot.log)
-│   ├── files.py               # safe_unlink + pending-delete list (Windows file locking)
-│   ├── text.py                # normalize_title (dependency-free, tested)
-│   └── i18n.py                # Localization helper (t() function)
+│   ├── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay, Loop)
+│   ├── queue_view.py          # Paginated queue view
+│   └── help_view.py           # Paginated !help
+├── utils/                     # logger (console + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
+├── tools/
+│   └── logsummary.py          # Timeline of the last run from bot.log
 ├── locales/
 │   ├── en.json                # English strings
 │   └── de.json                # German strings
 ├── downloads/                 # Audio cache
 ├── playlists/                 # Saved queues (!saveq / !loadq)
-└── tests/                     # pytest suite (test_text.py, test_presets.py)
+└── tests/                     # pytest suite
 ```
 
 ---

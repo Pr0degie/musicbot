@@ -14,15 +14,20 @@ laufen als INFO, ein Level-Filter auf WARNING würde den kompletten Normalbetrie
 `_ESSENTIAL_TAGS` (sichtbar) und `_QUIET_TAGS` (still) in `utils/logger.py`; WARNING+ passiert den Filter
 immer, auch bei stillen Tags. `tests/test_logger_mode.py` erzwingt, dass jeder im Code benutzte INFO-Tag in
 genau einer der beiden Listen steht — sonst verschwände eine neue Meldung stillschweigend aus dem Terminal.
-`!debug on|off` (`cogs/basic.py`) schaltet zur Laufzeit via `set_console_mode()` um. **`bot.log` bekommt immer
+`!debug on|off` (`cogs/basic.py`) schaltet zur Laufzeit via `set_console_mode()` um. Beim Start meldet
+`[Config]` (essential) die Keys aus `.env.example`, die in der eigenen `.env` fehlen und still auf Default
+laufen (`utils/env_check.py`, aufgerufen in `main.py` → `setup_hook`). **`bot.log` bekommt immer
 die volle Diagnose** — der File-Handler wird nie gefiltert.
 `_VoiceReconnectFilter` (attached to the `discord.voice_state` logger) downgrades the noisy code-1006
 reconnect message from ERROR to INFO and strips its traceback — discord.py auto-reconnects on idle channels
-are expected, so they're logged quietly instead of as a red stack trace.
+are expected, so they're logged quietly instead of as a red stack trace (rewritten to a `[Voice] Verbindung kurz
+unterbrochen …` line, which therefore also shows in the `quiet` terminal).
 Der `discord`-Logger steht auf WARNING (Gateway-/HTTP-Spam), mit einer Ausnahme: `discord.gateway`,
 `discord.client` und `discord.voice_state` loggen INFO — Resume vs. neue Sitzung, Voice-Close-Codes und
 Voice-Reconnects sind die einzige Spur, wenn nach einem Netz-Abbruch der Ton fehlt. Sie tragen keinen `[Tag]`,
-landen im `quiet`-Terminal also nicht, nur in `bot.log`.
+landen im `quiet`-Terminal also nicht, nur in `bot.log` (Ausnahme: die von `_VoiceReconnectFilter`
+umgeschriebene Zeile). Die eigenen `[Gateway]`-Zeilen der Voice-Reparatur stehen in `_QUIET_TAGS` (Discord
+trennt etwa stündlich routinemäßig).
 
 ## Rotation
 
@@ -45,7 +50,7 @@ Reihenfolge, die am wenigsten Log-Archäologie kostet:
 2. **Was ist passiert?** `python tools/logsummary.py` verdichtet den letzten Lauf auf eine Zeitleiste
    (Warnungen/Fehler mit Wiederholungszähler, Tracebacks auf die Exception-Zeile gekürzt, Gateway/Voice,
    Eingaben, gestartete Songs). `bot.log.1` = vorheriger Lauf, `--list` zeigt alle Läufe einer Datei mit
-   Kennzahlen, `-n` begrenzt. Importiert `utils.logger` bewusst nicht (der Import würde rotieren).
+   Kennzahlen, `--session -2` wählt den vorletzten Lauf derselben Datei, `-n` begrenzt (Default 80). Importiert `utils.logger` bewusst nicht (der Import würde rotieren).
 3. **Hängt etwas?** `py-spy dump --pid <pid>` zeigt alle Thread-Stacks des laufenden Prozesses, ohne ihn
    anzuhalten. Ein `audio-player`-Thread in `time.sleep` heißt: es wird gesendet — kommt trotzdem kein Ton, ist
    die Sprachverbindung tot (→ `poller_dead` in `/debug`).

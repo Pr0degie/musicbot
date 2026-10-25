@@ -4,7 +4,7 @@ Schritt-für-Schritt-Anleitung für den ersten Praxistest von
 „yo bot, spiel mal …". Technischer Hintergrund →
 [ADR 0011](adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
 
-**Stand:** Der Code ist gebaut und automatisiert getestet (544 Tests).
+**Stand:** Der Code ist gebaut und automatisiert getestet (577 Tests).
 Ungetestet ist bisher nur der echte Audio-Empfang aus einem laufenden
 Voice-Channel — genau dafür ist diese Liste da.
 
@@ -58,7 +58,7 @@ Weitere Sätze zum Durchprobieren (jeweils `text` austauschen):
 | `wie war eigentlich dein Tag` | **nichts** — `{"status":"ignored","reason":"no_wake_word"}` |
 | `yo bot blablubb` | Rückfrage im Chat, kein Command |
 
-- [ ] Der letzte Fall postet **nichts** in den Chat (nur `bot.log` bekommt eine `[STT]`-Zeile)
+- [ ] Der Satz ohne Weckwort postet **nichts** in den Chat (nur `bot.log` bekommt eine `[STT]`-Zeile)
 
 ---
 
@@ -76,7 +76,7 @@ Ziel: sitzt der DM-Bot im Channel, lädt der Musikbot **kein eigenes Modell**.
 
 Ab jetzt gilt die Weiche. Prüfen:
 
-- [ ] Mit DM-Bot im Channel: `!listen on` → meldet „über **DM-Bot**", **kein**
+- [ ] Mit DM-Bot im Channel: `!listen on` → meldet „über DM-Bot", **kein**
       „Lade Sprachmodell", `nvidia-smi` zeigt **keinen** zusätzlichen Speicher
 - [ ] DM-Bot verlässt den Channel → nach ~10 Sekunden „Lade Sprachmodell medium",
       danach hört der Musikbot selbst zu

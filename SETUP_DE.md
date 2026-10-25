@@ -2,7 +2,7 @@
 
 ## 1. Voraussetzungen
 
-- Python 3.10+
+- Python 3.10+ (CI testet mit 3.12)
 - FFmpeg im PATH
 - Node.js im PATH (für YouTube-Signatur-Solver)
 
@@ -12,7 +12,7 @@
 
 ```bat
 git clone https://github.com/Pr0degie/musicbot.git
-cd Musicbot
+cd musicbot
 install.bat
 ```
 
@@ -23,7 +23,7 @@ FFmpeg via winget und erstellt einen `.env`-Rohling.
 
 ```bash
 git clone https://github.com/Pr0degie/musicbot.git
-cd Musicbot
+cd musicbot
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -62,15 +62,35 @@ DM_BRIDGE_SECRET=
 |---|---|
 | `DISCORD_TOKEN` | Discord-Bot-Token (erforderlich) |
 | `YDL_COOKIES_FILE` | Pfad zu einer exportierten `cookies.txt` — hat Vorrang vor Browser-Extraktion |
-| `YDL_BROWSER` | Browser für Live-Cookie-Extraktion (`firefox`, `chrome`, …) — nur lokal, nicht auf Servern ohne GUI |
+| `YDL_BROWSER` | Browser für Live-Cookie-Extraktion (`firefox`, `chrome`, …; Standard `firefox`) — nur lokal, nicht auf Servern ohne GUI. Greift erst, wenn der Cookie-Modus anspringt (→ Abschnitt 4) |
 | `LANGUAGE` | Bot-Sprache: `en` (Standard) oder `de` |
 | `DM_BRIDGE_HOST` | DM-Bridge-HTTP-Host. `127.0.0.1` (Standard) = lokaler Pfad-Modus; LAN-/Tailscale-IP oder `0.0.0.0` = Remote-Byte-Modus |
 | `DM_BRIDGE_PORT` | DM-Bridge-HTTP-Port (Standard `8765`) |
 | `DM_BRIDGE_SECRET` | Gemeinsames Secret für die DM-Bridge-Auth. Leer + `127.0.0.1` = ohne Secret; **erforderlich** bei jedem Nicht-Localhost-Host |
+| `LOG_MODE` | Terminal-Ausgabe: `quiet` (Standard, Wesentliches + Probleme) oder `debug` (volle Diagnose); zur Laufzeit umschaltbar mit `!debug on\|off` |
+
+Alle weiteren Einstellungen (Security-Flags, Limit für den Download-Cache,
+Sprachsteuerung) sind in [`.env.example`](.env.example) dokumentiert. Bei jedem
+Start loggt der Bot eine `[Config]`-Zeile mit den Keys aus `.env.example`, die
+in deiner `.env` fehlen — die laufen dann einfach auf ihrem Standardwert.
 
 ## 4. YouTube-Authentifizierung (Cookies)
 
-YouTube blockiert unauthentifizierte Bot-Anfragen. Cookie-Auth ist notwendig.
+Der Bot läuft **standardmäßig ohne Cookies** und schaltet erst auf Cookie-Auth um,
+wenn YouTube sie tatsächlich verlangt — altersbeschränkte Videos, Mitglieder-Inhalte
+oder eine `Sign in to confirm you're not a bot`-Sperre. Der erste solche Fehler löst
+einen automatischen Zweitversuch mit Cookies aus, danach bleibt der Cookie-Modus für
+den Rest des Prozesses an (→ [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md)).
+
+Der Grund ist Tempo, nicht Bequemlichkeit: Eine angemeldete Session bekommt
+Pre-Roll-Werbung, und yt-dlp muss deren Überspringzeit abwarten, bevor das erste
+Audio-Byte kommt (vorher antwortet das CDN mit `403`). Das kostet bei jedem
+ungecachten Track 5–6 s — cookielos startet ein Song in etwa 3 s statt 13 s, bei
+identischer Audioqualität.
+
+Cookies einzurichten ist daher **empfohlen, aber optional**: Sie sind das
+Sicherheitsnetz für die Fälle oben. Ohne konfigurierte Cookie-Quelle scheitern
+diese Videos einfach mit YouTubes Fehlermeldung.
 
 ### Server-Setup (empfohlen)
 
@@ -92,7 +112,8 @@ Cookies halten ca. 1–3 Monate. Wenn YouTube wieder blockiert:
 
 1. Cookies erneut exportieren (Befehl oben)
 2. Hochladen via SCP
-3. `!reloadcookies` in Discord — lädt ohne Bot-Neustart neu
+3. `!reloadcookies` in Discord — lädt ohne Bot-Neustart neu und schaltet den
+   Cookie-Modus auch dann ein, wenn der Bot gerade cookielos läuft
 
 ### Troubleshooting: Browser-Cookie-Extraktion (`YDL_BROWSER`)
 
@@ -184,3 +205,23 @@ automatisch, und ein eingebauter **Reconnect-Watchdog** startet den nächsten Tr
 neu, falls die Wiedergabe hängen blieb — transparent, ohne Konfiguration. Diese
 Reconnects werden als ruhige INFO-Zeile statt als roter Traceback geloggt; eine
 solche Zeile gelegentlich in `bot.log` zu sehen ist also normal.
+
+Fällt die Netzverbindung zu Discord länger weg (oder stirbt die Sprachverbindung
+still), baut der Bot die Sprachverbindung selbst neu auf, setzt den Song an der
+aktuellen Stelle fort und schreibt einen kurzen Hinweis in den Chat
+(`🔌 … neu verbunden`).
+
+## 7. Logs & Fehlersuche
+
+- `bot.log` enthält immer die volle Diagnose, unabhängig von `LOG_MODE`/`!debug`.
+  Es rotiert bei jedem Start: der aktuelle Lauf steht in `bot.log`, die zehn
+  vorherigen bleiben als `bot.log.1` (vorheriger) … `bot.log.10` erhalten.
+  Startfehler landen ebenfalls dort, weil sich das `start.bat`-Fenster sofort
+  schließt.
+- `python tools/logsummary.py` verdichtet den letzten Lauf zu einer Zeitleiste
+  (Warnungen, Fehler, Voice-/Gateway-Ereignisse, Befehle, Songs). `--list` zeigt
+  alle Läufe einer Datei, `-n 30` nur die letzten 30 Ereignisse,
+  `python tools/logsummary.py bot.log.1` den vorherigen Lauf.
+- Solange der Bot läuft, liefert `GET /debug` an der DM-Bridge (Standard
+  `http://127.0.0.1:8765/debug`) einen Zustands-Schnappschuss als JSON — es
+  antwortet nur auf Anfragen von derselben Maschine.

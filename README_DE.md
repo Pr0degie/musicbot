@@ -8,15 +8,16 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ## Features
 
 - YouTube-Links, Playlists und Suchbegriffe abspielen
-- Steuerbuttons direkt in Discord: ⏸️ ▶️ ⏭️ 🔁
+- Steuerbuttons direkt in Discord: ⏸️ ▶️ ⏭️ 🔁 🔂
 - Autoplay: sucht automatisch den nächsten Song wenn die Queue leer läuft
 - Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audioformat: `webm` (Standard, verlustfrei) oder `mp3`
 - Internet-Radio via direktem Stream
 - Queue-Verwaltung mit Speichern/Laden, Shuffle, Loop-Modus
-- Kurze Songs werden gecacht, lange Songs (>20 min) und unbekannte Songs starten sofort per Stream
+- Kurze Songs werden gecacht, lange Songs (>20 min) starten sofort per Stream
 - Auto-Leave: Bot verlässt den Voice-Channel wenn alle User weg sind oder nach 2 h Inaktivität
-- Voice-Stabilität: Reconnect-Watchdog setzt die Wiedergabe nach Discord-Abbrüchen (Code 1006) fort
+- Voice-Stabilität: Reconnect-Watchdog setzt die Wiedergabe nach Discord-Abbrüchen (Code 1006) fort; nach einem Netzabbruch baut der Bot die Sprachverbindung selbst neu auf und schreibt einen Hinweis in den Chat
+- Sprachsteuerung („yo bot, spiel mal …") — optional, standardmäßig aus (`VOICE_CONTROL`, `!listen`)
 
 ---
 
@@ -47,6 +48,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!loop` | Loop-Modus: aus → Song → Queue → aus |
 | `!saveq <name>` | Aktuelle Queue speichern |
 | `!loadq <name>` | Gespeicherte Queue laden |
+| `!loadq last` | Queue der letzten Session laden |
 | `!lists` | Gespeicherte Queues auflisten |
 
 **Audio & Radio**
@@ -70,9 +72,12 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 | `!baba` | Baba-Playlist abspielen |
 | `!text` | Songtext abrufen |
 | `!stats` | Bot-Statistiken (RAM, CPU, Cache) |
+| `!help` / `!h` | Befehlsübersicht (blätterbar) |
 | `!j` / `!l` | Voice-Channel beitreten / verlassen |
 | `!dm` | DM-Bridge-Status anzeigen (KI-Dungeon-Master-Audioausgabe) |
 | `!reloadcookies` | `cookies.txt` neu laden ohne Bot-Neustart |
+| `!listen on\|off` | Sprachsteuerung an/aus (setzt `VOICE_CONTROL=true` voraus) |
+| `!debug on\|off` | Terminal-Ausgabe: volle Diagnose oder nur das Wesentliche (`bot.log` ist immer vollständig) |
 | `!restart` | Bot neu starten (nur Owner) — Windows: neues Konsolenfenster, Linux: in-place |
 
 ---
@@ -83,28 +88,32 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ├── main.py                    # Einstiegspunkt
 ├── config.py                  # Env-Variablen laden
 ├── cogs/
-│   ├── music.py               # Kern: Queue, FFmpeg-Wiedergabe, EQ, Autoplay
+│   ├── music.py               # Kern: Queue, EQ, Autoplay, !text, !format
+│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg-Quellen, Prefetch, Suche/Resolve
+│   ├── music_voice_ui.py      # Join/Leave/Idle, Watchdog, Voice-Reparatur, Fortschrittsbalken
 │   ├── music_radio.py         # RadioMixin: Internet-Radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
-│   ├── downloader.py          # yt_dlp-Instanzen, Download-Cache, Streaming
+│   ├── downloader.py          # yt_dlp-Instanzen, Cookie-Modus, Download-Cache, Streaming
+│   ├── downloader_progressive.py # Progressiver Download (Wiedergabe startet schon während des Downloads)
 │   ├── presets.py             # EQ-Filterketten
-│   ├── basic.py               # !j, !l, !ping, !echo, !help
-│   └── dm_bridge.py           # HTTP-Audio-Ausgabe-Bridge für KI-Dungeon-Master (localhost-Pfad + Remote-Byte-Modus)
+│   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart
+│   ├── dm_bridge.py           # HTTP-Audio-Ausgabe-Bridge für KI-Dungeon-Master (localhost-Pfad + Remote-Byte-Modus)
+│   ├── voice_listen.py        # Sprachsteuerung (!listen)
+│   └── voice_sink.py          # Audio-Empfang fürs eigene Zuhören (voice_recv)
 ├── views/
-│   ├── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay)
-│   └── queue_view.py          # Paginierte Queue-Ansicht
-├── utils/
-│   ├── logger.py              # Logging (Konsole + bot.log)
-│   ├── files.py               # safe_unlink + Pending-Delete-Liste (Windows-Datei-Locking)
-│   ├── text.py                # normalize_title (abhängigkeitsfrei, getestet)
-│   └── i18n.py                # Lokalisierungs-Helfer (t()-Funktion)
+│   ├── music_controls.py      # Discord-Buttons (Pause, Resume, Skip, Autoplay, Loop)
+│   ├── queue_view.py          # Paginierte Queue-Ansicht
+│   └── help_view.py           # Paginierte !help-Ansicht
+├── utils/                     # logger (Konsole + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
+├── tools/
+│   └── logsummary.py          # Zeitleiste des letzten Laufs aus bot.log
 ├── locales/
 │   ├── en.json                # Englische Texte
 │   └── de.json                # Deutsche Texte
 ├── downloads/                 # Audio-Cache
 ├── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
-└── tests/                     # pytest-Suite (test_text.py, test_presets.py)
+└── tests/                     # pytest-Suite
 ```
 
 ---
@@ -122,4 +131,4 @@ LANGUAGE=de   # Deutsch
 
 ## Setup
 
-→ Siehe [`SETUP.md`](SETUP.md)
+→ Siehe [`SETUP_DE.md`](SETUP_DE.md)

@@ -36,19 +36,24 @@ mit — Sprache ist kein zweiter, laxerer Weg in den Bot hinein.
 
 **Flags:** `VOICE_CONTROL` (Master, Default aus — ohne ihn existiert
 `/command` gar nicht), `VOICE_OWN_LISTEN` (eigenes Zuhören, braucht Neustart),
-`DM_BOT_USER_ID`, `VOICE_WAKE_WORDS`, `VOICE_BLOCKED_USER_IDS`. Zusätzlich
-muss `!listen on` zur Laufzeit geschaltet werden; die Nachricht dient als
-Referenz für die Command-Ausführung.
+`DM_BOT_USER_ID`, `VOICE_WAKE_WORDS`, `VOICE_BLOCKED_USER_IDS`; fürs eigene
+Zuhören außerdem `VOICE_STT_MODEL`/`_DEVICE`/`_COMPUTE`/`_ALLOW_CPU`
+(Default `medium`/`cuda`/`float16`/`false`) und `VOICE_SILENCE_MS`/`_MIN_MS`/`_MAX_MS`
+(800/700/12000). Zusätzlich muss `!listen on` zur Laufzeit geschaltet werden
+(`check_admin`, siehe `ADMIN_ROLE_ID`); die Nachricht dient als Referenz für
+die Command-Ausführung.
 
 **Eigenes Zuhören** (`VOICE_OWN_LISTEN=true`, Neustart nötig): `SpeechSink`
 (`cogs/voice_sink.py`) puffert dekodiertes PCM pro Sprecher in
 `SpeakerBuffers` (`utils/speech_buffer.py`). Ein Segment gilt als fertig,
-wenn 800 ms kein Paket mehr kam — bewusst über die Paketlücke statt über die
+wenn `VOICE_SILENCE_MS` (800 ms) kein Paket mehr kam — bewusst über die Paketlücke statt über die
 `speaking`-Events, die Clients unzuverlässig setzen. `_flush_loop` (200 ms)
 holt fertige Segmente ab, ein Rauschgate bei −50 dBFS verwirft Tastaturklicks
 vor der GPU, `utils/pcm.py` rechnet 48 kHz Stereo auf 16 kHz Mono float32 um
 (Faktor exakt 3, reine numpy-Mittelung), und `utils/stt.py` transkribiert in
-`asyncio.to_thread`.
+`asyncio.to_thread`. Baut der Music-Cog die Sprachverbindung neu auf
+([Voice-Reparatur](voice-connection.md)), hängt `on_voice_rebuilt` den
+Empfänger an den neuen Client.
 
 **Die Weiche:** Betritt der DM-Bot den Channel, wird sofort abgeschaltet und
 das Modell aus dem VRAM freigegeben. Geht er, wird erst nach 10 s Karenz

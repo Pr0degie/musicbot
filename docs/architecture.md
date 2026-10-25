@@ -3,7 +3,8 @@
 Beschreibung des Ist-Zustands. Das **Warum** hinter den Entscheidungen steht in [`docs/adr/`](adr/README.md);
 die Regeln, die nie gebrochen werden dürfen, in `CLAUDE.md` → *Invarianten*.
 
-Four cogs loaded at startup, all responses in German.
+Vier Cogs, geladen in `main.py` → `setup_hook`: `BasicCommands`, `MusicCommands`, `DMBridge`, `VoiceListen`.
+Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.json` (`LANGUAGE`, Default `en`).
 
 ## Themen
 
@@ -18,22 +19,32 @@ Four cogs loaded at startup, all responses in German.
 
 ## Cogs & Module
 
-- **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`; außerdem `!restart` (Mechanik → [ADR
-  0003](adr/0003-windows-native-zielplattform.md)).
-- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets, autoplay; delegates all yt_dlp
-  work to `self.dl`. Der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` steckt in vier Helpern:
+- **`cogs/basic.py`** — `BasicCommands`: `!j`, `!l`, `!ping`, `!echo`, `!help` (→ `views/help_view.py`
+  `HelpView`), `!debug on|off` (Terminal-Modi → [logging.md](architecture/logging.md)); außerdem `!restart`
+  (Mechanik → [ADR 0003](adr/0003-windows-native-zielplattform.md)).
+- **`cogs/music.py`** — `MusicCommands`: queue, FFmpeg playback, EQ presets (`cogs/presets.py` → `EQ_PRESETS`),
+  autoplay; delegates all yt_dlp work to `self.dl`. Alles Weitere steckt in Mixins — same instance state,
+  registered as cog commands via the MRO (Zerlegung → [ADR 0009](adr/0009-music-cog-mixin-zerlegung.md)):
+  - **`cogs/music_playback.py`** — `PlaybackMixin`: `play_next`-Orchestrator (delegiert an
+    `_handle_queue_empty`, `_build_audio_source`, `_make_after_playing`, `_snapshot_track_state`,
+    `_build_np_embed`, `_schedule_background_work`, `_skip_broken_track` → [playback.md](architecture/playback.md)),
+    `_stop_for_advance`, Prefetch-Kick. Der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` steckt in vier Helpern:
   `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
   Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als
   Parameter — Semantik-Unterschiede der drei Befehle stehen in der Docstring), `_fetch_single_track_info`
   (URL-Zweig von `!next`/`!now`; `!p` behält seinen eigenen wegen Playlist-Support + Duplikat-Warnung).
-  Radio/stats/queue-persistence commands are split into mixins — same instance state, registered as cog
-  commands via the MRO:
+  - **`cogs/music_voice_ui.py`** — `VoiceLifecycleMixin`: Auto-/Idle-Leave, `_voice_watchdog` (auch toter
+    Voice-Poller), Voice-Reparatur nach Gateway-Abbruch (`on_socket_raw_receive`/`on_disconnect`/`on_resumed`/
+    `on_ready` → `_heal_voice`/`_heal_one`, `GATEWAY_ZOMBIE_SECONDS`, danach Chat-Hinweis `status.voice_rebuilt(_track)`) →
+    [voice-connection.md](architecture/voice-connection.md);
+    `PlaybackUiMixin`: Fortschrittsbalken, Pause-Uhr (`_elapsed_seconds`), `_retire_np_message`.
   - **`cogs/music_radio.py`** — `RadioMixin`: internet-radio streaming (`_play_radio_stream`, reconnect,
     `!radio`), `RADIO_STATIONS_FILE`
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
-  - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!lists`, `PLAYLISTS_DIR`
+  - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
-  `playlist_ydl`, `autoplay_ydl` — all via `self.dl.*`), `_url_cache`, `resolve_track()`, `prefetch_next()`,
+  `playlist_ydl`, `autoplay_ydl` — aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
+  `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md)), `_url_cache`, `resolve_track()`, `prefetch_next()`,
   `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`. `resolve_track()` läuft in vier Phasen:
   `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`.
 - **`cogs/downloader_progressive.py`** — `ProgressiveDownloadMixin` (Basis von `Downloader`): In-Flight-Registry
@@ -44,13 +55,26 @@ Four cogs loaded at startup, all responses in German.
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET`
   in `config.py`) so a separate "Bot B" (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
   empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for
-  remote mode. `GET /health`, `GET /debug` (nur localhost, Zustands-Schnappschuss → [logging.md](architecture/logging.md)), `POST /speak` in **two transport modes**: (1) JSON `{"path", "guild_id"?}` →
+  remote mode. `GET /health`, `GET /debug` (nur localhost, Zustands-Schnappschuss → [logging.md](architecture/logging.md)),
+  `POST /command` (nur mit `VOICE_CONTROL`, → `VoiceListen.handle_text()`), `POST /speak` in **two transport modes**: (1) JSON `{"path", "guild_id"?}` →
   path mode (shared disk, localhost); (2) body with `Content-Type: audio/wav` (or `application/octet-stream`)
   + optional `X-DM-Guild-Id` header → byte mode (WAV bytes written to a `tempfile`, auto-deleted after
   playback). Non-loopback requests must pass the secret via HMAC (`hmac.compare_digest`). Both modes play via
   `FFmpegOpusAudio` (same pattern as `_play_radio_stream`). `!dm` shows status. Blocking-`/speak`,
   `bot.dm_speaking` und der bewusst fehlende Rück-Callback → [ADR
   0008](adr/0008-dm-bridge-blocking-speak-ohne-callback.md).
+- **`cogs/voice_listen.py`** — `VoiceListen`: Sprachsteuerung, `handle_text()` als gemeinsamer Eingang
+  (DM-Bot-`/command` + eigenes Zuhören), `!listen on|off`; **`cogs/voice_sink.py`** — `SpeechSink`, einzige Datei
+  mit `voice_recv`-Import auf Modulebene. Dazu `utils/nl_parser.py` (Weckwort + Intents), `utils/pcm.py`
+  (48k-Stereo → 16k-Mono), `utils/speech_buffer.py` (`SpeakerBuffers`), `utils/stt.py` (faster-whisper) →
+  [sprachsteuerung.md](architecture/sprachsteuerung.md).
+- **`utils/logger.py`** — `logger`, Terminal-Modi (`set_console_mode`, `_ESSENTIAL_TAGS`/`_QUIET_TAGS`),
+  `rotate_on_start` (bot.log-Rotation) → [logging.md](architecture/logging.md); **`tools/logsummary.py`** —
+  Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`utils/env_check.py`** — `missing_env_keys()`
+  gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
+- **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
+  [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`),
+  **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`), **`utils/i18n.py`** (`t()`).
 - **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`; `music.py`
   spiegelt sie (plus `utils/text.progress_bar`) als Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/
   `_classify_ffmpeg_error`/`_progress_bar`, damit bestehende Aufrufer und Tests unverändert bleiben.
@@ -68,15 +92,16 @@ Four cogs loaded at startup, all responses in German.
   nach `bot.run()` `[Shutdown] Bot beendet.` — fehlt die Zeile, hing das Herunterfahren. Deshalb startet
   `start.bat` den Bot per `start` in einem **eigenen** Konsolenfenster: in einer Batch-Datei würde cmd.exe
   jedes Strg+C abfangen und `Terminate batch job (Y/N)?` fragen.
-- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay buttons. Only current song
-  keeps buttons — previous get `view=None`. Resume: (1) paused → resume, (2) queue has songs → `play_next`,
-  (3) autoplay on → `autoplay()`. Pause-Button bestätigt ephemer mit Position (`Pausiert bei m:ss` via
+- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay/Loop buttons. Only current song
+  keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel`). Resume: (1) paused →
+  resume, (2) queue has songs → `play_next`, (3) queue empty → Song dieser Karte vorne einreihen, (4) autoplay
+  on → `autoplay()`. Pause-Button bestätigt ephemer mit Position (`Pausiert bei m:ss` via
   `_elapsed_seconds()`; ohne `track_start_time`, z. B. Radio, ohne Position). `SearchAutoplayView`: first
   search result plays immediately, alternatives as buttons (30 s timeout). Stale-Buttons-Fallback nach
   Neustart (`custom_id`-Schema, `StaleControlsFallback`-DynamicItem) → [ADR
   0006](adr/0006-stale-buttons-dynamicitem.md).
 - **`views/queue_view.py`** — `QueueView`: paginated queue embed with Prev/Next buttons; receives
-  `queue_snapshot`, `current_track`, `loop_mode` at construction. Footer summiert Dauern **nur aus dem
+  `queue_snapshot`, `current_track`, `loop_mode`, `autoplay_next_title` at construction. Footer summiert Dauern **nur aus dem
   Metadaten-Cache** (kein yt_dlp-Lookup); fehlen welche → `≥ Summe (n ohne Angabe)` als Untergrenze.
 
 

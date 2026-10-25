@@ -57,13 +57,17 @@ restarts; persistiert wird ein reduzierter Feldsatz → [ADR 0005](../adr/0005-p
 
 ## Streaming vs. Download
 
-`STREAM_THRESHOLD_SECONDS = 20 * 60` (in `downloader.py`). `resolve_track()` returns a direct CDN URL (`str`,
-not `Path`) in two cases — **this is intentional, not a bug**:
+`STREAM_THRESHOLD_SECONDS = 20 * 60` (in `cogs/downloader_progressive.py`, re-exportiert von `downloader.py`).
+`resolve_track()` läuft in vier Phasen (`_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` →
+`_acquire_file`) und returns a direct CDN URL (`str`, not `Path`) in these cases — **this is intentional, not a
+bug**:
 
 - Duration > 20 min → always stream, never download.
 - File not locally cached **und der progressive Pfad greift nicht** (Gates → [ADR
   0001](../adr/0001-progressiver-download-statt-cdn-stream.md)) → stream; `prefetch_next()` downloads queue
   songs in background.
+- Ein adoptierter, noch laufender progressiver Download puffert zu langsam (`_adopt_inflight`), oder eine
+  unvollständige Datei (Leiche) lässt sich nicht löschen (`_clear_corpse`) → stream.
 
 Der progressive Download ist der Primärpfad für ungecachte Tracks ≤ 20 min; Puffer, Gates, Buchhaltung,
 Resume, `_stop_for_advance`, Blockliste und Schnellstart → [ADR
@@ -95,7 +99,7 @@ in `_prefetch_one`.
 `play_next` detects streams via `isinstance(filename, str)` → adds FFmpeg reconnect options, skips
 `codec=copy`. Wachsende Dateien (`is_growing` via `dl.is_incomplete`): Wiedergabe- und Resume-Regeln → [ADR
 0001](../adr/0001-progressiver-download-statt-cdn-stream.md).
-`prefetch_next()` skips download for videos > 20 min.
+`prefetch_next()` (Worker `_prefetch_one`) skips download for videos > 20 min.
 
 ## Persistenz & Dauerbetrieb (schwache Hardware)
 
@@ -118,5 +122,5 @@ Pending-Delete-Liste, `.inprogress`-Sidecar) und die `!restart`-Mechanik → [AD
 Default format: `webm`. Default EQ preset: `punchy`. Filter chains in `cogs/presets.py` (`EQ_PRESETS`).
 Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`.
 `!eq` mid-song: restarts current track with new filter (prepends to queue, calls stop).
-`!format mp3|webm` or `!eq <preset>` → `update_ydl()` → `self.dl.rebuild()` recreates all five instances.
+`!format mp3|webm` → `update_ydl()` → `self.dl.rebuild()` recreates all five instances (`!eq` baut nichts neu).
 FFmpeg filter notes and "do not add" list → comments at top of `cogs/presets.py`.

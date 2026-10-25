@@ -7,14 +7,14 @@
 Added to survive Discord idle-drops.
 
 - `AUTO_LEAVE_SECONDS` (300 s): `on_voice_state_update()` starts this when the last human leaves → disconnect.
-- `IDLE_LEAVE_SECONDS` (7200 s / 2 h): started in `play_next()` when the queue empties and autoplay is off; if
-  nothing plays for 2 h the bot leaves. `_cancel_idle_timer()` clears it the moment playback resumes (also on
+- `IDLE_LEAVE_SECONDS` (7200 s / 2 h): started in `play_next()` → `_handle_queue_empty()` whenever the queue
+  empties (also with autoplay on — an autoplay track cancels it right away); if nothing plays for 2 h the bot leaves. `_cancel_idle_timer()` clears it the moment playback resumes (also on
   radio start). This is a safety net — Discord drops silent voice connections (code **1006**) after ~80 min
   anyway.
 - `_voice_watchdog` (`@tasks.loop(seconds=30)`): after a 1006 auto-reconnect, playback can hang (queue
   non-empty but `is_playing` False, vc not playing/paused). If that state persists ≥2 ticks (~60 s) it calls
-  `play_next()` to recover. Suppressed by `_stopped_by_user` (set on `!stop`/`!x`) and skipped during radio.
-- 1006 reconnect tracebacks are downgraded to a quiet INFO line — see **Logging**.
+  `play_next()` to recover. Suppressed by `_stopped_by_user` (set on `!stop`/`!x`/`!clear`/`!restart`) and skipped during radio.
+- 1006 reconnect tracebacks are downgraded to a quiet INFO line — see [Logging](logging.md).
 - **Voice-Reparatur nach Gateway-Abbruch** (`VoiceLifecycleMixin`, `on_disconnect`/`on_resumed`/`on_ready`):
   Fällt die Netzverbindung zu Discord kurz weg (`Shard ID None has stopped responding to the gateway`), baut
   discord.py das Gateway selbst neu auf, die Sprachverbindung bleibt aber stumm zurück — „verbunden“, Player
@@ -24,12 +24,14 @@ Added to survive Discord idle-drops.
   `on_disconnect` merkt sich die Voice-Clients und ob das Gateway ≥ `GATEWAY_ZOMBIE_SECONDS` (50 s) still war.
   Repariert wird nach Resume **nur** bei vorheriger Stille — den routinemäßigen Reconnect, den Discord etwa
   stündlich verlangt, erreicht die Schwelle nie, der darf keinen Tonaussetzer bekommen — und nach einer neuen
-  Sitzung **immer**. Die Reparatur (`_heal_one`) reiht den Song wie `!seek` an der Hörposition vorn ein
+  Sitzung **immer**. Die Reparatur (`_schedule_voice_heal` → `_heal_voice`, nie zwei parallel) wartet, solange der DM-Bot
+  spricht (`bot.dm_speaking`, max. 60 s), dann reiht `_heal_one` den Song wie `!seek` an der Hörposition vorn ein
   (`_current_seek_offset` + `_elapsed_seconds()`), stoppt, meldet den alten Client ab (5-s-Timeout: ein
   verwaister bekommt nie eine Bestätigung), verbindet über `connect_voice` neu und ruft `play_next` selbst;
   währenddessen prallt jedes andere `play_next` (after_playing des alten Clients, Watchdog) an
   `_voice_healing` ab. Radio wird neu gestartet, Pause bleibt Pause. `bot.dispatch("voice_rebuilt")` lässt
-  `VoiceListen` den Empfänger an den neuen Client hängen.
+  `VoiceListen` (`on_voice_rebuilt`) den Empfänger an den neuen Client hängen. Im Chat erscheint ein Hinweis
+  (`status.voice_rebuilt` bzw. `status.voice_rebuilt_track` mit Titel und Position, nach 120 s gelöscht).
 - **Toter Voice-Poller** (`utils/voice.py` → `dead_voice_poller`, geprüft im `_voice_watchdog`): discord.py
   hält die Sprachverbindung mit genau einer Task am Leben („Voice websocket poller“). Stirbt sie an einer
   Exception, bleibt `is_connected()` True und der Player sendet ins Leere — Discord zeigt den grünen Ring, es

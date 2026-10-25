@@ -134,7 +134,9 @@ Bridge-Weg sofort wirkt.
 
 ## Beiläufiger Fund
 
-`views/music_controls.py:169` und `:198` stoppen Musik-Quellen direkt statt über
+`views/music_controls.py:170` und `:199` (`SearchAutoplayView._make_callback`) stoppen Musik-Quellen direkt statt über
 `_stop_for_advance()` und umgehen damit `_suppress_resume`. Das ist ein
 **vorbestehender** Verstoß gegen die ADR-0001-Invariante, unabhängig von diesem
 Feature — hier nur notiert, nicht mitgefixt.
+
+**Stand 2026-10-25:** Bei aktivem eigenen Zuhören verbindet `connect_voice()` mit `SafeVoiceRecvClient` (Unterklasse von `VoiceRecvClient` in `utils/voice.py`): voice_recv 0.5.2a179 crasht in `_remove_ssrc`, wenn jemand den Channel verlässt, solange nicht zugehört wird — und legt damit still die Voice-Verbindung lahm. Der beiläufige Fund oben besteht unverändert (jetzt über `stop_playback()`, weiterhin ohne `_stop_for_advance()`).

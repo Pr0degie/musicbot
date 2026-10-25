@@ -2,7 +2,7 @@
 
 ## 1. Requirements
 
-- Python 3.10+
+- Python 3.10+ (CI tests with 3.12)
 - FFmpeg in PATH
 - Node.js in PATH (for YouTube signature solver)
 
@@ -12,7 +12,7 @@
 
 ```bat
 git clone https://github.com/Pr0degie/musicbot.git
-cd Musicbot
+cd musicbot
 install.bat
 ```
 
@@ -23,7 +23,7 @@ FFmpeg via winget and creates a `.env` stub.
 
 ```bash
 git clone https://github.com/Pr0degie/musicbot.git
-cd Musicbot
+cd musicbot
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -67,6 +67,12 @@ DM_BRIDGE_SECRET=
 | `DM_BRIDGE_HOST` | DM-Bridge HTTP host. `127.0.0.1` (default) = localhost path mode; LAN/Tailscale IP or `0.0.0.0` = remote byte mode |
 | `DM_BRIDGE_PORT` | DM-Bridge HTTP port (default `8765`) |
 | `DM_BRIDGE_SECRET` | Shared secret for DM-Bridge auth. Empty + `127.0.0.1` = no secret; **required** for any non-loopback host |
+| `LOG_MODE` | Terminal output: `quiet` (default, essentials + problems) or `debug` (full diagnostics); switchable at runtime with `!debug on\|off` |
+
+All further settings (security flags, download cache limit, voice control) are
+documented in [`.env.example`](.env.example). On every start the bot logs a
+`[Config]` line listing the keys from `.env.example` that are missing in your
+`.env` — those simply run on their default.
 
 ## 4. YouTube Authentication (Cookies)
 
@@ -196,3 +202,21 @@ If a 1006 drop happens *during* playback, discord.py auto-reconnects and a built
 **reconnect watchdog** restarts the next track if playback got stuck — transparent,
 no configuration needed. These reconnects are logged as a quiet INFO line instead of
 a red traceback, so seeing one occasionally in `bot.log` is normal.
+
+If the network connection to Discord drops for a while (or the voice connection
+silently dies), the bot rebuilds the voice connection itself, resumes the song
+at the current position and posts a short note in chat (`🔌 … reconnected`).
+
+## 7. Logs & Troubleshooting
+
+- `bot.log` always contains the full diagnostics, regardless of `LOG_MODE`/`!debug`.
+  It is rotated on every start: the current run is `bot.log`, the previous ten
+  runs are kept as `bot.log.1` (previous) … `bot.log.10`. Startup errors end up
+  there too, since the `start.bat` window closes immediately.
+- `python tools/logsummary.py` condenses the last run into a timeline (warnings,
+  errors, voice/gateway events, commands, songs). `--list` shows all runs in a
+  file, `-n 30` only the last 30 events, `python tools/logsummary.py bot.log.1`
+  the previous run.
+- While the bot is running, `GET /debug` on the DM-Bridge (default
+  `http://127.0.0.1:8765/debug`) returns a state snapshot as JSON — it only
+  answers requests from the same machine.
