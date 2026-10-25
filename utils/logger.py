@@ -181,6 +181,7 @@ _ESSENTIAL_TAGS = {
     "Auto-Join", "Auto-Leave", "Auto-Start", "KEINE VERBINDUNG",
     "play_next", "Voice", "DMBridge",
     "INIT", "Cookies", "yt-dlp", "restart", "Maintenance", "Shutdown",
+    "Config",                                # fehlende .env-Keys beim Start
     "Sprachbefehl", "Voice-Listen",          # gesprochene Befehle
 }
 

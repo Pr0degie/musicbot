@@ -33,6 +33,12 @@ class MusicBot(commands.Bot):
         )
 
     async def setup_hook(self):
+        from utils.env_check import missing_env_keys
+
+        missing = missing_env_keys()
+        if missing:
+            logger.info(f"[Config] {len(missing)} Einstellung(en) nicht in .env – laufen auf Default: "
+                        f"{', '.join(missing)} (Vorlage: .env.example)")
         # Cogs werden hier registriert – BasicCommands für Voice-Management,
         # MusicCommands für alles rund um Wiedergabe und Queue,
         # DMBridge für die HTTP-Bridge zum KI-Dungeon-Master (Bot B).
