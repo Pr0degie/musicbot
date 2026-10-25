@@ -10,6 +10,7 @@ import asyncio
 import os
 import tempfile
 import types
+import warnings
 from collections import deque
 
 # Muss vor dem ersten Import von utils.logger stehen (kommt über cogs.music
@@ -21,6 +22,11 @@ try:
 except OSError:
     pass
 os.environ["MUSICBOT_LOG_FILE"] = TEST_LOG_FILE
+
+# discord.player importiert audioop (ab Python 3.13 kommt es über audioop-lts,
+# das discord.py selbst mitbringt) – sonst Lärm in jedem Testlauf. Muss vor dem
+# ersten discord-Import stehen, pytests filterwarnings greift dafür zu spät.
+warnings.filterwarnings("ignore", message="'audioop' is deprecated", category=DeprecationWarning)
 
 import pytest  # noqa: E402 – erst nach MUSICBOT_LOG_FILE
 
