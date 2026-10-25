@@ -5,12 +5,12 @@
 
 ## Kontext
 
-Ein separater „Bot B" (AI dungeon master) soll diesen Bot über HTTP sprechen lassen. Bot B braucht ein Fertig-Signal; gleichzeitig darf die Musik-Wiedergabe dem DM-Voice-Client nicht in die Quere kommen.
+Ein separater DM-Bot (AI dungeon master) soll diesen Bot über HTTP sprechen lassen. Der DM-Bot braucht ein Fertig-Signal; gleichzeitig darf die Musik-Wiedergabe dem DM-Voice-Client nicht in die Quere kommen.
 
 ## Entscheidung
 
 - `/speak` is **blocking** — the HTTP response is the only done-signal; `_speak_lock` serializes calls, stops running music first.
-- No callback back to Bot B by design — feedback-loop protection lives entirely in Bot B.
+- No callback back to the DM-Bot by design — feedback-loop protection lives entirely in the DM-Bot.
 
 ## Konsequenzen
 

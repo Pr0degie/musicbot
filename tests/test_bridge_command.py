@@ -1,7 +1,7 @@
-"""Tests für POST /command – der Weg, auf dem Bot B gesprochene Wünsche
+"""Tests für POST /command – der Weg, auf dem der DM-Bot gesprochene Wünsche
 an den Musikbot weiterreicht.
 
-Bot B hört ohnehin schon im Voice-Channel zu und transkribiert. Statt hier ein
+Der DM-Bot hört ohnehin schon im Voice-Channel zu und transkribiert. Statt hier ein
 zweites Whisper danebenzustellen, schickt er den fertigen Satz herüber.
 """
 import asyncio
@@ -82,7 +82,7 @@ def test_satz_wird_an_den_gemeinsamen_eingang_gereicht():
 
 
 def test_bot_b_bekommt_immer_200_damit_er_nicht_retryt():
-    """Ein unverstandener Satz ist kein HTTP-Fehler – sonst würde Bot B es
+    """Ein unverstandener Satz ist kein HTTP-Fehler – sonst würde der DM-Bot es
     wieder und wieder versuchen."""
     listen = FakeListen(antwort={"status": "ignored", "reason": "not_understood"})
     antwort = run(baue_bridge(listen)._handle_command(

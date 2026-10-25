@@ -3,7 +3,7 @@
 Ein Parser, zwei Eingänge. `handle_text()` ist die einzige Stelle, durch die
 ein gesprochener Satz läuft – egal ob er
 
-  1. von Bot B (KI-Dungeon-Master) über `POST /command` der DM-Bridge kommt,
+  1. vom DM-Bot (KI-Dungeon-Master) über `POST /command` der DM-Bridge kommt,
      der ohnehin schon im Voice-Channel zuhört und transkribiert, oder
   2. später aus dem eigenen Zuhören (discord-ext-voice-recv + lokales Whisper).
 
@@ -102,7 +102,7 @@ class VoiceListen(commands.Cog):
             await self._reply_channel.send(text)
 
     def _bridge_present(self) -> bool:
-        """Sitzt Bot B im selben Voice-Channel?
+        """Sitzt der DM-Bot im selben Voice-Channel?
 
         Dann hört dieser Bot nicht selbst zu – ein zweites Whisper daneben wäre
         doppelte Arbeit und doppelter VRAM. Bewusst keine Heuristik "irgendein
@@ -121,7 +121,7 @@ class VoiceListen(commands.Cog):
 
     async def handle_text(self, text, *, user_id, guild_id=None, source="bridge") -> dict:
         """Verarbeitet einen transkribierten Satz. Gibt immer ein dict zurück,
-        damit der HTTP-Handler den Grund an Bot B zurückmelden kann."""
+        damit der HTTP-Handler den Grund an den DM-Bot zurückmelden kann."""
         if not self.enabled:
             return _ignoriert("disabled")
 
@@ -387,7 +387,7 @@ class VoiceListen(commands.Cog):
             if not self.enabled:
                 await ctx.send(t("status.listen_status_off"))
             else:
-                quelle = "Bot B" if self._bridge_present() else "eigenes Zuhören"
+                quelle = "DM-Bot" if self._bridge_present() else "eigenes Zuhören"
                 await ctx.send(t("status.listen_status_on", source=quelle))
             return
 

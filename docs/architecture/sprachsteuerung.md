@@ -10,13 +10,13 @@ Details und Begründungen → [ADR 0011](../adr/0011-sprachsteuerung-ein-parser-
 ist die einzige Stelle, durch die ein gesprochener Satz läuft:
 
 ```
-Bot B im Voice-Channel?  ──ja──▶  Bot B transkribiert ohnehin
+DM-Bot im Voice-Channel? ──ja──▶  DM-Bot transkribiert ohnehin
                                   └─▶ POST /command ──┐
                                                       ├──▶ handle_text() ──▶ !p / !s / !x / ...
    ──nein──▶  eigenes Zuhören (voice-recv + Whisper)  ──┘
 ```
 
-Sitzt Bot B im Channel, hört dieser Bot **nicht** selbst zu: er transkribiert
+Sitzt der DM-Bot im Channel, hört dieser Bot **nicht** selbst zu: er transkribiert
 bereits mit `faster-whisper-medium`, ein zweites Modell daneben wäre doppelte
 Arbeit und doppelter VRAM. Erkannt wird er über die konfigurierte
 `DM_BOT_USER_ID`, nie per Heuristik.

@@ -21,7 +21,7 @@ DM_BOT_USER_ID=          ← wird in Teil 2 gefüllt
 ```
 
 - [ ] Bot **neu starten** (`start.bat`) — ein laufender Bot hat noch den alten Code
-- [ ] Im Terminal steht `[DMBridge] /command aktiv – Sprachbefehle von Bot B.`
+- [ ] Im Terminal steht `[DMBridge] /command aktiv – Sprachbefehle vom DM-Bot.`
 
 Fehlt diese Zeile, greift `VOICE_CONTROL=true` nicht. Dann `.env` prüfen.
 

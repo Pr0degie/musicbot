@@ -53,7 +53,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   die Konstanten `STREAM_THRESHOLD_SECONDS`/`PROGRESSIVE_*` (von `downloader.py` re-exportiert). Zustand in
   `Downloader.__init__`; `_purge_stale_progressive` bleibt im Downloader (braucht `DOWNLOAD_DIR`).
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET`
-  in `config.py`) so a separate "Bot B" (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
+  in `config.py`) so a separate DM-Bot (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
   empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for
   remote mode. `GET /health`, `GET /debug` (nur localhost, Zustands-Schnappschuss → [logging.md](architecture/logging.md)),
   `POST /command` (nur mit `VOICE_CONTROL`, → `VoiceListen.handle_text()`), `POST /speak` in **two transport modes**: (1) JSON `{"path", "guild_id"?}` →

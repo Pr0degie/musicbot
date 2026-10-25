@@ -34,17 +34,17 @@ das „was läuft als nächstes").
 `VoiceListen.handle_text()` ist die einzige Stelle, durch die ein gesprochener
 Satz läuft. Davor gibt es zwei Quellen:
 
-1. **`POST /command`** der DM-Bridge — Bot B (KI-Dungeon-Master) sitzt ohnehin
+1. **`POST /command`** der DM-Bridge — der DM-Bot (KI-Dungeon-Master) sitzt ohnehin
    im Voice-Channel, hört zu und transkribiert bereits mit
    `Systran/faster-whisper-medium`. Er reicht den Rohtext samt Sprecher-ID
    herüber.
 2. **Eigenes Zuhören** über `discord-ext-voice-recv` plus lokales Whisper —
-   für den Fall, dass Bot B nicht im Channel sitzt.
+   für den Fall, dass der DM-Bot nicht im Channel sitzt.
 
 Der ausschlaggebende Fund: auf der Maschine liegt bereits ein vollständiger
 `faster-whisper-medium`-Cache (1,45 GB). Ein zweites Whisper im selben Channel
 wäre doppelte Transkription **und** doppelter VRAM (~5 GB statt 2,5). Deshalb
-gilt: **sitzt Bot B im Channel, hört dieser Bot nicht selbst zu.**
+gilt: **sitzt der DM-Bot im Channel, hört dieser Bot nicht selbst zu.**
 
 Weil beide Quellen denselben Eingang benutzen, sitzen Rechte-Prüfung,
 Weckwort-Erkennung, Parsing, Rückmeldung und Logging genau einmal im Code —
@@ -106,9 +106,9 @@ Kommentaren weiter über `vc.stop()` reden darf).
 Die ADR-0001-Invariante bleibt unverändert: sie regelt, **wer** stoppen darf
 (`_stop_for_advance` für Musik-Quellen), nicht **wie**.
 
-### 5. Bot-B-Erkennung über eine konfigurierte ID, nicht per Heuristik
+### 5. DM-Bot-Erkennung über eine konfigurierte ID, nicht per Heuristik
 
-`DM_BOT_USER_ID` benennt Bot B explizit. Die naheliegende Heuristik „irgendein
+`DM_BOT_USER_ID` benennt den DM-Bot explizit. Die naheliegende Heuristik „irgendein
 fremder Bot im Channel" wurde verworfen: ein Recording-Bot, ein zweiter
 Musikbot oder ein Soundboard würde damit das eigene Zuhören abschalten — ein
 Verhalten, das niemand debuggen will. Ohne gesetzte ID gibt es keine Weiche.

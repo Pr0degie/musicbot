@@ -41,7 +41,7 @@ class MusicBot(commands.Bot):
                         f"{', '.join(missing)} (Vorlage: .env.example)")
         # Cogs werden hier registriert – BasicCommands für Voice-Management,
         # MusicCommands für alles rund um Wiedergabe und Queue,
-        # DMBridge für die HTTP-Bridge zum KI-Dungeon-Master (Bot B).
+        # DMBridge für die HTTP-Bridge zum KI-Dungeon-Master (DM-Bot).
         await self.add_cog(BasicCommands(self))
         await self.add_cog(MusicCommands(self))
         await self.add_cog(DMBridge(self))

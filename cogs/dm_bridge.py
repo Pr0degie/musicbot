@@ -38,10 +38,10 @@ def _peer_is_loopback(request) -> bool:
 class DMBridge(commands.Cog):
     """HTTP-Bridge für den KI-Dungeon-Master.
 
-    Dieser Bot ("Bot A") ist im DM-Setup der *Mund*: er empfängt über einen
-    kleinen aiohttp-Server fertige Audiodateien von Bot B (dem "Ohr + Hirn")
+    Dieser Bot (der Musikbot) ist im DM-Setup der *Mund*: er empfängt über einen
+    kleinen aiohttp-Server fertige Audiodateien vom DM-Bot (dem "Ohr + Hirn")
     und spielt sie im Voice-Channel ab. Das gesamte Empfangen/STT/LLM/TTS
-    passiert in Bot B – hier kommt nur das Abspielen dazu.
+    passiert im DM-Bot – hier kommt nur das Abspielen dazu.
 
     Der Server lauscht ausschließlich auf localhost (siehe config.py); es gibt
     keine externe Erreichbarkeit.
@@ -67,7 +67,7 @@ class DMBridge(commands.Cog):
         app.router.add_post("/speak", self._handle_speak)
         if config.VOICE_CONTROL:
             app.router.add_post("/command", self._handle_command)
-            logger.info("[DMBridge] /command aktiv – Sprachbefehle von Bot B.")
+            logger.info("[DMBridge] /command aktiv – Sprachbefehle vom DM-Bot.")
         # access_log=None: sonst landet jeder /health- und /debug-Abruf als
         # aiohttp.access-Zeile in bot.log.
         self._runner = web.AppRunner(app, access_log=None)
@@ -97,16 +97,16 @@ class DMBridge(commands.Cog):
         return web.json_response(snapshot(self.bot), dumps=lambda o: json.dumps(o, ensure_ascii=False, indent=1))
 
     async def _handle_command(self, request):
-        """Nimmt einen von Bot B transkribierten Satz entgegen ("yo bot, spiel ...").
+        """Nimmt einen vom DM-Bot transkribierten Satz entgegen ("yo bot, spiel ...").
 
-        Bot B sitzt ohnehin im Voice-Channel und transkribiert; statt hier ein
+        Der DM-Bot sitzt ohnehin im Voice-Channel und transkribiert; statt hier ein
         zweites Whisper danebenzustellen, reicht er den Rohtext samt Sprecher-ID
         herüber. Geparst wird ausschließlich hier – nur so bleiben die Regeln
         an einem Ort.
 
         Anders als /speak antwortet dieser Endpunkt sofort und meldet
         Fachliches (nicht verstanden, kein Weckwort, gesperrt) als HTTP 200 mit
-        einem "status"-Feld: Bot B soll darauf nie einen Retry aufbauen.
+        einem "status"-Feld: Der DM-Bot soll darauf nie einen Retry aufbauen.
         """
         if DM_BRIDGE_SECRET and not _peer_is_loopback(request):
             sent = request.headers.get("X-DM-Secret", "")
@@ -142,7 +142,7 @@ class DMBridge(commands.Cog):
         return web.json_response(ergebnis)
 
     async def _handle_speak(self, request):
-        """Spielt eine von Bot B gelieferte Audiodatei im Voice-Channel ab.
+        """Spielt eine vom DM-Bot gelieferte Audiodatei im Voice-Channel ab.
 
         Zwei Transporte (ADR 010):
         - JSON ``{"path","guild_id?"}`` → **Pfad-Modus** (gemeinsame Platte, localhost).
@@ -165,7 +165,7 @@ class DMBridge(commands.Cog):
         return web.json_response({"error": "unsupported content-type"}, status=400)
 
     async def _speak_path(self, request):
-        """Pfad-Modus (localhost): Bot B besitzt die Datei, wir spielen sie nur ab."""
+        """Pfad-Modus (localhost): Der DM-Bot besitzt die Datei, wir spielen sie nur ab."""
         try:
             data = await request.json()
         except Exception:
@@ -197,7 +197,7 @@ class DMBridge(commands.Cog):
         if len(body) > _MAX_WAV_BYTES:
             return web.json_response({"error": "file too large"}, status=413)
 
-        # Voice zuerst prüfen – spart das Schreiben auf Platte, wenn Bot A gar nicht im Voice ist.
+        # Voice zuerst prüfen – spart das Schreiben auf Platte, wenn dieser Bot gar nicht im Voice ist.
         vc = self._resolve_voice_client(request.headers.get("X-DM-Guild-Id"))
         if vc is None or not vc.is_connected():
             return web.json_response({"error": "not connected to voice"}, status=409)

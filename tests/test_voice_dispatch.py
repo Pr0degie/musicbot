@@ -1,7 +1,7 @@
 """Tests für den gemeinsamen Eingang der Sprachsteuerung.
 
 `VoiceListen.handle_text()` ist die einzige Stelle, durch die gesprochene
-Befehle laufen – egal ob sie von Bot B über die DM-Bridge kommen oder aus dem
+Befehle laufen – egal ob sie vom DM-Bot über die DM-Bridge kommen oder aus dem
 eigenen Zuhören. Deshalb liegen hier auch alle Abwehrfälle.
 """
 import asyncio

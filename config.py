@@ -14,7 +14,7 @@ YDL_COOKIES_FILE = os.getenv("YDL_COOKIES_FILE", "")
 YDL_BROWSER = os.getenv("YDL_BROWSER", "firefox")
 LANGUAGE = os.getenv("LANGUAGE", "en")
 
-# DM-Bridge: kleiner HTTP-Server, über den Bot B (das "Ohr+Hirn") diesem Bot
+# DM-Bridge: kleiner HTTP-Server, über den DM-Bot (das "Ohr+Hirn") diesem Bot
 # fertige Audiodateien zum Abspielen schickt. Localhost (Default) = Pfad-Modus
 # (gemeinsame Platte). Für getrennte Maschinen DM_BRIDGE_HOST auf die Tailscale-/
 # LAN-IP (oder 0.0.0.0) setzen; dann kommen die WAV-Bytes übers Netz (ADR 010).
@@ -108,16 +108,16 @@ def _parse_csv(value, default: tuple) -> tuple:
     return teile or default
 
 
-# Master-Flag für beide Eingänge (Bot-B-Bridge und eigenes Zuhören).
+# Master-Flag für beide Eingänge (DM-Bridge und eigenes Zuhören).
 # false (Default) = exakt heutiges Verhalten, /command existiert nicht.
 VOICE_CONTROL = _parse_bool(os.getenv("VOICE_CONTROL", "false"))
 
 # Nur der eigene Zuhör-Weg (discord-ext-voice-recv + lokales Whisper).
 # Entscheidet die Voice-Client-Klasse beim connect() – Änderung braucht einen
-# Neustart. false (Default) = Bot B liefert die Sätze über die DM-Bridge.
+# Neustart. false (Default) = der DM-Bot liefert die Sätze über die DM-Bridge.
 VOICE_OWN_LISTEN = _parse_bool(os.getenv("VOICE_OWN_LISTEN", "false"))
 
-# Discord-User-ID von "Bot B" (KI-Dungeon-Master). Sitzt er im selben
+# Discord-User-ID des DM-Bots (KI-Dungeon-Master). Sitzt er im selben
 # Voice-Channel, hört dieser Bot NICHT selbst zu – ein zweites Whisper daneben
 # wäre doppelte Arbeit und doppelter VRAM. 0/leer = keine Weiche.
 DM_BOT_USER_ID = _parse_user_id(os.getenv("DM_BOT_USER_ID", ""))
