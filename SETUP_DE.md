@@ -29,6 +29,12 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+**Optional – eigenes Zuhören** (`VOICE_CONTROL=true` und `VOICE_OWN_LISTEN=true`, d. h. der Bot erkennt
+Sprache selbst, wenn der DM-Bot nicht im Voice-Channel sitzt): `pip install -r requirements-voice.txt`
+(faster-whisper, numpy, discord-ext-voice-recv). Zusammen mit dem DM-Bot nicht nötig – der bringt seine eigene
+Spracherkennung mit und schickt die erkannten Sätze per `POST /command`. Ohne diese Pakete läuft der Bot
+unverändert.
+
 ## 3. Konfiguration (`.env`)
 
 `.env`-Datei im Projektordner anlegen:

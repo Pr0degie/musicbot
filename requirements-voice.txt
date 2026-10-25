@@ -1,0 +1,18 @@
+# Optional – nur für das eigene Zuhören der Sprachsteuerung
+# (VOICE_CONTROL=true UND VOICE_OWN_LISTEN=true): der Musikbot transkribiert
+# dann selbst, falls der DM-Bot nicht im Voice-Channel sitzt.
+#
+# Mit dem DM-Bot (Repo dungeonmaster) ist das nicht nötig: der bringt
+# faster-whisper und voice-recv in seiner eigenen Umgebung mit und schickt
+# die erkannten Sätze per POST /command. Ohne diese Pakete läuft der Bot
+# unverändert; VOICE_OWN_LISTEN=true meldet dann beim Verbinden, dass das
+# eigene Zuhören entfällt.
+#
+# Installation: pip install -r requirements-voice.txt
+
+# Exakt gepinnt: utils/voice.SafeVoiceRecvClient greift auf Interna dieser Alpha
+# zu (_reader, _id_to_ssrc). Vor einem Update tests/test_voice_heal.py laufen
+# lassen – er meldet auch, wenn das Paket den Fehler selbst behoben hat.
+discord-ext-voice-recv==0.5.2a179
+faster-whisper>=1.2
+numpy>=1.26

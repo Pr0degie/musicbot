@@ -4,10 +4,11 @@ Discord liefert 48 kHz, 16 bit, stereo. Whisper will 16 kHz mono float32.
 48000/16000 ist exakt 3, deshalb reicht Mittelung über je drei Samples –
 das wirkt zugleich als grober Anti-Alias-Filter. Kein scipy, kein torchaudio.
 """
-import numpy as np
 import pytest
 
 from utils.pcm import pcm48_stereo_to_f32_16k, pcm_duration_seconds, rms_dbfs
+
+np = pytest.importorskip("numpy")  # optionales Voice-Paket (requirements-voice.txt)
 
 
 def pcm_bytes(samples):

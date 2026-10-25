@@ -4,12 +4,4 @@ python-dotenv==1.2.2
 PyNaCl==1.5.0
 psutil
 
-# Nur für das eigene Zuhören der Sprachsteuerung (VOICE_OWN_LISTEN=true).
-# Ohne diese Pakete läuft der Bot unverändert; er nimmt die Sätze dann über
-# POST /command vom DM-Bot entgegen.
-# Exakt gepinnt: utils/voice.SafeVoiceRecvClient greift auf Interna dieser Alpha
-# zu (_reader, _id_to_ssrc). Vor einem Update tests/test_voice_heal.py laufen
-# lassen – er meldet auch, wenn das Paket den Fehler selbst behoben hat.
-discord-ext-voice-recv==0.5.2a179
-faster-whisper>=1.2
-numpy>=1.26
+# Optional: eigenes Zuhören der Sprachsteuerung → requirements-voice.txt

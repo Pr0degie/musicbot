@@ -3,8 +3,15 @@
 Discord liefert 48 kHz, 16 bit, stereo, little-endian. Whisper will 16 kHz
 mono float32. Kein `audioop` (in Python 3.13 entfernt), kein scipy, kein
 FFmpeg-Subprozess – nur numpy, das mit ctranslate2 ohnehin an Bord ist.
+
+numpy wird erst in den Rechenfunktionen importiert: es gehört zu den
+optionalen Voice-Paketen (requirements-voice.txt), und die Konstanten hier
+brauchen VoiceListen/SpeechBuffers auch ohne eigenes Zuhören beim Start.
 """
-import numpy as np
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 SAMPLE_RATE = 48000
 KANAELE = 2
@@ -22,13 +29,15 @@ def pcm_duration_seconds(nbytes: int) -> float:
     return nbytes / float(SAMPLE_RATE * BYTES_PRO_FRAME)
 
 
-def pcm48_stereo_to_f32_16k(data: bytes) -> np.ndarray:
+def pcm48_stereo_to_f32_16k(data: bytes) -> "np.ndarray":
     """48 kHz Stereo-PCM → 16 kHz Mono float32, wie Whisper es erwartet.
 
     Unvollständige Frames am Ende (ein halb angekommenes Paket) werden
     abgeschnitten statt zu werfen. Die Mittelung über drei Samples ersetzt
     einen echten Tiefpass – für Sprache völlig ausreichend.
     """
+    import numpy as np
+
     # frombuffer wirft bei ungerader Byte-Zahl – ein halb angekommenes Paket
     # darf die Pipeline aber nicht anhalten.
     roh = np.frombuffer(data[: len(data) - (len(data) % BYTES_PRO_SAMPLE)], dtype="<i2")
@@ -53,6 +62,8 @@ def rms_dbfs(data: bytes) -> float:
 
     Spart Transkriptionen von Tastaturklicks und Lüftergeräuschen.
     """
+    import numpy as np
+
     roh = np.frombuffer(data[: len(data) - (len(data) % BYTES_PRO_SAMPLE)], dtype="<i2")
     if roh.size == 0:
         return -120.0
