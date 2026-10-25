@@ -46,7 +46,9 @@ Radio code lives in `cogs/music_radio.py` (`RadioMixin`). `RADIO_STATIONS_FILE` 
 `{name, url}`).
 State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
 `_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error or
-unexpected stream end.
+unexpected stream end (`_radio_should_reconnect`, `RADIO_MAX_RECONNECTS`). Der Zähler wird erst nach
+`RADIO_STABLE_SECONDS` (60 s) stabilem Lauf zurückgesetzt, nicht beim Start – sonst verbände ein sofort
+abbrechender Sender endlos neu (der Reconnect startet selbst über `_play_radio_stream`).
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
 `!stop` beendet Radio oder aktuelle Wiedergabe (Queue bleibt erhalten). Radio-Modus und Song-Modus schließen
 sich gegenseitig aus.

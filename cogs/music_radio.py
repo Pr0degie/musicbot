@@ -22,6 +22,11 @@ from utils.checks import check_admin
 from views.music_controls import MusicControlView
 
 RADIO_STATIONS_FILE = Path("radio_stations.json")
+# Erst nach so langem stabilem Lauf gilt ein Abbruch als neuer Vorfall und
+# bekommt wieder volle RADIO_MAX_RECONNECTS Versuche. Sonst würde ein Sender,
+# der sich verbindet und sofort wieder abbricht, endlos neu verbunden.
+RADIO_STABLE_SECONDS = 60
+RADIO_MAX_RECONNECTS = 3
 
 
 def _write_stations(stations: dict) -> None:
@@ -42,6 +47,19 @@ class RadioMixin:
         if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
             self._autoplay_prefetch_task.cancel()
             self._autoplay_prefetch_task = None
+
+    def _radio_should_reconnect(self, ran_seconds: float) -> bool:
+        """Nach einem Stream-Abbruch: noch ein Reconnect-Versuch? Zählt mit.
+
+        Der Zähler wird nicht beim Start zurückgesetzt (der Reconnect startet
+        über _play_radio_stream, die Kappe griffe sonst nie), sondern erst,
+        wenn der Stream RADIO_STABLE_SECONDS lang lief."""
+        if ran_seconds >= RADIO_STABLE_SECONDS:
+            self._radio_reconnect_count = 0
+        if self._radio_reconnect_count >= RADIO_MAX_RECONNECTS:
+            return False
+        self._radio_reconnect_count += 1
+        return True
 
     async def _play_radio_stream(self, ctx, url: str, name: str) -> bool:
         """Startet einen Internet-Radio-Stream direkt über FFmpeg (kein yt_dlp).
@@ -95,9 +113,8 @@ class RadioMixin:
                 logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
             if not self.is_radio:
                 return
-            if self._radio_reconnect_count < 3:
-                self._radio_reconnect_count += 1
-                logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/3 für {name}")
+            if self._radio_should_reconnect(time.monotonic() - started):
+                logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/{RADIO_MAX_RECONNECTS} für {name}")
                 asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx), self.bot.loop)
             else:
                 logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
@@ -114,9 +131,8 @@ class RadioMixin:
         await self._retire_np_message(self.now_playing_msg, self._np_title)
 
         self._playback_done.clear()
-        self.track_start_time = time.monotonic()
+        self.track_start_time = started = time.monotonic()
         ctx.voice_client.play(source, after=after_radio)
-        self._radio_reconnect_count = 0
 
         embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
         embed.add_field(name=t("embed.status"), value=t("embed.radio_live"), inline=True)
