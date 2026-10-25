@@ -61,6 +61,8 @@
   "error.stale_controls": "⚠️ The bot was restarted — these buttons belong to an old message. Use the current now-playing message or start with `!p`.",
   "status.format_set": "🔄 Audio format set to **{format}**{note}.",
   "status.format_note": " (takes effect on the next track)",
+  "status.voice_rebuilt": "🔌 Lost the connection to Discord for a moment – reconnected.",
+  "status.voice_rebuilt_track": "🔌 Lost the connection to Discord for a moment – reconnected, resuming at {pos}: **{title}**",
   "status.autoplay_added": "🔁 Autoplay: **{title}**",
   "status.radio_stopped": "⏹️ Radio stopped.",
   "status.playback_stopped": "⏹️ Playback stopped.",

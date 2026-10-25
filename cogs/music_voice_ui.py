@@ -216,6 +216,7 @@ class VoiceLifecycleMixin:
         was_paused = old_vc.is_paused()
         radio = (self.radio_stream_url, self.radio_station_name) if self.is_radio else None
         restart_track = False
+        resume_at = None   # (Titel, Sekunde) für die Chat-Meldung
 
         self._voice_healing = True
         try:
@@ -229,6 +230,7 @@ class VoiceLifecycleMixin:
                 url, title, *_ = self.current_track
                 pos = self._current_seek_offset + (self._elapsed_seconds() or 0)
                 self._seek_offset = max(0, int(pos) - 1)   # 1 s Überlappung
+                resume_at = (title, int(pos))
                 self.current_track = None   # kein Doppel-Insert durch die Loop-Logik
                 self.queue.appendleft((url, title))
                 restart_track = True
@@ -262,6 +264,16 @@ class VoiceLifecycleMixin:
         ctx = self._last_ctx
         if ctx is None:
             return
+        # Sonst repariert der Bot still, und niemand weiß, wie oft das passiert.
+        try:
+            if resume_at:
+                mins, secs = divmod(resume_at[1], 60)
+                await ctx.send(t("status.voice_rebuilt_track", pos=f"{mins}:{secs:02d}", title=resume_at[0]),
+                               delete_after=120)
+            else:
+                await ctx.send(t("status.voice_rebuilt"), delete_after=120)
+        except Exception:
+            pass
         if radio:
             await self._play_radio_stream(ctx, *radio)
         elif restart_track or (self.queue and self.is_playing):

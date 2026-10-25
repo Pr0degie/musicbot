@@ -207,6 +207,7 @@ def test_song_laeuft_an_der_hoerposition_weiter(monkeypatch):
         assert 117 <= mc._seek_offset <= 120     # 20 + 100 − 1 s Überlappung
         assert mc._voice_healing is False
         assert "voice_rebuilt" in mc._dispatched
+        assert any("2:00" in text and "Song" in text for text in mc._last_ctx.texts), mc._last_ctx.texts
         cleanup_cog(mc)
     run(body())
 

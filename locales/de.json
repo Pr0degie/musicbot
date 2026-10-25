@@ -61,6 +61,8 @@
   "error.stale_controls": "⚠️ Der Bot wurde neu gestartet — diese Buttons gehören zu einer alten Nachricht. Nutze die aktuelle Now-Playing-Nachricht oder starte mit `!p`.",
   "status.format_set": "🔄 Audioformat auf **{format}** gesetzt{note}.",
   "status.format_note": " (wirkt ab dem nächsten Titel)",
+  "status.voice_rebuilt": "🔌 Verbindung zu Discord war kurz weg – neu verbunden.",
+  "status.voice_rebuilt_track": "🔌 Verbindung zu Discord war kurz weg – neu verbunden, weiter bei {pos}: **{title}**",
   "status.autoplay_added": "🔁 Autoplay: **{title}**",
   "status.radio_stopped": "⏹️ Radio beendet.",
   "status.playback_stopped": "⏹️ Wiedergabe gestoppt.",
