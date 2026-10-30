@@ -19,13 +19,14 @@ gestartet und gestoppt.
 
 import asyncio
 import time
+from dataclasses import dataclass
 
 import discord
 from discord.ext import commands, tasks
 
 from utils.logger import logger
 from utils.i18n import t
-from utils.voice import connect_voice, dead_voice_poller, stop_playback
+from utils.voice import connect_voice, dead_voice_poller, disconnect_voice, stop_playback
 
 # Ab so vielen Sekunden Funkstille gilt ein Gateway-Reconnect als echter
 # Abbruch. Discord schickt alle ~41 s ein Heartbeat-ACK, discord.py gibt nach
@@ -36,6 +37,16 @@ GATEWAY_ZOMBIE_SECONDS = 50
 # Bestätigung des Voice-Abmeldens: ein verwaister Client (nach neuer Gateway-
 # Sitzung) bekommt sie nie – discord.py würde sonst 30 s darauf warten.
 HEAL_DISCONNECT_TIMEOUT = 5.0
+
+
+@dataclass
+class FrozenPlayback:
+    """Was vor einem Neuaufbau der Sprachverbindung lief (_freeze_playback)."""
+    was_active: bool
+    was_paused: bool
+    radio: tuple | None
+    restart_track: bool = False
+    resume_at: tuple | None = None   # (Titel, Sekunde) für die Chat-Meldung
 
 
 class VoiceLifecycleMixin:
@@ -54,7 +65,7 @@ class VoiceLifecycleMixin:
             self.current_track = None
             if voice_client.is_playing() or voice_client.is_paused():
                 self._stop_for_advance(voice_client)
-            await voice_client.disconnect()
+            await disconnect_voice(voice_client)
             if self.text_channel:
                 await self.text_channel.send(t("misc.auto_leave"))
             logger.info("[Auto-Leave] Channel verlassen – keine User mehr.")
@@ -85,7 +96,7 @@ class VoiceLifecycleMixin:
             self.queue.clear()
             self.is_playing = False
             self.current_track = None
-            await voice_client.disconnect()
+            await disconnect_voice(voice_client)
             if self.text_channel:
                 await self.text_channel.send(t("misc.idle_leave"))
             logger.info("[Auto-Leave] Channel verlassen – zu lange inaktiv (Idle).")
@@ -212,49 +223,11 @@ class VoiceLifecycleMixin:
             logger.warning(f"[Voice] Neuaufbau {reason} nicht möglich – Channel nicht mehr da.")
             return
 
-        was_active = old_vc.is_playing() or old_vc.is_paused()
-        was_paused = old_vc.is_paused()
-        radio = (self.radio_stream_url, self.radio_station_name) if self.is_radio else None
-        restart_track = False
-        resume_at = None   # (Titel, Sekunde) für die Chat-Meldung
-
         self._voice_healing = True
         try:
-            if radio:
-                # after_radio startet ohne is_radio keinen eigenen Reconnect.
-                self.is_radio = False
-                if was_active:
-                    stop_playback(old_vc)
-            elif was_active and self.current_track:
-                # Wie !seek: Track mit Position vorn einreihen, dann stoppen.
-                url, title, *_ = self.current_track
-                pos = self._current_seek_offset + (self._elapsed_seconds() or 0)
-                self._seek_offset = max(0, int(pos) - 1)   # 1 s Überlappung
-                resume_at = (title, int(pos))
-                self.current_track = None   # kein Doppel-Insert durch die Loop-Logik
-                self.queue.appendleft((url, title))
-                restart_track = True
-                self._stop_for_advance(old_vc)
-            if was_active:
-                # after_playing einmal durchlaufen lassen – sein play_next
-                # prallt am Reparatur-Flag ab.
-                try:
-                    await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-                except asyncio.TimeoutError:
-                    pass
-                await asyncio.sleep(0.2)
-
-            for vc in {old_vc, channel.guild.voice_client} - {None}:
-                try:
-                    await asyncio.wait_for(vc.disconnect(force=True), timeout=HEAL_DISCONNECT_TIMEOUT)
-                except Exception:
-                    pass
-            # Brach das Abmelden im Timeout ab, steht der alte Client noch in
-            # discord.pys Liste – connect() würde "Already connected" werfen.
-            stale = channel.guild.voice_client
-            if stale is not None:
-                stale.cleanup()
-            await connect_voice(channel)
+            frozen = self._freeze_playback(old_vc)
+            await self._wait_frozen(frozen)
+            await self._reconnect_voice(channel, old_vc)
         finally:
             self._voice_healing = False
 
@@ -266,21 +239,85 @@ class VoiceLifecycleMixin:
             return
         # Sonst repariert der Bot still, und niemand weiß, wie oft das passiert.
         try:
-            if resume_at:
-                mins, secs = divmod(resume_at[1], 60)
-                await ctx.send(t("status.voice_rebuilt_track", pos=f"{mins}:{secs:02d}", title=resume_at[0]),
-                               delete_after=120)
+            if frozen.resume_at:
+                mins, secs = divmod(frozen.resume_at[1], 60)
+                await ctx.send(t("status.voice_rebuilt_track", pos=f"{mins}:{secs:02d}",
+                                 title=frozen.resume_at[0]), delete_after=120)
             else:
                 await ctx.send(t("status.voice_rebuilt"), delete_after=120)
         except Exception:
             pass
-        if radio:
-            await self._play_radio_stream(ctx, *radio)
-        elif restart_track or (self.queue and self.is_playing):
+        await self._resume_frozen(frozen, ctx)
+
+    # --- Bausteine für einen Neuaufbau (Reparatur, Rauswurf-Schutz) ---------
+    # Aufrufer setzen _voice_healing davor, damit after_playing des alten
+    # Clients nicht den nächsten Song startet.
+
+    def _freeze_playback(self, vc):
+        """Hält fest, was lief, und stoppt es – synchron, ohne await, damit kein
+        after_playing dazwischenkommt. Der laufende Song wandert wie bei !seek
+        mit seiner Position vorn in die Queue."""
+        was_active = vc is not None and (vc.is_playing() or vc.is_paused())
+        frozen = FrozenPlayback(
+            was_active=was_active,
+            was_paused=vc is not None and vc.is_paused(),
+            radio=(self.radio_stream_url, self.radio_station_name) if self.is_radio else None,
+        )
+        if frozen.radio:
+            # after_radio startet ohne is_radio keinen eigenen Reconnect.
+            self.is_radio = False
+            if was_active:
+                stop_playback(vc)
+        elif was_active and self.current_track:
+            url, title, *_ = self.current_track
+            pos = self._current_seek_offset + (self._elapsed_seconds() or 0)
+            self._seek_offset = max(0, int(pos) - 1)   # 1 s Überlappung
+            frozen.resume_at = (title, int(pos))
+            self.current_track = None   # kein Doppel-Insert durch die Loop-Logik
+            self.queue.appendleft((url, title))
+            frozen.restart_track = True
+            self._stop_for_advance(vc)
+        return frozen
+
+    def _drop_frozen(self, frozen):
+        """Doch kein Neuaufbau: den vorn eingereihten Song wieder entfernen."""
+        if frozen.restart_track and self.queue:
+            self.queue.popleft()
+            self._seek_offset = 0
+        self.is_playing = False
+
+    async def _wait_frozen(self, frozen):
+        if frozen.was_active:
+            # after_playing einmal durchlaufen lassen – sein play_next
+            # prallt am Reparatur-Flag ab.
+            try:
+                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                pass
+            await asyncio.sleep(0.2)
+
+    async def _reconnect_voice(self, channel, old_vc=None):
+        for vc in {old_vc, channel.guild.voice_client} - {None}:
+            try:
+                await asyncio.wait_for(disconnect_voice(vc, force=True, forget=False),
+                                       timeout=HEAL_DISCONNECT_TIMEOUT)
+            except Exception:
+                pass
+        # Brach das Abmelden im Timeout ab, steht der alte Client noch in
+        # discord.pys Liste – connect() würde "Already connected" werfen.
+        stale = channel.guild.voice_client
+        if stale is not None:
+            stale.cleanup()
+        await connect_voice(channel)
+
+    async def _resume_frozen(self, frozen, ctx):
+        if frozen.radio:
+            await self._play_radio_stream(ctx, *frozen.radio)
+        elif frozen.restart_track or (self.queue and self.is_playing):
             self.is_playing = True
             await self.play_next(ctx)
             vc = ctx.voice_client
-            if was_paused and vc and vc.is_playing():
+            if frozen.was_paused and vc and vc.is_playing():
                 vc.pause()
                 self._mark_paused()
                 self.is_playing = False

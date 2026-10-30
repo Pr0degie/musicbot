@@ -124,6 +124,10 @@ def intended_channel_id(guild_id):
     return _intended.get(guild_id)
 
 
+def forget_intended_channel(guild_id):
+    _intended.pop(guild_id, None)
+
+
 def set_intended_channel(channel):
     """Für den Move-Schutz, wenn der Owner den Bot per Hand verschoben hat."""
     _intended[channel.guild.id] = channel.id
@@ -134,3 +138,16 @@ async def move_voice(voice_client, channel):
     damit der Move-Schutz den eigenen Wechsel nicht zurückdreht."""
     _intended[channel.guild.id] = channel.id
     await voice_client.move_to(channel)
+
+
+async def disconnect_voice(voice_client, *, forget=True, **kwargs):
+    """Der einzige Verbindungsabbau im Projekt.
+
+    forget=True (Normalfall: !l, Auto-Leave, Neustart) vergisst den gewollten
+    Channel, damit der Rauswurf-Schutz den eigenen Abgang nicht rückgängig
+    macht. Die Voice-Reparatur baut gleich wieder auf und übergibt False.
+    """
+    guild = getattr(voice_client, "guild", None)
+    if forget and guild is not None:
+        forget_intended_channel(guild.id)
+    await voice_client.disconnect(**kwargs)

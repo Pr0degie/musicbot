@@ -18,7 +18,8 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
   Deregistrierung nach Thread-Ende, `cogs/downloader_progressive.py`), wachsende Datei nie unlinken → [ADR 0002](docs/adr/0002-inflight-registry.md).
 - Musik-`vc.stop()` nur via `_stop_for_advance()` ([ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md));
   jeder Wiedergabe-Stopp über `utils/voice.stop_playback()` (erzwingt `tests/test_no_raw_vc_stop.py`).
-- Verbindungsaufbau nur über `utils/voice.connect_voice()` (Klasse nur beim connect setzbar; mit eigenem
+- Verbindungsauf-/-abbau und Channel-Wechsel nur über `utils/voice.connect_voice()`/`disconnect_voice()`/`move_voice()`
+  (merken den gewollten Channel für den Move-Schutz, erzwingt `tests/test_voice_guard_move.py`; Klasse nur beim connect setzbar; mit eigenem
   Zuhören `SafeVoiceRecvClient`, fixt den voice_recv-Crash beim Channel-Verlassen) → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
 - Gesprochene Befehle nur durch `VoiceListen.handle_text()`; synthetische Message statt `ctx.invoke`, `ctx.author`
   echtes `Member`; DM-Bot im Channel → kein eigenes Sprachmodell → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).

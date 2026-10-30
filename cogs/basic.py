@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from utils.i18n import t
 import config
-from utils.voice import connect_voice, move_voice
+from utils.voice import connect_voice, disconnect_voice, move_voice
 
 
 class BasicCommands(commands.Cog):
@@ -118,7 +118,7 @@ class BasicCommands(commands.Cog):
             music._stopped_by_user = True
         for vc in list(self.bot.voice_clients):
             try:
-                await vc.disconnect(force=True)
+                await disconnect_voice(vc, force=True)
             except Exception:
                 pass  # Restart darf am Voice-Cleanup nicht scheitern
         if music is not None:
@@ -151,8 +151,12 @@ class BasicCommands(commands.Cog):
     async def leave(self, ctx):
         """Trennt den Bot vom Voice-Channel."""
         if ctx.voice_client is not None:
+            # Mit Move-Schutz darf nur der Owner den Bot wegschicken.
+            if config.MOVE_GUARD and not await self.bot.is_owner(ctx.author):
+                await ctx.send(t("error.leave_owner_only"))
+                return
             try:
-                await ctx.voice_client.disconnect()
+                await disconnect_voice(ctx.voice_client)
                 await ctx.send(t("status.left"))
             except Exception as e:
                 await ctx.send(t("error.leave_failed", err=type(e).__name__))

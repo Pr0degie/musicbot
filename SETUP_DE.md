@@ -223,10 +223,10 @@ nach 3 Mutes in 5 Minuten wartet er nur jeweils 3 Sekunden. Ohne das Recht pausi
 bittet im Chat darum und spielt weiter, sobald ihn jemand entmutet. Abschalten mit `MUTE_GUARD=false`.
 
 **Move-Schutz** (`MOVE_GUARD=true`, standardmäßig aus): Nur der Bot-Owner darf den Bot in
-einen anderen Voice-Channel verschieben. Zieht ihn jemand anderes weg (oder holt ihn per
-`!j` aus einem anderen Channel), geht er sofort zurück. Damit er dein eigenes Verschieben
-erkennt, braucht er das Recht **Audit-Log anzeigen**; ohne geht er immer zurück und du
-nimmst ihn per `!j` mit.
+einen anderen Voice-Channel verschieben oder rauswerfen. Zieht ihn jemand anderes weg oder
+trennt ihn, kommt er sofort zurück und spielt an der Stelle weiter; `!j` aus einem anderen
+Channel und `!l` sind dann Owner-only. Damit er dein eigenes Verschieben erkennt, braucht er
+das Recht **Audit-Log anzeigen**; ohne geht er immer zurück und du nutzt `!j` bzw. `!l`.
 
 ## 7. Logs & Fehlersuche
 

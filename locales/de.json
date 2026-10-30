@@ -190,5 +190,7 @@
   "status.mute_no_permission": "🔇 Ich wurde stummgeschaltet und darf mich nicht selbst entmuten – gib meiner Rolle „Mitglieder stummschalten“. Bis dahin ist die Musik pausiert.",
   "status.mute_resumed": "🔊 Wieder entmutet – weiter geht's.",
   "error.move_owner_only": "🔒 Verschieben darf mich nur der Bot-Owner.",
-  "status.move_reverted": "🔒 Verschieben darf mich nur der Bot-Owner – bin zurück in **{channel}**."
+  "status.move_reverted": "🔒 Verschieben darf mich nur der Bot-Owner – bin zurück in **{channel}**.",
+  "error.leave_owner_only": "🔒 Wegschicken darf mich nur der Bot-Owner.",
+  "status.kick_reverted": "🔒 Rauswerfen darf mich nur der Bot-Owner – bin zurück in **{channel}**."
 }

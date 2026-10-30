@@ -16,6 +16,9 @@ der Bot merkt aber, dass er nicht mehr dort ist, wo er selbst hinwollte
 (`utils.voice.intended_channel_id`), und geht zurück. Wer verschoben hat, steht
 im Audit-Log (Recht "Audit-Log anzeigen"); war es der Owner, bleibt er. Ohne
 das Recht geht er immer zurück – der Owner nimmt ihn dann per `!j` mit.
+Dasselbe beim Rauswerfen: Der Bot kommt zurück und spielt an der Hörposition
+weiter (Bausteine der Voice-Reparatur, cogs/music_voice_ui.py). `!j` in einen
+anderen Channel und `!l` sind dann Owner-only (cogs/basic.py).
 """
 
 import asyncio
@@ -27,7 +30,8 @@ from discord.ext import commands
 import config
 from utils.i18n import t
 from utils.logger import logger
-from utils.voice import intended_channel_id, move_voice, set_intended_channel
+from utils.voice import (forget_intended_channel, intended_channel_id, move_voice,
+                         set_intended_channel)
 
 FAST_UNMUTES = 3       # so oft pro Fenster sofort entmuten
 WINDOW_SECONDS = 300
@@ -130,7 +134,7 @@ class VoiceGuardMixin:
         except Exception:
             pass   # Kein Schreibrecht o. Ä. – das Log reicht
 
-    # --- Move-Schutz ---------------------------------------------------------
+    # --- Move- und Rauswurf-Schutz -------------------------------------------
 
     @commands.Cog.listener("on_voice_state_update")
     async def _move_guard(self, member, before, after):
@@ -140,13 +144,15 @@ class VoiceGuardMixin:
             return
         guild = member.guild
         if before.channel is None and after.channel is not None:
-            # Beigetreten: Audit-Log-Stand merken, damit der nächste Move als
-            # neu erkannt wird (Discord fasst Moves zu einem Eintrag zusammen).
-            await self._who_moved(guild, None, wait=False)
+            # Beigetreten: Audit-Log-Stand merken, damit der nächste Eingriff
+            # als neu erkannt wird (Discord fasst sie zu einem Eintrag zusammen).
+            for action in (discord.AuditLogAction.member_move, discord.AuditLogAction.member_disconnect):
+                await self._audit_actor(guild, action, prime=True)
             return
-        if before.channel is None or after.channel is None:
+        if before.channel is not None and after.channel is None:
+            await self._on_kicked(guild)
             return
-        if before.channel.id == after.channel.id:
+        if before.channel is None or before.channel.id == after.channel.id:
             return
         if after.channel.id == intended_channel_id(guild.id):
             return   # eigener Wechsel (!j, Zurückgehen)
@@ -160,7 +166,7 @@ class VoiceGuardMixin:
             set_intended_channel(channel)   # nichts zum Zurückgehen – bleibt halt
             return
 
-        actor = await self._who_moved(guild, channel.id)
+        actor = await self._audit_actor(guild, discord.AuditLogAction.member_move, channel.id)
         if actor is not None and await self.bot.is_owner(actor):
             set_intended_channel(channel)
             logger.info(f"[Move-Schutz] Owner hat mich nach {channel.name} verschoben – bleibe.")
@@ -183,31 +189,78 @@ class VoiceGuardMixin:
         if len(self._move_backs) == 1:   # bei Move-Kriegen nicht den Chat fluten
             await self._mute_notice(t("status.move_reverted", channel=home.name), delete_after=120)
 
-    async def _who_moved(self, guild, channel_id, wait=True):
-        """Wer hat zuletzt jemanden in channel_id verschoben? None = unbekannt.
+    async def _on_kicked(self, guild):
+        """Jemand hat den Bot aus dem Channel geworfen: zurück und an der
+        Hörposition weiterspielen – außer es war der Owner.
 
-        Discord fasst Moves desselben Moderators zu einem Eintrag zusammen und
-        zählt nur `extra.count` hoch – neu ist also ein unbekannter, frischer
-        Eintrag oder einer mit gestiegenem Zähler. channel_id=None merkt sich
-        nur den aktuellen Stand. Der Eintrag erscheint teils mit Verzögerung,
-        daher bis zu zwei Versuche.
+        Eigene Abgänge (!l, Auto-Leave, Neustart) laufen über disconnect_voice
+        und haben den gewollten Channel schon vergessen; die Voice-Reparatur
+        setzt _voice_healing.
+        """
+        home_id = intended_channel_id(guild.id)
+        if home_id is None or self._voice_healing:
+            return
+        home = guild.get_channel(home_id)
+        if home is None:
+            forget_intended_channel(guild.id)
+            return
+        # Synchron vor dem ersten await: sonst startet after_playing des
+        # getrennten Clients schon den nächsten Song.
+        self._voice_healing = True
+        frozen = self._freeze_playback(guild.voice_client)
+        try:
+            async with self._move_lock:
+                actor = await self._audit_actor(guild, discord.AuditLogAction.member_disconnect)
+                if actor is not None and await self.bot.is_owner(actor):
+                    forget_intended_channel(guild.id)
+                    self._drop_frozen(frozen)
+                    logger.info("[Move-Schutz] Owner hat mich rausgeworfen – bleibe draußen.")
+                    return
+                if _backoff_due(self._move_backs):
+                    await asyncio.sleep(BACKOFF_SECONDS)
+                await self._wait_frozen(frozen)
+                await self._reconnect_voice(home)
+        except Exception as e:
+            logger.warning(f"[Move-Schutz] Zurück nach {home.name} fehlgeschlagen: {type(e).__name__}: {e}")
+            self._drop_frozen(frozen)
+            return
+        finally:
+            self._voice_healing = False
+
+        self._move_backs.append(time.monotonic())
+        who = getattr(actor, "display_name", None) or "unbekannt"
+        logger.info(f"[Move-Schutz] Von {who} rausgeworfen – zurück in {home.name}.")
+        self.bot.dispatch("voice_rebuilt")   # VoiceListen hängt den Empfänger neu an
+        if len(self._move_backs) == 1:
+            await self._mute_notice(t("status.kick_reverted", channel=home.name), delete_after=120)
+        if self._last_ctx is not None:
+            await self._resume_frozen(frozen, self._last_ctx)
+
+    async def _audit_actor(self, guild, action, channel_id=None, prime=False):
+        """Wer hat zuletzt `action` ausgeführt (bei Moves: in channel_id)?
+        None = unbekannt.
+
+        Discord fasst Eingriffe desselben Moderators zu einem Eintrag zusammen
+        und zählt nur `extra.count` hoch – neu ist also ein unbekannter, frischer
+        Eintrag oder einer mit gestiegenem Zähler. prime=True merkt sich nur den
+        aktuellen Stand. Der Eintrag erscheint teils mit Verzögerung, daher bis
+        zu zwei Versuche.
         """
         if not guild.me.guild_permissions.view_audit_log:
-            if channel_id is not None and not self._audit_warned:
+            if not prime and not self._audit_warned:
                 self._audit_warned = True
                 logger.warning("[Move-Schutz] Recht 'Audit-Log anzeigen' fehlt – kann nicht erkennen, "
-                               "wer verschoben hat, gehe immer zurück.")
+                               "wer verschoben/rausgeworfen hat, gehe immer zurück.")
             return None
-        for _ in range(2 if wait else 1):
-            if wait:
+        for _ in range(1 if prime else 2):
+            if not prime:
                 await asyncio.sleep(1)
             try:
-                entries = [e async for e in guild.audit_logs(
-                    limit=10, action=discord.AuditLogAction.member_move)]
+                entries = [e async for e in guild.audit_logs(limit=10, action=action)]
             except discord.HTTPException as e:
                 logger.warning(f"[Move-Schutz] Audit-Log nicht lesbar: {type(e).__name__}: {e}")
                 return None
-            seen, found = self._audit_seen, None
+            seen, found = self._audit_seen.get(action.name, {}), None
             jetzt = discord.utils.utcnow()
             for e in entries:   # neueste zuerst
                 count = getattr(e.extra, "count", 1) or 1
@@ -216,9 +269,12 @@ class VoiceGuardMixin:
                     neu = count > seen[e.id]
                 else:
                     neu = (jetzt - e.created_at).total_seconds() < AUDIT_FRESH_SECONDS
-                if found is None and neu and ch is not None and ch.id == channel_id:
+                passt = channel_id is None or (ch is not None and ch.id == channel_id)
+                if found is None and neu and passt:
                     found = e.user
-            self._audit_seen = {e.id: getattr(e.extra, "count", 1) or 1 for e in entries}
-            if found is not None or channel_id is None:
+            self._audit_seen[action.name] = {e.id: getattr(e.extra, "count", 1) or 1 for e in entries}
+            if prime:
+                return None
+            if found is not None:
                 return found
         return None

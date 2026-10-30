@@ -190,5 +190,7 @@
   "status.mute_no_permission": "🔇 I was server-muted and can't unmute myself – give my role \"Mute Members\". Music is paused until then.",
   "status.mute_resumed": "🔊 Unmuted again – resuming.",
   "error.move_owner_only": "🔒 Only the bot owner can move me.",
-  "status.move_reverted": "🔒 Only the bot owner can move me – back in **{channel}**."
+  "status.move_reverted": "🔒 Only the bot owner can move me – back in **{channel}**.",
+  "error.leave_owner_only": "🔒 Only the bot owner can send me away.",
+  "status.kick_reverted": "🔒 Only the bot owner can kick me – back in **{channel}**."
 }

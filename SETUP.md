@@ -219,9 +219,10 @@ needs the **Mute Members** permission for the bot role. It never gives up; after
 permission it pauses, asks for it in chat and resumes once someone unmutes it. Disable with `MUTE_GUARD=false`.
 
 **Move guard** (`MOVE_GUARD=true`, off by default): only the bot owner may move the bot
-to another voice channel. If anyone else drags it (or uses `!j` from another channel),
-it goes straight back. To tell your own drags apart it needs the **View Audit Log**
-permission; without it, it always goes back and you take it along with `!j`.
+to another voice channel or kick it out. If anyone else drags or disconnects it, it goes
+straight back and resumes the song where it was; `!j` from another channel and `!l` are
+owner-only. To tell your own moves apart it needs the **View Audit Log** permission;
+without it, it always goes back and you use `!j` / `!l` instead.
 
 ## 7. Logs & Troubleshooting
 

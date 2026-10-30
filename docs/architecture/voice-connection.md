@@ -50,11 +50,18 @@ Added to survive Discord idle-drops.
   angehaltener Live-Stream bricht ab) und meldet sich im Chat. Das Echo des eigenen Entmutens wird über
   `_mute_blocked` ignoriert; entmutet ein Mensch, wird nur eine vom Mute-Schutz gesetzte Pause aufgehoben. Log-Tag `[Mute-Schutz]`.
 - **Move-Schutz** (gleiche Datei, Flag `MOVE_GUARD`, Default aus — ADR 0004): nur der Owner darf den Bot verschieben.
-  `utils/voice.py` merkt sich pro Server den selbst gewählten Channel (`connect_voice`, `move_voice` — der einzige
-  Channel-Wechsel, erzwingt `tests/test_voice_guard_move.py`). Landet der Bot woanders, fragt `_who_moved` das
-  Audit-Log (`member_move`, Recht „Audit-Log anzeigen“): Discord fasst Moves eines Moderators zu einem Eintrag
+  `utils/voice.py` merkt sich pro Server den selbst gewählten Channel (`connect_voice`, `move_voice`;
+  `disconnect_voice` vergisst ihn — die einzigen Wege, erzwingt `tests/test_voice_guard_move.py`). Landet der Bot
+  woanders, fragt `_audit_actor` das Audit-Log (`member_move`, Recht „Audit-Log anzeigen“): Discord fasst Moves eines Moderators zu einem Eintrag
   zusammen und erhöht nur `extra.count`, deshalb vergleicht `_audit_seen` die Zähler; beim Beitreten wird der
   Stand vorgemerkt. War es der Owner, wird der neue Channel übernommen, sonst `move_voice` zurück (Backoff wie
   beim Mute, Chat-Hinweis `status.move_reverted` nur beim ersten im Fenster). Ohne Audit-Recht geht er immer
   zurück. `!j` in einen anderen Channel ist bei aktivem Flag Owner-only (`error.move_owner_only`).
   Log-Tag `[Move-Schutz]`.
+- **Rauswurf-Schutz** (Teil von `MOVE_GUARD`, `_on_kicked`): Verliert der Bot den Channel, obwohl ein gewollter
+  gemerkt ist und keine Reparatur läuft, war es ein fremder Abgang. Noch **vor dem ersten await** setzt er
+  `_voice_healing` und `_freeze_playback` (sonst startet `after_playing` des getrennten Clients den nächsten Song),
+  dann `member_disconnect` im Audit-Log: Owner → `_drop_frozen`, Channel vergessen, bleibt draußen; sonst
+  `_wait_frozen` → `_reconnect_voice` → `_resume_frozen` an der Hörposition, `voice_rebuilt`-Dispatch,
+  Chat `status.kick_reverted`. Die drei Bausteine teilt er mit `_heal_one` (`FrozenPlayback`, `music_voice_ui.py`).
+  `!l` ist bei aktivem Flag Owner-only (`error.leave_owner_only`).
