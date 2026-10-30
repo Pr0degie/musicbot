@@ -179,7 +179,7 @@ _ESSENTIAL_TAGS = {
     "Nächster Track", "Wiedergabe", "Queue", "Radio", "Autoplay",
     "p", "next", "now",                      # Sucheinstiege ([{log_tag}])
     "Auto-Join", "Auto-Leave", "Auto-Start", "KEINE VERBINDUNG",
-    "play_next", "Voice", "DMBridge",
+    "play_next", "Voice", "DMBridge", "Mute-Schutz", "Move-Schutz",
     "INIT", "Cookies", "yt-dlp", "restart", "Maintenance", "Shutdown",
     "Config",                                # fehlende .env-Keys beim Start
     "Sprachbefehl", "Voice-Listen",          # gesprochene Befehle

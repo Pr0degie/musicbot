@@ -28,13 +28,14 @@ from cogs.music_radio import RadioMixin
 from cogs.music_stats import StatsMixin
 from cogs.music_queue_io import QueuePersistenceMixin
 from cogs.music_voice_ui import VoiceLifecycleMixin, PlaybackUiMixin
+from cogs.music_voice_guard import VoiceGuardMixin
 from cogs.music_playback import PlaybackMixin, _YTDLP_FAILED
 
 SCORE_FILE = Path("play_counts.json")
 
 
 class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
-                    VoiceLifecycleMixin, PlaybackUiMixin, PlaybackMixin,
+                    VoiceLifecycleMixin, VoiceGuardMixin, PlaybackUiMixin, PlaybackMixin,
                     commands.Cog):
     """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay.
 
@@ -90,6 +91,13 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self._stuck_ticks = 0       # Aufeinanderfolgende Watchdog-Ticks im Hänge-Zustand
         self._stopped_by_user = False  # True nach !stop/!x – unterdrückt den Watchdog-Restart
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
+        self._mute_unmutes = deque()   # Zeitpunkte der Selbst-Entmutungen (Mute-Schutz)
+        self._mute_blocked = False     # True = konnte mich nicht entmuten, warte auf Unmute
+        self._paused_by_mute = False   # True = Mute-Schutz hat die Musik pausiert
+        self._move_backs = deque()     # Zeitpunkte des Zurückgehens (Move-Schutz)
+        self._move_lock = asyncio.Lock()
+        self._audit_seen = {}          # Audit-Log-Eintrag-ID → count (Move-Schutz)
+        self._audit_warned = False     # fehlendes Audit-Log-Recht nur einmal loggen
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
         self.now_playing_embed = None  # Embed-Referenz für Live-Edit des Fortschrittsbalkens
         self._np_title = None       # Titel/Sender der aktuellen Karte – für ihren Rückbau zur Textzeile

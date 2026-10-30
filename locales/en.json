@@ -186,5 +186,9 @@
   "status.listen_source_own": "🔀 The DM bot is gone – I'm listening myself from now on (model `{model}`).",
   "error.listen_no_model": "❌ Could not load the speech model: {err}",
   "status.listen_loading": "⏳ Loading speech model `{model}` … (one-off, takes a moment)",
-  "status.listen_hint_dm_bot": "💡 **{bot}** is in the channel too. If that's your DM bot, set `DM_BOT_USER_ID={id}` in your .env – then I won't load my own speech model while it's listening."
+  "status.listen_hint_dm_bot": "💡 **{bot}** is in the channel too. If that's your DM bot, set `DM_BOT_USER_ID={id}` in your .env – then I won't load my own speech model while it's listening.",
+  "status.mute_no_permission": "🔇 I was server-muted and can't unmute myself – give my role \"Mute Members\". Music is paused until then.",
+  "status.mute_resumed": "🔊 Unmuted again – resuming.",
+  "error.move_owner_only": "🔒 Only the bot owner can move me.",
+  "status.move_reverted": "🔒 Only the bot owner can move me – back in **{channel}**."
 }

@@ -1,6 +1,7 @@
 """Voice-Client-Helfer.
 
-Zustandslos wie der Rest von utils/ — und ohne Import von
+Zustandslos bis auf ein Register: welchen Channel der Bot pro Server selbst
+gewählt hat (`intended_channel_id`, für den Move-Schutz). Ohne Import von
 discord.ext.voice_recv auf Modulebene: der Helfer muss auch dann funktionieren,
 wenn das (experimentelle) Empfangs-Paket gar nicht installiert ist.
 """
@@ -107,7 +108,29 @@ async def connect_voice(channel, **kwargs):
     Ohne aktivierte Sprachsteuerung ist das byte-identisch zu einem nackten
     channel.connect() – kein zusätzliches Argument, kein anderes Verhalten.
     """
+    _intended[channel.guild.id] = channel.id
     cls = voice_client_cls()
     if cls is not None:
         return await channel.connect(cls=cls, **kwargs)
     return await channel.connect(**kwargs)
+
+
+# guild_id → channel_id, in den der Bot selbst gegangen ist (connect/move).
+# Landet er woanders, hat ihn jemand verschoben (cogs/music_voice_guard.py).
+_intended: dict[int, int] = {}
+
+
+def intended_channel_id(guild_id):
+    return _intended.get(guild_id)
+
+
+def set_intended_channel(channel):
+    """Für den Move-Schutz, wenn der Owner den Bot per Hand verschoben hat."""
+    _intended[channel.guild.id] = channel.id
+
+
+async def move_voice(voice_client, channel):
+    """Der einzige Channel-Wechsel im Projekt – merkt sich das Ziel vorher,
+    damit der Move-Schutz den eigenen Wechsel nicht zurückdreht."""
+    _intended[channel.guild.id] = channel.id
+    await voice_client.move_to(channel)

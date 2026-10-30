@@ -213,6 +213,16 @@ If the network connection to Discord drops for a while (or the voice connection
 silently dies), the bot rebuilds the voice connection itself, resumes the song
 at the current position and posts a short note in chat (`🔌 … reconnected`).
 
+**Mute guard:** if someone server-mutes the bot, it unmutes itself right away. This
+needs the **Mute Members** permission for the bot role. It never gives up; after
+3 mutes within 5 minutes it just waits 3 seconds before each unmute. Without the
+permission it pauses, asks for it in chat and resumes once someone unmutes it. Disable with `MUTE_GUARD=false`.
+
+**Move guard** (`MOVE_GUARD=true`, off by default): only the bot owner may move the bot
+to another voice channel. If anyone else drags it (or uses `!j` from another channel),
+it goes straight back. To tell your own drags apart it needs the **View Audit Log**
+permission; without it, it always goes back and you take it along with `!j`.
+
 ## 7. Logs & Troubleshooting
 
 - `bot.log` always contains the full diagnostics, regardless of `LOG_MODE`/`!debug`.

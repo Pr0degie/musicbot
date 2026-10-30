@@ -70,6 +70,15 @@ def _parse_role_id(value) -> int:
 # false (Default) = kein Check. Owner ist immer ausgenommen (utils/checks.py).
 REQUIRE_SAME_VOICE = _parse_bool(os.getenv("REQUIRE_SAME_VOICE", "false"))
 
+# Mute-Schutz (cogs/music_voice_guard.py): bei Server-Mute entmutet sich der Bot
+# selbst – braucht "Mitglieder stummschalten" für die Bot-Rolle. false = aus.
+MUTE_GUARD = _parse_bool(os.getenv("MUTE_GUARD", "true"))
+
+# Move-Schutz (cogs/music_voice_guard.py): nur der Owner darf den Bot in einen
+# anderen Channel verschieben (per Drag oder !j), sonst geht er zurück.
+# false (Default) = heutiges Verhalten (ADR 0004).
+MOVE_GUARD = _parse_bool(os.getenv("MOVE_GUARD", "false"))
+
 # Wenn gesetzt: !radio delete/rename, !reloadcookies und !format nur für Mitglieder
 # dieser Rolle ODER den Bot-Owner. 0/leer (Default) = kein Gating.
 ADMIN_ROLE_ID = _parse_role_id(os.getenv("ADMIN_ROLE_ID", ""))

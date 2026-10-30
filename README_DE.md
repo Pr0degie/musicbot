@@ -17,6 +17,8 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 - Kurze Songs werden gecacht, lange Songs (>20 min) starten sofort per Stream
 - Auto-Leave: Bot verlässt den Voice-Channel wenn alle User weg sind oder nach 2 h Inaktivität
 - Voice-Stabilität: Reconnect-Watchdog setzt die Wiedergabe nach Discord-Abbrüchen (Code 1006) fort; nach einem Netzabbruch baut der Bot die Sprachverbindung selbst neu auf und schreibt einen Hinweis in den Chat
+- Mute-Schutz: entmutet sich bei Server-Mute selbst (braucht *Mitglieder stummschalten*), pausiert sonst
+- Move-Schutz (optional): nur der Owner darf den Bot verschieben, fremdes Verschieben macht er rückgängig
 - Sprachsteuerung („yo bot, spiel mal …") — optional, standardmäßig aus (`VOICE_CONTROL`, `!listen`)
 
 ---

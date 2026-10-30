@@ -41,3 +41,20 @@ Added to survive Discord idle-drops.
   13, ein User verlässt den Channel), wenn nicht zugehört wird (`_reader` fehlt) — `connect_voice` nutzt
   deshalb `SafeVoiceRecvClient` mit Prüfung; `tests/test_voice_heal.py` meldet, sobald das Paket den Fehler
   selbst behebt.
+- **Mute-Schutz** (`cogs/music_voice_guard.py`, `VoiceGuardMixin`, Flag `MUTE_GUARD`, Default an): Ein
+  Server-Mute hängt am Bot-Account, Rejoin/Neustart helfen nicht. Eigener `on_voice_state_update`-Listener
+  (`_mute_guard`, nur für den Bot selbst) entmutet per `member.edit(mute=False)`, sobald der Bot gemutet wird
+  oder gemutet beitritt — braucht „Mitglieder stummschalten“. Gibt nie auf; ab dem 4. Mute
+  in `WINDOW_SECONDS` (300) wartet er je `BACKOFF_SECONDS` (3) gegen Endlosschleifen mit einem anderen Bot und
+  prüft danach `member.voice.mute`. Nur ohne Recht (`Forbidden`) pausiert er wie `!x` (`_paused_by_mute`, Radio nicht — ein
+  angehaltener Live-Stream bricht ab) und meldet sich im Chat. Das Echo des eigenen Entmutens wird über
+  `_mute_blocked` ignoriert; entmutet ein Mensch, wird nur eine vom Mute-Schutz gesetzte Pause aufgehoben. Log-Tag `[Mute-Schutz]`.
+- **Move-Schutz** (gleiche Datei, Flag `MOVE_GUARD`, Default aus — ADR 0004): nur der Owner darf den Bot verschieben.
+  `utils/voice.py` merkt sich pro Server den selbst gewählten Channel (`connect_voice`, `move_voice` — der einzige
+  Channel-Wechsel, erzwingt `tests/test_voice_guard_move.py`). Landet der Bot woanders, fragt `_who_moved` das
+  Audit-Log (`member_move`, Recht „Audit-Log anzeigen“): Discord fasst Moves eines Moderators zu einem Eintrag
+  zusammen und erhöht nur `extra.count`, deshalb vergleicht `_audit_seen` die Zähler; beim Beitreten wird der
+  Stand vorgemerkt. War es der Owner, wird der neue Channel übernommen, sonst `move_voice` zurück (Backoff wie
+  beim Mute, Chat-Hinweis `status.move_reverted` nur beim ersten im Fenster). Ohne Audit-Recht geht er immer
+  zurück. `!j` in einen anderen Channel ist bei aktivem Flag Owner-only (`error.move_owner_only`).
+  Log-Tag `[Move-Schutz]`.

@@ -68,6 +68,8 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Netz ~2 min trennen (WLAN aus/an) während Musik läuft → nach Rückkehr `[Voice] Sprachverbindung … neu aufgebaut: <Channel>` + dieselbe Chat-Meldung, Song läuft an der Hörposition weiter (kein stummes „verbunden“)
 - [ ] `curl http://127.0.0.1:8765/debug` (nur von localhost) → JSON-Schnappschuss; bei laufender Musik `voice_clients[].poller_dead` = `null`, `connected`/`playing` = `true`, `music.track` = laufender Song
 - [ ] `python tools/logsummary.py` → Zeitleiste des letzten Laufs (Start, Songs, Warnungen, Gateway/Voice); `bot.log` beginnt mit jedem Start frisch, `python tools/logsummary.py bot.log.1` zeigt den vorherigen Lauf
+- [ ] **Mute-Schutz** (Bot-Rolle mit „Mitglieder stummschalten“): Musik läuft, Bot per Rechtsklick → *Server-Stummschaltung* → binnen ~1 s wieder entmutet, Musik lief durch, `[Mute-Schutz] Server-Mute aufgehoben (1x in 5 Min.)`. 5× hintereinander muten → ab dem 4. dauert es ~3 s, er entmutet sich aber jedes Mal, Musik läuft durch. Ohne das Recht: sofort Pause + Chat-Hinweis auf die fehlende Rolle; per Hand entmuten → „🔊 Wieder entmutet“, Song läuft weiter
+- [ ] **Move-Schutz** (`MOVE_GUARD=true`, Bot-Rolle mit „Audit-Log anzeigen“): Musik läuft → zweiter Account zieht den Bot in einen anderen Channel → binnen ~2 s zurück, Chat „🔒 Verschieben darf mich nur der Bot-Owner …“, Musik läuft weiter. Owner zieht ihn → er bleibt, `[Move-Schutz] Owner hat mich … verschoben – bleibe`. Zweiter Account tippt `!j` aus anderem Channel → „🔒 Verschieben darf mich nur der Bot-Owner.“, Owner-`!j` klappt
 
 ## Sprachsteuerung (ADR 0011)
 

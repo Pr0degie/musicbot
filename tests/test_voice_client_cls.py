@@ -18,6 +18,8 @@ from utils.voice import connect_voice, stop_playback, voice_client_cls
 class FakeChannel:
     def __init__(self):
         self.aufrufe = []
+        self.id = 1
+        self.guild = types.SimpleNamespace(id=1)
 
     async def connect(self, **kwargs):
         self.aufrufe.append(kwargs)

@@ -6,7 +6,8 @@ import discord
 from discord.ext import commands
 
 from utils.i18n import t
-from utils.voice import connect_voice
+import config
+from utils.voice import connect_voice, move_voice
 
 
 class BasicCommands(commands.Cog):
@@ -79,9 +80,14 @@ class BasicCommands(commands.Cog):
                         )
                     )
             else:
-                # Bot ist bereits irgendwo verbunden → in den neuen Kanal wechseln
+                # Bot ist bereits irgendwo verbunden → in den neuen Kanal wechseln.
+                # Mit Move-Schutz darf das nur der Owner (cogs/music_voice_guard.py).
+                if (config.MOVE_GUARD and ctx.voice_client.channel != channel
+                        and not await self.bot.is_owner(ctx.author)):
+                    await ctx.send(t("error.move_owner_only"))
+                    return
                 try:
-                    await ctx.voice_client.move_to(channel)
+                    await move_voice(ctx.voice_client, channel)
                     await ctx.send(t("status.moved_to", channel=channel.name))
                 except Exception as e:
                     await ctx.send(
