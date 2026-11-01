@@ -755,10 +755,10 @@ class PlaybackMixin:
         Gemeinsamer Fetch-Teil der Such- und URL-Zweige von !p, !next und !now.
         `kind` wählt die yt_dlp-Instanz ("search"/"url"/"playlist"), aufgelöst
         erst im Downloader – so greift dort auch der Cookie-Fallback bei
-        Alterssperre/Bot-Check (ADR 0010). Gibt das Info-Dict zurück (kann auch
-        None sein, wenn yt_dlp nichts liefert – damit gehen die Aufrufer wie
-        bisher selbst um), oder _YTDLP_FAILED wenn bereits eine Fehlermeldung
-        gesendet wurde.
+        Alterssperre/Bot-Check (ADR 0010). Gibt das Info-Dict zurück oder
+        _YTDLP_FAILED, wenn bereits eine Fehlermeldung gesendet wurde – auch
+        wenn yt_dlp None liefert (z. B. YouTube-Mix-Link, den yt_dlp nicht
+        auflöst); vorher lief das als TypeError in die Aufrufer.
 
         Die Status-Nachricht ("Suche läuft..." bzw. "Verarbeite...") wird nach
         Abschluss wieder gelöscht – bei Erfolg wie im Fehlerfall (dann steht
@@ -767,8 +767,14 @@ class PlaybackMixin:
         status_msg = None
         try:
             status_msg = await ctx.send(t(status_key))
-            return await self.dl.extract_info_async(query, kind)
+            info = await self.dl.extract_info_async(query, kind)
+            if info is None:
+                logger.warning(f"{log_msg}: yt_dlp lieferte keine Infos für {query[:120]}")
+                await ctx.send(t(error_key))
+                return _YTDLP_FAILED
+            return info
         except asyncio.TimeoutError:
+            logger.warning(f"{log_msg}: Timeout für {query[:120]}")
             await ctx.send(t(timeout_key))
             return _YTDLP_FAILED
         except Exception:

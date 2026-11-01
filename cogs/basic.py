@@ -180,5 +180,8 @@ class BasicCommands(commands.Cog):
         # Unerwarteter Fehler → kurze Meldung + ins Log
         from utils.logger import logger
 
-        logger.error(f"[on_command_error] {ctx.command}: {error}")
+        # Traceback mitloggen – sonst steht im bot.log nur die Exception-Zeile.
+        cause = getattr(error, "original", error)
+        logger.error(f"[on_command_error] {ctx.command}: {error}",
+                     exc_info=(type(cause), cause, cause.__traceback__))
         await ctx.send(f"❌ Error: {type(error).__name__}")

@@ -87,3 +87,32 @@ def test_delete_failure_does_not_crash():
         assert result is info
 
     asyncio.run(run())
+
+
+def test_none_from_ytdlp_reports_error_instead_of_crashing():
+    # yt_dlp kann für manche Links (z. B. YouTube-Mix "list=RD…") None liefern;
+    # vorher lief das als TypeError ("argument of type 'NoneType'") in !p.
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+
+        result = await _call(mc, ctx, FakeYdl(result=None))
+
+        assert result is _YTDLP_FAILED
+        assert ctx.texts == [t("status.searching"), t("error.search_error")]
+        assert ctx.messages[0].deleted is True
+
+    asyncio.run(run())
+
+
+def test_timeout_reports_error():
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+
+        result = await _call(mc, ctx, FakeYdl(exc=asyncio.TimeoutError()))
+
+        assert result is _YTDLP_FAILED
+        assert ctx.texts == [t("status.searching"), t("error.search_timeout")]
+
+    asyncio.run(run())
