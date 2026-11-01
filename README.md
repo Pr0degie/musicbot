@@ -108,7 +108,8 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   └── help_view.py           # Paginated !help
 ├── utils/                     # logger (console + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
 ├── tools/
-│   └── logsummary.py          # Timeline of the last run from bot.log
+│   ├── logsummary.py          # Timeline of the last run from bot.log
+│   └── multi_bots.py          # Run several bot instances in parallel (docs/multi-bots.md)
 ├── locales/
 │   ├── en.json                # English strings
 │   └── de.json                # German strings

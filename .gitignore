@@ -189,3 +189,6 @@ cookies.txt
 bot.log
 bot.log.*
 playlists/
+
+# Mehrere Bot-Instanzen (tools/multi_bots.py) – enthält Tokens
+multi_bots/

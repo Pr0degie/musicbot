@@ -72,7 +72,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   [sprachsteuerung.md](architecture/sprachsteuerung.md).
 - **`utils/logger.py`** — `logger`, Terminal-Modi (`set_console_mode`, `_ESSENTIAL_TAGS`/`_QUIET_TAGS`),
   `rotate_on_start` (bot.log-Rotation) → [logging.md](architecture/logging.md); **`tools/logsummary.py`** —
-  Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`utils/env_check.py`** — `missing_env_keys()`
+  Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`tools/multi_bots.py`** — mehrere Instanzen parallel, je eigener Ordner `multi_bots/botN/` als cwd, Bridge-Port 8765+N → [multi-bots.md](multi-bots.md); **`utils/env_check.py`** — `missing_env_keys()`
   gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
   [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`),

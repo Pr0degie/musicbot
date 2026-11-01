@@ -108,7 +108,8 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   └── help_view.py           # Paginierte !help-Ansicht
 ├── utils/                     # logger (Konsole + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
 ├── tools/
-│   └── logsummary.py          # Zeitleiste des letzten Laufs aus bot.log
+│   ├── logsummary.py          # Zeitleiste des letzten Laufs aus bot.log
+│   └── multi_bots.py          # Mehrere Bot-Instanzen parallel (docs/multi-bots.md)
 ├── locales/
 │   ├── en.json                # Englische Texte
 │   └── de.json                # Deutsche Texte
