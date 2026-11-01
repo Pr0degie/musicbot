@@ -185,7 +185,8 @@ pip install "yt-dlp[default]"
 start.bat
 ```
 
-Aktiviert das venv (falls vorhanden) und startet `python main.py` in einem
+Aktiviert das venv (falls vorhanden), aktualisiert yt-dlp (ohne Internet startet
+der Bot mit der installierten Version) und startet `python main.py` in einem
 eigenen Konsolenfenster — das `start.bat`-Fenster schließt sich sofort. Strg+C
 im Bot-Fenster ist zweistufig: einmal drücken fragt nach, ein zweites Mal
 innerhalb von 5 s fährt geordnet herunter (ein drittes bricht hart ab).
