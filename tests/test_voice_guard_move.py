@@ -122,7 +122,6 @@ def state(channel):
 @pytest.fixture(autouse=True)
 def setup(monkeypatch):
     monkeypatch.setattr(mg.config, "MOVE_GUARD", True)
-    monkeypatch.setattr(mg.config, "MUTE_GUARD", False)
     monkeypatch.setattr(uv, "_intended", {})
     waits = []
 
@@ -220,9 +219,9 @@ def test_flag_aus_laesst_alles_zu(monkeypatch):
 
 def test_move_krieg_wartet_ab_dem_vierten_und_meldet_nur_einmal(setup):
     mc, g, me, home, other = make(audit=False)
-    for _ in range(mg.FAST_UNMUTES + 2):
+    for _ in range(mg.FAST_RETRIES + 2):
         run(moved(mc, g, me, home, other))
-    assert g.voice_client.moves == [home.id] * (mg.FAST_UNMUTES + 2)
+    assert g.voice_client.moves == [home.id] * (mg.FAST_RETRIES + 2)
     assert setup.count(mg.BACKOFF_SECONDS) == 2
     assert len(mc.text_channel.sent) == 1
 

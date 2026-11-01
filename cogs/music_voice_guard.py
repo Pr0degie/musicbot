@@ -1,14 +1,4 @@
-"""Mute- und Move-Schutz für MusicCommands.
-
-**Mute-Schutz** (MUTE_GUARD, Default an): Ein Server-Mute hängt am Bot-Account
-im Server, nicht an der Verbindung – Rejoin oder Neustart helfen nicht. Hat die
-Bot-Rolle "Mitglieder stummschalten", hebt der Bot den Mute sofort selbst auf.
-Er gibt nie auf, egal wie oft jemand mutet. Gegen eine Endlosschleife (etwa ein
-anderer Bot, der sofort zurückmutet) wartet er ab dem (FAST_UNMUTES+1). Mal
-innerhalb von WINDOW_SECONDS jeweils BACKOFF_SECONDS, die Musik läuft dabei
-weiter. Nur wenn das Recht fehlt, pausiert er, statt ins Leere zu spielen, sagt
-im Chat Bescheid und spielt weiter, sobald ihn jemand entmutet. Radio wird
-nicht pausiert – ein angehaltener Live-Stream bricht ab.
+"""Move- und Rauswurf-Schutz für MusicCommands.
 
 **Move-Schutz** (MOVE_GUARD, Default aus – ADR 0004): Nur der Bot-Owner darf
 den Bot in einen anderen Channel verschieben. Discord kann das nicht verbieten;
@@ -33,100 +23,25 @@ from utils.logger import logger
 from utils.voice import (forget_intended_channel, intended_channel_id, move_voice,
                          set_intended_channel)
 
-FAST_UNMUTES = 3       # so oft pro Fenster sofort entmuten
+FAST_RETRIES = 3       # so oft pro Fenster sofort zurückgehen
 WINDOW_SECONDS = 300
-BACKOFF_SECONDS = 3    # danach vor jedem Entmuten/Zurückgehen kurz warten
+BACKOFF_SECONDS = 3    # danach vor jedem Zurückgehen kurz warten (gegen Endlosschleifen)
 AUDIT_FRESH_SECONDS = 30   # so alt darf ein neuer Audit-Log-Eintrag höchstens sein
 
 
 def _backoff_due(stamps):
-    """True, wenn schon FAST_UNMUTES Eingriffe im Fenster liegen."""
+    """True, wenn schon FAST_RETRIES Eingriffe im Fenster liegen."""
     now = time.monotonic()
     while stamps and now - stamps[0] > WINDOW_SECONDS:
         stamps.popleft()
-    return len(stamps) >= FAST_UNMUTES
+    return len(stamps) >= FAST_RETRIES
 
 
 class VoiceGuardMixin:
-    """State (self._mute_unmutes, self._mute_blocked, self._paused_by_mute,
-    self._move_backs, self._move_lock, self._audit_seen, self._audit_warned)
-    legt cogs/music.py an; dazu self.bot, self.text_channel, self.is_radio,
-    self.is_playing, self._stopped_by_user, _mark_paused/_mark_resumed."""
+    """State (self._move_backs, self._move_lock, self._audit_seen,
+    self._audit_warned) legt cogs/music.py an; dazu self.bot, self.text_channel."""
 
-    @commands.Cog.listener("on_voice_state_update")
-    async def _mute_guard(self, member, before, after):
-        if not config.MUTE_GUARD:
-            return
-        if self.bot.user is None or member.id != self.bot.user.id:
-            return
-        if after.channel is None:
-            self._mute_blocked = False
-            self._paused_by_mute = False
-            return
-
-        if before.mute and not after.mute:
-            await self._on_unmuted(member)
-            return
-        # Neu gemutet – oder schon gemutet beigetreten (before.channel ist None).
-        if after.mute and not (before.mute and before.channel is not None):
-            await self._on_muted(member, after.channel)
-
-    async def _on_muted(self, member, channel):
-        if not channel.permissions_for(member).mute_members:
-            logger.warning("[Mute-Schutz] Server-Mute, aber der Bot-Rolle fehlt "
-                           "'Mitglieder stummschalten' – kann mich nicht entmuten.")
-            await self._mute_pause(member, t("status.mute_no_permission"))
-            return
-
-        if _backoff_due(self._mute_unmutes):
-            await asyncio.sleep(BACKOFF_SECONDS)
-            voice = getattr(member, "voice", None)
-            if voice is None or not voice.mute:
-                return   # inzwischen entmutet oder raus aus dem Channel
-
-        try:
-            await member.edit(mute=False, reason="Mute-Schutz")
-        except discord.Forbidden as e:
-            logger.warning(f"[Mute-Schutz] Entmuten verboten: {e}")
-            await self._mute_pause(member, t("status.mute_no_permission"))
-            return
-        except discord.HTTPException as e:
-            logger.warning(f"[Mute-Schutz] Entmuten fehlgeschlagen: {type(e).__name__}: {e}")
-            return
-        self._mute_unmutes.append(time.monotonic())
-        logger.info(f"[Mute-Schutz] Server-Mute aufgehoben ({len(self._mute_unmutes)}x "
-                    f"in {WINDOW_SECONDS // 60} Min.).")
-
-    async def _mute_pause(self, member, text):
-        """Pausiert wie !x, aber merkt sich, dass der Mute der Grund war."""
-        self._mute_blocked = True
-        vc = member.guild.voice_client
-        if vc and vc.is_playing() and not self.is_radio and not self._paused_by_mute:
-            vc.pause()
-            self._mark_paused()
-            self.is_playing = False
-            self._stopped_by_user = True   # Watchdog soll nicht neu starten
-            self._paused_by_mute = True
-        await self._mute_notice(text)
-
-    async def _on_unmuted(self, member):
-        if not self._mute_blocked:
-            return   # Unser eigenes Entmuten – nichts zu tun
-        # Jemand anderes hat entmutet: Pause aufheben.
-        self._mute_blocked = False
-        paused, self._paused_by_mute = self._paused_by_mute, False
-        vc = member.guild.voice_client
-        if paused and vc and vc.is_paused():
-            vc.resume()
-            self._mark_resumed()
-            self.is_playing = True
-            self._stopped_by_user = False
-            logger.info("[Mute-Schutz] Entmutet – Wiedergabe läuft weiter.")
-            await self._mute_notice(t("status.mute_resumed"))
-        else:
-            logger.info("[Mute-Schutz] Entmutet.")
-
-    async def _mute_notice(self, text, delete_after=300):
+    async def _guard_notice(self, text, delete_after=300):
         if self.text_channel is None:
             return
         try:
@@ -187,7 +102,7 @@ class VoiceGuardMixin:
         self._move_backs.append(time.monotonic())
         logger.info(f"[Move-Schutz] Von {who} nach {channel.name} verschoben – zurück nach {home.name}.")
         if len(self._move_backs) == 1:   # bei Move-Kriegen nicht den Chat fluten
-            await self._mute_notice(t("status.move_reverted", channel=home.name), delete_after=120)
+            await self._guard_notice(t("status.move_reverted", channel=home.name), delete_after=120)
 
     async def _on_kicked(self, guild):
         """Jemand hat den Bot aus dem Channel geworfen: zurück und an der
@@ -232,7 +147,7 @@ class VoiceGuardMixin:
         logger.info(f"[Move-Schutz] Von {who} rausgeworfen – zurück in {home.name}.")
         self.bot.dispatch("voice_rebuilt")   # VoiceListen hängt den Empfänger neu an
         if len(self._move_backs) == 1:
-            await self._mute_notice(t("status.kick_reverted", channel=home.name), delete_after=120)
+            await self._guard_notice(t("status.kick_reverted", channel=home.name), delete_after=120)
         if self._last_ctx is not None:
             await self._resume_frozen(frozen, self._last_ctx)
 

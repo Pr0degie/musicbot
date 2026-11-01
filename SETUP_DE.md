@@ -218,11 +218,6 @@ still), baut der Bot die Sprachverbindung selbst neu auf, setzt den Song an der
 aktuellen Stelle fort und schreibt einen kurzen Hinweis in den Chat
 (`🔌 … neu verbunden`).
 
-**Mute-Schutz:** Schaltet jemand den Bot im Server stumm, hebt er das sofort selbst auf.
-Dafür braucht die Bot-Rolle das Recht **Mitglieder stummschalten**. Er gibt nie auf;
-nach 3 Mutes in 5 Minuten wartet er nur jeweils 3 Sekunden. Ohne das Recht pausiert er,
-bittet im Chat darum und spielt weiter, sobald ihn jemand entmutet. Abschalten mit `MUTE_GUARD=false`.
-
 **Move-Schutz** (`MOVE_GUARD=true`, standardmäßig aus): Nur der Bot-Owner darf den Bot in
 einen anderen Voice-Channel verschieben oder rauswerfen. Zieht ihn jemand anderes weg oder
 trennt ihn, kommt er sofort zurück und spielt an der Stelle weiter; `!j` aus einem anderen

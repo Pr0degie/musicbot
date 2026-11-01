@@ -17,7 +17,6 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 - Short songs are cached; long songs (>20 min) start instantly via stream
 - Auto-leave: bot leaves voice when all users go, or after 2 h of inactivity
 - Voice stability: reconnect watchdog recovers playback after Discord drops (code 1006); after a network outage the bot rebuilds the voice connection itself and posts a note in chat
-- Mute guard: unmutes itself when server-muted (needs *Mute Members*), pauses instead if it can't
 - Move guard (optional): only the owner may move or kick the bot, anyone else's move or kick gets undone
 - Voice control ("yo bot, play …") — optional, off by default (`VOICE_CONTROL`, `!listen`)
 

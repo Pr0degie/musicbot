@@ -91,9 +91,6 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self._stuck_ticks = 0       # Aufeinanderfolgende Watchdog-Ticks im Hänge-Zustand
         self._stopped_by_user = False  # True nach !stop/!x – unterdrückt den Watchdog-Restart
         self.text_channel = None    # Letzter Textkanal – für Auto-Leave-Nachricht
-        self._mute_unmutes = deque()   # Zeitpunkte der Selbst-Entmutungen (Mute-Schutz)
-        self._mute_blocked = False     # True = konnte mich nicht entmuten, warte auf Unmute
-        self._paused_by_mute = False   # True = Mute-Schutz hat die Musik pausiert
         self._move_backs = deque()     # Zeitpunkte des Zurückgehens (Move-Schutz)
         self._move_lock = asyncio.Lock()
         self._audit_seen = {}          # Audit-Log-Eintrag-ID → count (Move-Schutz)

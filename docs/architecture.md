@@ -38,8 +38,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
     `on_ready` → `_heal_voice`/`_heal_one`, `GATEWAY_ZOMBIE_SECONDS`, danach Chat-Hinweis `status.voice_rebuilt(_track)`) →
     [voice-connection.md](architecture/voice-connection.md);
     `PlaybackUiMixin`: Fortschrittsbalken, Pause-Uhr (`_elapsed_seconds`), `_retire_np_message`.
-  - **`cogs/music_voice_guard.py`** — `VoiceGuardMixin`: Mute-Schutz (entmutet den Bot bei Server-Mute selbst,
-    ohne Recht Pause bis zum Unmute) und Move-/Rauswurf-Schutz (nur der Owner darf verschieben oder rauswerfen, Audit-Log entscheidet)
+  - **`cogs/music_voice_guard.py`** — `VoiceGuardMixin`: Move-/Rauswurf-Schutz (nur der Owner darf verschieben oder rauswerfen, Audit-Log entscheidet)
     → [voice-connection.md](architecture/voice-connection.md)
   - **`cogs/music_radio.py`** — `RadioMixin`: internet-radio streaming (`_play_radio_stream`, reconnect,
     `!radio`), `RADIO_STATIONS_FILE`
