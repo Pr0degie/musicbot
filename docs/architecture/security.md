@@ -13,8 +13,10 @@ in Tests) → [ADR 0004](../adr/0004-security-flags-default-altverhalten.md). Di
   i18n-Meldung ab. Nicht auflösbare Hosts gelten als ok (Stream scheitert ohnehin). `!radio` persistiert neue
   Sender erst **nach** erfolgreichem Stream-Start (`_play_radio_stream` → `bool`).
 - **`REQUIRE_SAME_VOICE`** = `false` (Default) | `true` — Wiedergabe-steuernde Commands (`!s`, `!stop`,
-  `!clear`, `!eq`, `!seek`, `!now`, `!remove`, `!move`, `!shuffle`) erfordern denselben Voice-Channel wie der
-  Bot (`utils/checks.py` → `require_same_voice()`). Bot nicht in Voice → kein Check.
+  `!clear`, `!eq`, `!seek`, `!now`, `!remove`, `!move`, `!shuffle`, `!x`, `!resume`, `!loop`, `!replay`) erfordern
+  denselben Voice-Channel wie der Bot (`utils/checks.py` → `require_same_voice()`). Dasselbe gilt für die Buttons:
+  jede Schaltfläche der Now-Playing-Karte (zentral in `MusicControlView`), der Rückgängig-Button und die
+  Aktionen der `!q`-Ansicht prüfen über `same_voice_allowed()`. `!p` bleibt frei – Songs einreihen darf jeder. Bot nicht in Voice → kein Check.
 - **`ADMIN_ROLE_ID`** = leer (Default = kein Gating) | Rollen-ID — `!radio delete/rename` und `!listen` (inline
   `check_admin()`), `!reloadcookies`, `!format` (`require_admin()`) nur für diese Rolle oder den Owner.
 - **`!loadq`** validiert ohne Flag (nur Fehlerpfad geändert): Datei muss Liste von `[url,

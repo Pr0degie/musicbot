@@ -8,7 +8,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ## Features
 
 - Play YouTube links, playlists and search terms
-- Control buttons directly in Discord: ⏸️ ▶️ ⏭️ 🔁 🔂
+- Control buttons directly in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌
 - Autoplay: finds the next song automatically when queue runs out
 - Equalizer presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audio format: `webm` (default, lossless) or `mp3`
@@ -103,7 +103,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── voice_listen.py        # Voice control (!listen)
 │   └── voice_sink.py          # Audio receive for own listening (voice_recv)
 ├── views/
-│   ├── music_controls.py      # Discord buttons (Pause, Resume, Skip, Autoplay, Loop)
+│   ├── music_controls.py      # Now-playing card + buttons (Back, Pause/Resume, Skip, Autoplay, Loop, Clear)
 │   ├── queue_view.py          # Paginated queue view
 │   └── help_view.py           # Paginated !help
 ├── utils/                     # logger (console + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …

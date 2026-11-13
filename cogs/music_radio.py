@@ -138,6 +138,7 @@ class RadioMixin:
             self, ctx,
             heading=f"### 📻 {discord.utils.escape_markdown(name)}",
             details=f"**{t('embed.status')}** {t('embed.radio_live')} · **{t('embed.eq')}** {self.equalizer}",
+            up_next=self._up_next_title(),
             accent=0xe74c3c,
         )
         self.now_playing_msg = await ctx.send(view=view)

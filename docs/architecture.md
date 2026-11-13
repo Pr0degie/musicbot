@@ -104,7 +104,9 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   0006](adr/0006-stale-buttons-dynamicitem.md).
 - **`views/queue_view.py`** — `QueueView`: paginated queue embed with Prev/Next buttons; receives
   `queue_snapshot`, `current_track`, `loop_mode`, `autoplay_next_title` at construction. Footer summiert Dauern **nur aus dem
-  Metadaten-Cache** (kein yt_dlp-Lookup); fehlen welche → `≥ Summe (n ohne Angabe)` als Untergrenze.
+  Metadaten-Cache** (kein yt_dlp-Lookup); fehlen welche → `≥ Summe (n ohne Angabe)` als Untergrenze. Mit `music_cog`
+  zusätzlich ein Auswahlmenü pro Seite (höchstens 25 Songs, Discord-Limit) samt „Entfernen"/„Als Nächstes"; die
+  Ansicht ist ein Schnappschuss, jede Aktion sucht den Song in der echten Queue (`_find_live`) und lädt neu (`_queue_snapshot`).
 
 
 ## Key Bot Commands

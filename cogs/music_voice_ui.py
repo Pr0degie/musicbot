@@ -432,7 +432,10 @@ class PlaybackUiMixin:
             return
         if self._np_paused_at is not None:   # pausiert
             bar = "⏸ " + bar
-        if bar == self._np_last_desc:        # nichts Neues → kein API-Call
+        # Buttons (Pause/Fortsetzen, Autoplay, Loop) und „Als Nächstes" angleichen –
+        # auch Änderungen per Befehl oder Sprache landen so spätestens nach 5 s in der Karte.
+        state_changed = view.sync_state(up_next=self._up_next_title())
+        if bar == self._np_last_desc and not state_changed:   # nichts Neues → kein API-Call
             return
         view.set_body(bar)
         try:

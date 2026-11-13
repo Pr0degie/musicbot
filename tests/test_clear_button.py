@@ -13,7 +13,7 @@ import config
 from tests.conftest import FakeCtx, FakeVoiceClient, build_cog
 from utils.i18n import t
 from views.music_controls import (
-    NP_HEADING_ID, MusicControlView, _stale_card_title,
+    NP_HEADING_ID, MusicControlView, UndoClearView, _stale_card_title,
 )
 
 
@@ -48,6 +48,13 @@ def _playing_setup():
     return MusicControlView(cog, FakeCtx(voice_client=vc), heading="### 🎵 Läuft"), cog, vc, stopped
 
 
+def _assert_cleared_with_undo(interaction):
+    """Öffentliche Geleert-Meldung mit Rückgängig-Button."""
+    (content, kwargs), = interaction.sent
+    assert content == t("status.cleared")
+    assert isinstance(kwargs["view"], UndoClearView) and "ephemeral" not in kwargs
+
+
 # ---------------------------------------------------------------------------
 # Layout: ❌ oben rechts
 # ---------------------------------------------------------------------------
@@ -66,10 +73,10 @@ def test_clear_button_is_accessory_of_title_section():
     assert accessory["type"] == 2 and accessory["style"] == 2, "grauer Button"
     assert accessory["emoji"]["name"] == "❌", "rotes Kreuz"
     assert accessory["custom_id"].endswith(":clear")
-    # Die fünf bisherigen Buttons bleiben in einer Zeile darunter.
+    # Die Steuer-Buttons bleiben in einer Zeile darunter.
     row = container["components"][-1]
     assert [b["custom_id"].rsplit(":", 1)[1] for b in row["components"]] == [
-        "pause", "resume", "skip", "autoplay", "loop",
+        "back", "pause", "skip", "autoplay", "loop",
     ]
 
 
@@ -108,7 +115,7 @@ def test_clear_button_clears_like_command():
         assert cog.loop_mode is None
         assert cog._stopped_by_user is True
         assert stopped == [vc], "Wiedergabe-Stopp nur über _stop_for_advance"
-        assert interaction.sent == [(t("status.cleared"), {})]
+        _assert_cleared_with_undo(interaction)
 
     asyncio.run(run())
 
@@ -154,7 +161,7 @@ def test_clear_button_owner_always_passes(monkeypatch):
         await view.clear.callback(interaction)
 
         assert not cog.queue
-        assert interaction.sent == [(t("status.cleared"), {})]
+        _assert_cleared_with_undo(interaction)
 
     asyncio.run(run())
 

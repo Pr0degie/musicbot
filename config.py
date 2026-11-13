@@ -66,7 +66,8 @@ def _parse_role_id(value) -> int:
 
 
 # Wiedergabe-steuernde Commands (!s, !stop, !clear, !eq, !seek, !now, !remove,
-# !move, !shuffle) erfordern denselben Voice-Channel wie der Bot.
+# !move, !shuffle, !x, !resume, !loop, !replay) und alle Buttons der
+# Now-Playing-Karte und der !q-Ansicht erfordern denselben Voice-Channel wie der Bot.
 # false (Default) = kein Check. Owner ist immer ausgenommen (utils/checks.py).
 REQUIRE_SAME_VOICE = _parse_bool(os.getenv("REQUIRE_SAME_VOICE", "false"))
 

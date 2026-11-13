@@ -562,6 +562,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(t("error.no_song_playing"))
 
     @commands.command(name="x")
+    @require_same_voice()
     async def pause(self, ctx):
         """Pausiert die Wiedergabe und aktualisiert is_playing."""
         if ctx.voice_client and ctx.voice_client.is_playing():
@@ -575,6 +576,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(t("error.no_song_playing"))
 
     @commands.command()
+    @require_same_voice()
     async def resume(self, ctx):
         """Setzt die Wiedergabe fort. Startet auch, wenn is_playing False aber Queue voll ist."""
         if ctx.voice_client and ctx.voice_client.is_paused():
@@ -704,6 +706,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(f"{header}```\n{chunk}\n```")
 
     @commands.command(name="loop")
+    @require_same_voice()
     async def loop(self, ctx):
         """Schaltet den Loop-Modus durch: aus → Song wiederholen → Queue loopen → aus."""
         modes = [None, "song", "queue"]
@@ -719,33 +722,31 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         einer festen Songanzahl.
         """
         from views.queue_view import QueueView
-        # Autoplay-Vorschau: der von _prefetch_autoplay eingereihte Song hängt
-        # als letzter Queue-Eintrag – als "🔮 Als Nächstes"-Zeile zeigen statt
-        # als nummerierter Eintrag. Nur wenn er wirklich hinten steht, sonst
-        # verschöbe das Ausblenden die Nummern für !remove/!move.
-        autoplay_next_title = None
-        if (self.autoplay_enabled and self._autoplay_queued_url and self.queue
-                and self.queue[-1][0] == self._autoplay_queued_url):
-            autoplay_next_title = self.queue[-1][1]
-        queue_snapshot = [
-            (url, title, self.dl._url_cache[url].get("duration") if url in self.dl._url_cache else None)
-            for url, title in self.queue
-        ]
-        if autoplay_next_title is not None:
-            queue_snapshot.pop()
+        queue_snapshot, autoplay_next_title = self._queue_snapshot()
         view = QueueView(queue_snapshot, self.current_track, self.loop_mode,
-                         autoplay_next_title=autoplay_next_title)
-        await ctx.send(content=view.build_content(), view=view)
+                         autoplay_next_title=autoplay_next_title, music_cog=self, ctx=ctx)
+        view.message = await ctx.send(content=view.build_content(), view=view)
 
     @commands.command()
     @require_same_voice()
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
-        self._clear_all(ctx.voice_client)
-        await ctx.send(t("status.cleared"))
+        snapshot = self._clear_all(ctx.voice_client)
+        if snapshot is None:
+            await ctx.send(t("status.cleared"))
+            return
+        from views.music_controls import UndoClearView
+        undo = UndoClearView(self, ctx, snapshot)
+        undo.message = await ctx.send(t("status.cleared"), view=undo)
 
     def _clear_all(self, vc):
-        """Gemeinsamer Kern von !clear und dem ❌-Button der Now-Playing-Karte."""
+        """Gemeinsamer Kern von !clear und dem ❌-Button der Now-Playing-Karte.
+
+        Gibt einen Snapshot (laufender Song, Queue, Loop-Modus) für den
+        Rückgängig-Button zurück – None, wenn es nichts wiederherzustellen gibt
+        (leere Queue und kein Song; Radio lässt sich nicht zurückholen)."""
+        track = None if self.is_radio else self.current_track
+        snapshot = (track, list(self.queue), self.loop_mode) if (track or self.queue) else None
         self._stop_radio()
         self.queue.clear()
         self.dl.clear_cache()
@@ -759,6 +760,68 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             self._autoplay_prefetch_task.cancel()   # darf die geleerte Queue nicht neu befüllen
         if vc and vc.is_playing():
             self._stop_for_advance(vc)
+        return snapshot
+
+    def _restore_cleared(self, snapshot) -> int:
+        """Rückgängig für !clear/❌: Song und Queue aus dem Snapshot wieder vorn
+        einreihen (vor allem, was seitdem dazukam). Startet nichts selbst – das
+        macht der Aufrufer, wenn gerade nichts läuft. Gibt die Songanzahl zurück."""
+        track, queue, loop_mode = snapshot
+        restored = list(queue)
+        if track:
+            url, title, *_ = track
+            restored.insert(0, (url, title))   # lief gerade → wieder als Erstes, von vorn
+        self.queue.extendleft(reversed(restored))
+        if self.loop_mode is None:
+            self.loop_mode = loop_mode
+        self._restart_prefetch()   # Queue-Reihenfolge hat sich geändert
+        return len(restored)
+
+    def _queue_previous(self, vc):
+        """⏮-Button: den vorherigen Song (last_played) als Nächstes einreihen.
+
+        Läuft gerade etwas, rückt der aktuelle Song direkt dahinter (Skip führt
+        also wieder zu ihm) und die Wiedergabe wird gestoppt – after_playing
+        startet dann den vorherigen. Läuft nichts, reiht die Methode nur ein;
+        den Start übernimmt der Aufrufer. Gibt den Titel zurück, None wenn es
+        keinen vorherigen Song gibt."""
+        if not self.last_played:
+            return None
+        lp_url, lp_title, *_ = self.last_played
+        active = bool(vc and (vc.is_playing() or vc.is_paused()))
+        if active and self.current_track:
+            url, title, *_ = self.current_track
+            self.current_track = None   # verhindert Doppel-Insert durch den Loop-Zweig in after_playing
+            self.queue.appendleft((url, title))
+        self.queue.appendleft((lp_url, lp_title))
+        self.last_played = None         # sonst pendelte ein zweiter Klick endlos zwischen zwei Songs
+        self._restart_prefetch()
+        if active:
+            self._stop_for_advance(vc)
+        return lp_title
+
+    def _up_next_title(self):
+        """Titel des nächsten Songs für die „Als Nächstes"-Zeile der Karte."""
+        return self.queue[0][1] if self.queue else None
+
+    def _queue_snapshot(self):
+        """Queue für die !q-Ansicht: (Einträge mit Dauer, Autoplay-Vorschau-Titel).
+
+        Der von _prefetch_autoplay eingereihte Song hängt als letzter Eintrag –
+        als „🔮 Als Nächstes"-Zeile zeigen statt als nummerierter Eintrag. Nur
+        wenn er wirklich hinten steht, sonst verschöbe das Ausblenden die
+        Nummern für !remove/!move."""
+        autoplay_next_title = None
+        if (self.autoplay_enabled and self._autoplay_queued_url and self.queue
+                and self.queue[-1][0] == self._autoplay_queued_url):
+            autoplay_next_title = self.queue[-1][1]
+        snapshot = [
+            (url, title, self.dl._url_cache[url].get("duration") if url in self.dl._url_cache else None)
+            for url, title in self.queue
+        ]
+        if autoplay_next_title is not None:
+            snapshot.pop()
+        return snapshot, autoplay_next_title
 
     @commands.command(usage="!remove <position>")
     @require_same_voice()
@@ -833,6 +896,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             await ctx.send(t("status.shuffled"))
 
     @commands.command()
+    @require_same_voice()
     async def replay(self, ctx):
         """Stellt den zuletzt gespielten Song an den Anfang der Queue."""
         if self.last_played:

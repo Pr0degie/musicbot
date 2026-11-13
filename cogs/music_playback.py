@@ -257,6 +257,7 @@ class PlaybackMixin:
                 _bar = self._progress_bar(0, duration)
                 if _bar and _bar != self._np_last_desc:
                     self.now_playing_view.set_body(_bar)
+                    self.now_playing_view.sync_state(up_next=self._up_next_title())
                     self._np_last_desc = _bar
                     try:
                         await self.now_playing_msg.edit(view=self.now_playing_view)
@@ -322,13 +323,14 @@ class PlaybackMixin:
             f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
             f" · **{t('embed.format')}** {self.audio_format}"
         )
-        if info.get("uploader"):
-            details += f"\n-# {discord.utils.escape_markdown(info['uploader'])}"
+        uploader = info.get("uploader")
         return MusicControlView(
             self, ctx, song=(url, title),
             heading=heading,
             body=self._progress_bar(0, duration),   # Fortschrittsbalken sofort bei 0:00 anzeigen
             details=details,
+            footer=discord.utils.escape_markdown(uploader) if uploader else None,
+            up_next=self._up_next_title(),
             thumbnail=info.get("thumbnail"),
         )
 

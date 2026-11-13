@@ -11,10 +11,16 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
 - [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (keine Karte, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
 - [ ] Karte (Components V2): Titel als Link, Fortschrittsbalken läuft mit, Thumbnail sichtbar, grauer Button mit rotem ❌ **oben rechts**
-- [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`); bei `REQUIRE_SAME_VOICE=true` von außerhalb des Voice-Channels → nur ephemere Absage
+- [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`)
+- [ ] `REQUIRE_SAME_VOICE=true`: jeder Button der Karte (Zurück, Pause, Skip, Autoplay, Loop, ❌) sowie `!x`/`!resume`/`!loop`/`!replay` von außerhalb des Voice-Channels → nur Absage, nichts ändert sich; Owner kommt immer durch
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
-- [ ] Skip-/Pause-/Resume-Buttons funktionieren; Pause bestätigt ephemer mit Position („Pausiert bei m:ss")
+- [ ] Skip-Button funktioniert; Pause/Fortsetzen ist **ein** Button, der Beschriftung und Farbe wechselt; Pause bestätigt ephemer mit Position („Pausiert bei m:ss")
+- [ ] Autoplay- und Loop-Button: grün = an, grau = aus; auch nach `!loop`/`!pause` per Befehl zieht die Karte binnen ~5 s nach
+- [ ] ⏮ Zurück → vorheriger Song spielt, der eben laufende steht als Nächstes in der Queue; aus der Pause heraus startet genau **ein** Song
+- [ ] Karte zeigt „Als Nächstes" mit dem ersten Queue-Titel; ändert sich nach `!p`/`!remove` binnen ~5 s
+- [ ] Nach ❌ oder `!clear`: Geleert-Meldung hat 30 s einen Rückgängig-Button → Song und Queue sind zurück, Wiedergabe startet wieder; nach 30 s verschwindet der Button
+- [ ] `!q` → Song im Auswahlmenü wählen → „Entfernen" bzw. „Als Nächstes" wirkt auf den richtigen Song, Liste lädt neu; nach 60 s verschwinden die Bedienelemente
 - [ ] `!eq <preset>` mid-song → aktueller Track startet mit neuem Filter neu
 - [ ] `!next <Suche/URL>` → Track landet vorn in der Queue
 - [ ] `!now <n>` → Queue-Eintrag an Position n rückt nach vorn + aktueller Song wird geskippt

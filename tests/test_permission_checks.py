@@ -165,6 +165,7 @@ def test_admin_owner_never_locked_out(monkeypatch):
 
 @pytest.mark.parametrize("cmd", [
     "skip", "stop", "clear", "eq", "seek", "now_playing", "remove", "move", "shuffle",
+    "pause", "resume", "loop", "replay",
 ])
 def test_same_voice_check_attached(cmd):
     assert len(getattr(MusicCommands, cmd).checks) == 1

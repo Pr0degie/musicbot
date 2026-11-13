@@ -17,27 +17,32 @@ _CUSTOM_ID_PREFIX = "musicctl"
 # Feste Komponenten-ID der Titelzeile: StaleControlsFallback findet darüber
 # in alten Karten den Titel für den Rückbau.
 NP_HEADING_ID = 1
+_KEEP = object()   # Sentinel: „Als Nächstes" unverändert lassen
 
 
 class MusicControlView(LayoutView):
     """Now-Playing-Karte als Components-V2-Layout samt Steuer-Buttons.
 
     Aufbau (ein Container in Akzentfarbe):
-      Section  [Titel, Fortschrittsbalken]       → Accessory: grauer Button mit rotem ❌ (= !clear)
-      Section  [Dauer · EQ · Format, Uploader]   → Accessory: Thumbnail (falls vorhanden)
-      ActionRow [Pause, Resume, Skip, Autoplay, Loop]
+      Section  [Titel, Fortschrittsbalken]        → Accessory: grauer Button mit rotem ❌ (= !clear)
+      Section  [Details, Als Nächstes, Uploader]  → Accessory: Thumbnail (falls vorhanden)
+      ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
     oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
     tragen nie content/embeds, und das Flag lässt sich nicht mehr entfernen.
     Rückbau daher über retired_card(), nie über content=/embed=/view=None.
 
+    Die Buttons spiegeln den Zustand (Pause ↔ Fortsetzen, Autoplay/Loop grün =
+    an): sync_state() gleicht sie an den Cog an und meldet, ob sich etwas
+    geändert hat – der _progress_loop schickt die Karte dann mit.
+
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
     """
 
     def __init__(self, music_cog, ctx, song=None, *, heading="🎵", body=None,
-                 details=None, thumbnail=None, accent=0x1db954):
+                 details=None, footer=None, up_next=None, thumbnail=None, accent=0x1db954):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
@@ -47,14 +52,24 @@ class MusicControlView(LayoutView):
 
         def make(action, callback, **kwargs):
             button = Button(custom_id=f"{_CUSTOM_ID_PREFIX}:{BOOT_ID}:{nonce}:{action}", **kwargs)
-            button.callback = callback
+
+            async def guarded(interaction: discord.Interaction):
+                # REQUIRE_SAME_VOICE gilt für jeden Button der Karte, nicht nur
+                # für die getippten Befehle (Default aus, Owner immer durch).
+                if not await same_voice_allowed(interaction.client, interaction.user, self.ctx.voice_client):
+                    await interaction.response.send_message(t("error.same_voice_required"), ephemeral=True)
+                    return
+                await callback(interaction)
+
+            button.callback = guarded
             return button
 
         S = discord.ButtonStyle
-        self.pause = make("pause", self._on_pause, label=t("button.pause"), style=S.primary)
-        self.resume = make("resume", self._on_resume, label=t("button.resume"), style=S.success)
+        self.back = make("back", self._on_back, label=t("button.back"), style=S.secondary)
+        # Ein Button für Pause und Fortsetzen; Beschriftung/Farbe setzt sync_state().
+        self.pause = make("pause", self._on_pause_toggle, label=t("button.pause"), style=S.primary)
         self.skip = make("skip", self._on_skip, label=t("button.skip"), style=S.secondary)
-        self.autoplay_toggle = make("autoplay", self._on_autoplay, label=t("button.autoplay"), style=S.danger)
+        self.autoplay_toggle = make("autoplay", self._on_autoplay, label=t("button.autoplay"), style=S.secondary)
         self.loop_toggle = make("loop", self._on_loop, label=t("button.loop"), style=S.secondary)
         # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
         self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
@@ -65,17 +80,21 @@ class MusicControlView(LayoutView):
         if self._body:
             self._top.add_item(self._body)
         container = Container(self._top, accent_colour=accent)
+        self._details_base, self._footer, self._up_next = details, footer, up_next
+        self._details = None
         if details:
+            self._details = TextDisplay(self._details_text())
             # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
             # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
             if isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
-                container.add_item(Section(details, accessory=Thumbnail(thumbnail)))
+                container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
             else:
-                container.add_item(TextDisplay(details))
+                container.add_item(self._details)
         container.add_item(ActionRow(
-            self.pause, self.resume, self.skip, self.autoplay_toggle, self.loop_toggle,
+            self.back, self.pause, self.skip, self.autoplay_toggle, self.loop_toggle,
         ))
         self.add_item(container)
+        self.sync_state()
 
     @property
     def body(self):
@@ -89,7 +108,84 @@ class MusicControlView(LayoutView):
         else:
             self._body.content = text
 
-    async def _on_pause(self, interaction: discord.Interaction):
+    def _details_text(self):
+        """Details-Zeile + „Als Nächstes" + klein gesetzter Uploader."""
+        lines = [self._details_base]
+        if self._up_next:
+            title = discord.utils.escape_markdown(self._up_next)
+            if len(title) > 80:
+                title = title[:79] + "…"
+            lines.append(f"**{t('embed.up_next')}** {title}")
+        if self._footer:
+            lines.append(f"-# {self._footer}")
+        return "\n".join(lines)
+
+    def sync_state(self, up_next=_KEEP) -> bool:
+        """Gleicht Buttons und „Als Nächstes"-Zeile an den Cog-Zustand an.
+
+        Gibt True zurück, wenn sich etwas geändert hat – nur dann lohnt es sich,
+        die Karte neu zu schicken (msg.edit(view=self))."""
+        S = discord.ButtonStyle
+        cog, vc = self.music_cog, self.ctx.voice_client
+        playing = bool(vc and vc.is_playing())
+        wanted = (
+            (self.pause, t("button.pause") if playing else t("button.resume"),
+             S.primary if playing else S.success),
+            (self.autoplay_toggle, t("button.autoplay"), S.success if cog.autoplay_enabled else S.secondary),
+            (self.loop_toggle, t("button.loop"), S.success if cog.loop_mode == "song" else S.secondary),
+        )
+        changed = False
+        for button, label, style in wanted:
+            if button.label != label or button.style != style:
+                button.label, button.style = label, style
+                changed = True
+        if up_next is not _KEEP:
+            self._up_next = up_next
+        if self._details is not None:
+            text = self._details_text()
+            if self._details.content != text:
+                self._details.content = text
+                changed = True
+        return changed
+
+    async def _push_state(self, interaction):
+        """Nach einem Klick die Karte sofort nachziehen (Farben, Beschriftung).
+
+        Nur wenn dies noch die aktive Karte ist: hat der Klick einen neuen Song
+        gestartet, ist diese Nachricht schon zur Textzeile zurückgebaut – ein
+        Edit mit der View würde die alte Karte samt Buttons wiederbeleben."""
+        if not self.sync_state():
+            return
+        try:
+            active = self.music_cog.now_playing_msg
+            if active is not None and active.id == interaction.message.id:
+                await interaction.message.edit(view=self)
+        except Exception:
+            pass   # Karte weg oder Rate-Limit – der nächste Progress-Tick holt es nach
+
+    async def _on_pause_toggle(self, interaction: discord.Interaction):
+        vc = self.ctx.voice_client
+        if vc and vc.is_playing():
+            await self._pause(interaction)
+        else:
+            await self._resume(interaction)
+        await self._push_state(interaction)
+
+    async def _on_back(self, interaction: discord.Interaction):
+        """⏮: vorherigen Song noch einmal spielen; der laufende rückt direkt dahinter."""
+        cog, vc = self.music_cog, self.ctx.voice_client
+        was_active = bool(vc and (vc.is_playing() or vc.is_paused()))
+        title = None if cog.is_radio else cog._queue_previous(vc)
+        if title is None:
+            await interaction.response.send_message(t("error.no_last_song"), ephemeral=True)
+            return
+        await interaction.response.send_message(t("status.back_eph", title=title), ephemeral=True)
+        if not was_active:
+            # Lief etwas, startet after_playing den Song – ein zweiter Start hier
+            # (z. B. aus der Pause heraus) würde zwei Songs gleichzeitig anstoßen.
+            await _start_if_idle(cog, self.ctx)
+
+    async def _pause(self, interaction: discord.Interaction):
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.pause()
             self.music_cog._mark_paused()   # Fortschrittsbalken einfrieren
@@ -106,7 +202,7 @@ class MusicControlView(LayoutView):
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
-    async def _on_resume(self, interaction: discord.Interaction):
+    async def _resume(self, interaction: discord.Interaction):
         if self.ctx.voice_client and self.ctx.voice_client.is_paused():
             self.ctx.voice_client.resume()
             self.music_cog._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
@@ -164,6 +260,7 @@ class MusicControlView(LayoutView):
         status = t("misc.enabled") if self.music_cog.autoplay_enabled else t("misc.disabled")
         logger.info(f"[Autoplay] {status.capitalize()} per Button")
         await interaction.response.send_message(f"🔁 Autoplay {status}.", ephemeral=True)
+        await self._push_state(interaction)
 
         # Sofort loslegen, wenn Autoplay gerade eingeschaltet wurde und die Queue leer ist.
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
@@ -174,15 +271,62 @@ class MusicControlView(LayoutView):
         self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
         loop_keys = {None: "status.loop_off", "song": "status.loop_song"}
         await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
+        await self._push_state(interaction)
 
     async def _on_clear(self, interaction: discord.Interaction):
-        """❌ oben rechts: dasselbe wie !clear (inkl. REQUIRE_SAME_VOICE)."""
+        """❌ oben rechts: dasselbe wie !clear."""
+        snapshot = self.music_cog._clear_all(self.ctx.voice_client)
+        logger.info(f"[Queue] Geleert per ❌-Button von {interaction.user}")
+        if snapshot is None:
+            await interaction.response.send_message(t("status.cleared"))
+            return
+        undo = UndoClearView(self.music_cog, self.ctx, snapshot)
+        await interaction.response.send_message(t("status.cleared"), view=undo)
+        try:
+            undo.message = await interaction.original_response()
+        except Exception:
+            pass   # ohne Nachricht bleibt der Button nach dem Timeout einfach tot
+
+
+async def _start_if_idle(cog, ctx):
+    """Wiedergabe anstoßen, wenn Songs in der Queue liegen, aber nichts läuft."""
+    vc = ctx.voice_client
+    if cog.is_playing or cog.is_radio or not cog.queue:
+        return
+    if vc and (vc.is_playing() or vc.is_paused()):
+        return
+    cog.is_playing = True
+    await cog.play_next(ctx)
+
+
+class UndoClearView(View):
+    """„Rückgängig" unter der Geleert-Meldung (30 s): stellt Queue, laufenden
+    Song und Loop-Modus aus dem Snapshot von _clear_all wieder her."""
+
+    def __init__(self, music_cog, ctx, snapshot):
+        super().__init__(timeout=30)
+        self.music_cog = music_cog
+        self.ctx = ctx
+        self.snapshot = snapshot
+        self.message = None   # setzt der Aufrufer nach dem Senden
+
+    @discord.ui.button(label=t("button.undo"), style=discord.ButtonStyle.secondary)
+    async def undo(self, interaction: discord.Interaction, button: Button):
         if not await same_voice_allowed(interaction.client, interaction.user, self.ctx.voice_client):
             await interaction.response.send_message(t("error.same_voice_required"), ephemeral=True)
             return
-        self.music_cog._clear_all(self.ctx.voice_client)
-        logger.info(f"[Queue] Geleert per ❌-Button von {interaction.user}")
-        await interaction.response.send_message(t("status.cleared"))
+        self.stop()
+        count = self.music_cog._restore_cleared(self.snapshot)
+        logger.info(f"[Queue] Leeren rückgängig gemacht von {interaction.user} ({count} Songs)")
+        await interaction.response.edit_message(content=t("status.clear_undone", count=count), view=None)
+        await _start_if_idle(self.music_cog, self.ctx)
+
+    async def on_timeout(self):
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)   # normale Nachricht mit Text → view=None ist ok
+            except discord.HTTPException:
+                pass
 
 
 def retired_card(title):

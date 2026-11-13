@@ -17,6 +17,8 @@ class FakeInteraction:
     def __init__(self):
         self.sent = []
         self.response = types.SimpleNamespace(send_message=self._send)
+        self.user = types.SimpleNamespace(voice=None)
+        self.client = types.SimpleNamespace()
 
     async def _send(self, content=None, **kwargs):
         self.sent.append((content, kwargs))
