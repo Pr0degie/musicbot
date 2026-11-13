@@ -745,7 +745,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         await ctx.send(t("status.cleared"))
 
     def _clear_all(self, vc):
-        """Gemeinsamer Kern von !clear und dem ✖-Button der Now-Playing-Karte."""
+        """Gemeinsamer Kern von !clear und dem ❌-Button der Now-Playing-Karte."""
         self._stop_radio()
         self.queue.clear()
         self.dl.clear_cache()

@@ -1,6 +1,6 @@
-"""Tests für den roten ✖-Button der Now-Playing-Karte.
+"""Tests für den ❌-Button (grau, rotes Kreuz) der Now-Playing-Karte.
 
-Der ✖ sitzt als Accessory oben rechts in der Titel-Section (Components V2)
+Der ❌ sitzt als Accessory oben rechts in der Titel-Section (Components V2)
 und tut dasselbe wie `!clear` – über den gemeinsamen Kern `_clear_all`,
 inklusive REQUIRE_SAME_VOICE (Default aus, Owner immer durch).
 """
@@ -49,7 +49,7 @@ def _playing_setup():
 
 
 # ---------------------------------------------------------------------------
-# Layout: ✖ oben rechts
+# Layout: ❌ oben rechts
 # ---------------------------------------------------------------------------
 
 def test_clear_button_is_accessory_of_title_section():

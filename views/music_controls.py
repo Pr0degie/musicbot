@@ -27,7 +27,7 @@ class MusicControlView(LayoutView):
       Section  [Dauer · EQ · Format, Uploader]   → Accessory: Thumbnail (falls vorhanden)
       ActionRow [Pause, Resume, Skip, Autoplay, Loop]
 
-    Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ✖
+    Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
     oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
     tragen nie content/embeds, und das Flag lässt sich nicht mehr entfernen.
     Rückbau daher über retired_card(), nie über content=/embed=/view=None.
@@ -176,12 +176,12 @@ class MusicControlView(LayoutView):
         await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
 
     async def _on_clear(self, interaction: discord.Interaction):
-        """Roter ✖ oben rechts: dasselbe wie !clear (inkl. REQUIRE_SAME_VOICE)."""
+        """❌ oben rechts: dasselbe wie !clear (inkl. REQUIRE_SAME_VOICE)."""
         if not await same_voice_allowed(interaction.client, interaction.user, self.ctx.voice_client):
             await interaction.response.send_message(t("error.same_voice_required"), ephemeral=True)
             return
         self.music_cog._clear_all(self.ctx.voice_client)
-        logger.info(f"[Queue] Geleert per ✖-Button von {interaction.user}")
+        logger.info(f"[Queue] Geleert per ❌-Button von {interaction.user}")
         await interaction.response.send_message(t("status.cleared"))
 
 

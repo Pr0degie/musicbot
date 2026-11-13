@@ -26,7 +26,7 @@ def _buttons(view):
 
 def test_live_custom_ids_never_match_fallback_template():
     view = _make_view()
-    assert len(_buttons(view)) == 6   # Pause, Resume, Skip, Autoplay, Loop + ✖
+    assert len(_buttons(view)) == 6   # Pause, Resume, Skip, Autoplay, Loop + ❌
     for child in _buttons(view):
         assert child.custom_id.startswith(f"musicctl:{BOOT_ID}:")
         assert TEMPLATE.fullmatch(child.custom_id) is None

@@ -10,8 +10,8 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!p <URL>` → Track wird eingereiht; erneutes `!p` derselben URL → Duplikat-Warnung
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
 - [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (keine Karte, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
-- [ ] Karte (Components V2): Titel als Link, Fortschrittsbalken läuft mit, Thumbnail sichtbar, roter ✖ **oben rechts**
-- [ ] ✖ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`); bei `REQUIRE_SAME_VOICE=true` von außerhalb des Voice-Channels → nur ephemere Absage
+- [ ] Karte (Components V2): Titel als Link, Fortschrittsbalken läuft mit, Thumbnail sichtbar, grauer Button mit rotem ❌ **oben rechts**
+- [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`); bei `REQUIRE_SAME_VOICE=true` von außerhalb des Voice-Channels → nur ephemere Absage
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-/Pause-/Resume-Buttons funktionieren; Pause bestätigt ephemer mit Position („Pausiert bei m:ss")
