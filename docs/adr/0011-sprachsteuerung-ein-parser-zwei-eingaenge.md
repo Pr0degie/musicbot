@@ -139,4 +139,6 @@ Bridge-Weg sofort wirkt.
 **vorbestehender** Verstoß gegen die ADR-0001-Invariante, unabhängig von diesem
 Feature — hier nur notiert, nicht mitgefixt.
 
+**Stand 2026-11-14:** Die Zeilennummern oben sind überholt (Datei für [ADR 0012](0012-now-playing-karte-components-v2.md) umgebaut); `SearchAutoplayView._make_callback` stoppt inzwischen über `_stop_for_advance()`.
+
 **Stand 2026-10-25:** Bei aktivem eigenen Zuhören verbindet `connect_voice()` mit `SafeVoiceRecvClient` (Unterklasse von `VoiceRecvClient` in `utils/voice.py`): voice_recv 0.5.2a179 crasht in `_remove_ssrc`, wenn jemand den Channel verlässt, solange nicht zugehört wird — und legt damit still die Voice-Verbindung lahm. Der beiläufige Fund oben besteht unverändert (jetzt über `stop_playback()`, weiterhin ohne `_stop_for_advance()`).

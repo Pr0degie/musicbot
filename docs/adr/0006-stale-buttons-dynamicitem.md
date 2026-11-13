@@ -14,4 +14,5 @@ Buttons tragen `custom_id = musicctl:{BOOT_ID}:{nonce}:{action}` (BOOT_ID = pro 
 ## Konsequenzen
 
 - **Wichtig:** discord.py dispatcht Dynamic Items **zusätzlich** zu Live-Views (nicht nur als Fallback) — die Abgrenzung kommt allein aus dem Template-Regex (negative lookahead auf die aktuelle BOOT_ID), nie die Reihenfolge ändern.
+- **Stand 2026-11-13:** Die Karte ist seit [ADR 0012](0012-now-playing-karte-components-v2.md) ein Components-V2-Layout. „Tote Buttons entfernen" heißt dort: Karte per `retired_card()` zur Textzeile zurückbauen (Titel aus der Titelzeile mit `NP_HEADING_ID`) — `view=None` ließe eine leere Nachricht zurück (400). Embed-Karten aus früheren Läufen weiterhin per `view=None`; die Unterscheidung trifft `message.flags.components_v2`.
 - Nachrichten von vor diesem Feature (32-Hex-Auto-IDs) matchen nichts → weiterhin „Interaktion fehlgeschlagen", einmalig bis zum ersten Neustart danach.

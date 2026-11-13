@@ -41,9 +41,9 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 
 | Command | Description |
 |---|---|
-| `!q` | Show queue (paginated) |
+| `!q` | Show queue (paginated), remove or move a song via select menu |
 | `!shuffle` | Shuffle queue |
-| `!clear` | Stop + clear queue |
+| `!clear` | Stop + clear queue (undo for 30 s) |
 | `!remove <n>` | Remove song at position `n` |
 | `!move <n\|title>` | Move song to front — by position or title search |
 | `!loop` | Loop mode: off → song → queue → off |

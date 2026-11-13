@@ -94,10 +94,15 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   nach `bot.run()` `[Shutdown] Bot beendet.` — fehlt die Zeile, hing das Herunterfahren. Deshalb startet
   `start.bat` den Bot per `start` in einem **eigenen** Konsolenfenster: in einer Batch-Datei würde cmd.exe
   jedes Strg+C abfangen und `Terminate batch job (Y/N)?` fragen.
-- **`views/music_controls.py`** — `MusicControlView`: Pause/Resume/Skip/Autoplay/Loop buttons. Only current song
-  keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel`). Resume: (1) paused →
+- **`views/music_controls.py`** — `MusicControlView`: die Now-Playing-Karte als Components-V2-Layout
+  ([ADR 0012](adr/0012-now-playing-karte-components-v2.md)) mit ❌ oben rechts (= `!clear`) und der Zeile
+  Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop; Buttons spiegeln den Zustand
+  (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `UndoClearView`: Rückgängig-Button unter der
+  Geleert-Meldung (30 s). Only current song
+  keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel` via `retired_card()`).
+  Fortsetzen: (1) paused →
   resume, (2) queue has songs → `play_next`, (3) queue empty → Song dieser Karte vorne einreihen, (4) autoplay
-  on → `autoplay()`. Pause-Button bestätigt ephemer mit Position (`Pausiert bei m:ss` via
+  on → `autoplay()`. Pause bestätigt ephemer mit Position (`Pausiert bei m:ss` via
   `_elapsed_seconds()`; ohne `track_start_time`, z. B. Radio, ohne Position). `SearchAutoplayView`: first
   search result plays immediately, alternatives as buttons (30 s timeout). Stale-Buttons-Fallback nach
   Neustart (`custom_id`-Schema, `StaleControlsFallback`-DynamicItem) → [ADR

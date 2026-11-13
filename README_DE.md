@@ -41,9 +41,9 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 
 | Befehl | Funktion |
 |---|---|
-| `!q` | Queue anzeigen (paginiert) |
+| `!q` | Queue anzeigen (paginiert), Song per Auswahlmenü entfernen oder vorziehen |
 | `!shuffle` | Queue mischen |
-| `!clear` | Stopp + Queue leeren |
+| `!clear` | Stopp + Queue leeren (30 s lang rückgängig machbar) |
 | `!remove <n>` | Song an Position `n` entfernen |
 | `!move <n\|titel>` | Song nach vorne schieben — per Position oder Titelsuche |
 | `!loop` | Loop-Modus: aus → Song → Queue → aus |

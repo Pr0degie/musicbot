@@ -13,3 +13,4 @@ Rückwirkend angelegt am 2026-07-12 (Datierung aus dem git log der zugehörigen 
 - [0009](0009-music-cog-mixin-zerlegung.md) — Music-Cog-Mixin-Zerlegung + `play_next`-Orchestrator
 - [0010](0010-cookielos-zuerst-cookie-fallback.md) — Cookielos zuerst, Cookies nur als Fallback (Startlatenz)
 - [0011](0011-sprachsteuerung-ein-parser-zwei-eingaenge.md) — Sprachsteuerung: ein Parser, zwei Eingänge (kein LLM)
+- [0012](0012-now-playing-karte-components-v2.md) — Now-Playing-Karte als Components-V2-Layout (❌ oben rechts)
