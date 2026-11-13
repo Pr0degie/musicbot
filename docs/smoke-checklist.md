@@ -9,7 +9,9 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Klick auf einen Alternativen-Button → Alternative spielt
 - [ ] `!p <URL>` → Track wird eingereiht; erneutes `!p` derselben URL → Duplikat-Warnung
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
-- [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (kein Embed, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
+- [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (keine Karte, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
+- [ ] Karte (Components V2): Titel als Link, Fortschrittsbalken läuft mit, Thumbnail sichtbar, roter ✖ **oben rechts**
+- [ ] ✖ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`); bei `REQUIRE_SAME_VOICE=true` von außerhalb des Voice-Channels → nur ephemere Absage
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-/Pause-/Resume-Buttons funktionieren; Pause bestätigt ephemer mit Position („Pausiert bei m:ss")
@@ -42,7 +44,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Bot-Start mit `.env`, der Keys aus `.env.example` fehlen → eine Zeile `[Config] n Einstellung(en) nicht in .env – laufen auf Default: …` (auch im Quiet-Modus); bei vollständiger `.env` keine
 - [ ] `!loop`-Zyklus: `None` → `song` → `queue` → `None` (Anzeige + Verhalten am Trackende)
 - [ ] Bot-Neustart → zuletzt gespielte Songs sofort wieder spielfähig (Metadaten-Cache greift, keine Neu-Extraktion nötig)
-- [ ] Buttons einer Now-Playing-Nachricht von **vor** dem Neustart klicken → ephemere Erklärung statt „Interaktion fehlgeschlagen", tote Buttons werden entfernt (ADR 0006)
+- [ ] Buttons einer Now-Playing-Nachricht von **vor** dem Neustart klicken → ephemere Erklärung statt „Interaktion fehlgeschlagen", tote Buttons werden entfernt, V2-Karte wird zur Zeile `🎶 Titel` (ADR 0006)
 - [ ] `!restart` aus laufendem Bot-Fenster → neues Konsolenfenster öffnet sich, altes schließt sich von selbst; `!score`-Zähler haben den Neustart überlebt (ADR 0003/0005)
 - [ ] Strg+C im Bot-Fenster: 1× fragt nach, nach 5 s ohne Bestätigung „Abbruch – der Bot läuft weiter"; 2× (innerhalb 5 s) fährt herunter, Fenster schließt sich, `bot.log` endet mit `[Shutdown] Bot beendet.`
 

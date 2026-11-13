@@ -13,6 +13,20 @@ from discord.ext import commands
 from utils.i18n import t
 
 
+async def same_voice_allowed(bot, author, vc) -> bool:
+    """Kern von require_same_voice, auch für Buttons nutzbar (ohne Meldung)."""
+    if not getattr(config, "REQUIRE_SAME_VOICE", False):
+        return True
+    if vc is None or getattr(vc, "channel", None) is None:
+        return True
+    voice = getattr(author, "voice", None)
+    if voice is not None and voice.channel == vc.channel:
+        return True
+    # Owner-Check zuletzt: kostet ggf. einen API-Call, ist aber die Garantie
+    # gegen Selbst-Aussperren.
+    return await bot.is_owner(author)
+
+
 def require_same_voice():
     """Check: User muss im selben Voice-Channel sein wie der Bot.
 
@@ -21,17 +35,7 @@ def require_same_voice():
     """
 
     async def predicate(ctx):
-        if not getattr(config, "REQUIRE_SAME_VOICE", False):
-            return True
-        vc = ctx.voice_client
-        if vc is None or getattr(vc, "channel", None) is None:
-            return True
-        voice = getattr(ctx.author, "voice", None)
-        if voice is not None and voice.channel == vc.channel:
-            return True
-        # Owner-Check zuletzt: kostet ggf. einen API-Call, ist aber die Garantie
-        # gegen Selbst-Aussperren.
-        if await ctx.bot.is_owner(ctx.author):
+        if await same_voice_allowed(ctx.bot, ctx.author, ctx.voice_client):
             return True
         await ctx.send(t("error.same_voice_required"))
         return False

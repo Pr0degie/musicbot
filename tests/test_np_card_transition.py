@@ -9,6 +9,8 @@ import asyncio
 
 import discord
 
+from conftest import retired_text
+
 from test_music_playback import (
     STREAM_INFO, FakeCtx, FakeDownloader, FakeVoiceClient, _cleanup, make_cog,
     make_fake_source,
@@ -24,8 +26,7 @@ def edits_of(msg):
 def assert_is_text_line(msg, title):
     edit = edits_of(msg)
     assert edit is not None, "Karte wurde nie zurückgebaut"
-    assert edit["embed"] is None and edit["view"] is None
-    assert edit["content"] == f"🎶 {title}"
+    assert retired_text(edit) == f"🎶 {title}"
 
 
 def test_previous_card_becomes_text_line(monkeypatch, tmp_path):
@@ -40,7 +41,7 @@ def test_previous_card_becomes_text_line(monkeypatch, tmp_path):
         # Song 1 läuft bereits und hat seine Karte.
         alte_karte = await ctx.send(embed=object())
         mc.now_playing_msg = alte_karte
-        mc.now_playing_embed = object()
+        mc.now_playing_view = object()
         mc._np_title = "Song 1"
         mc.current_track = ("https://x/1", "Song 1", 100)
 
@@ -72,7 +73,7 @@ def test_both_pending_cards_are_retired(monkeypatch, tmp_path):
         aktuelle_karte = await ctx.send(embed=object())
         beendete_karte = await ctx.send(embed=object())
         mc.now_playing_msg = aktuelle_karte
-        mc.now_playing_embed = object()
+        mc.now_playing_view = object()
         mc._np_title = "Song 2"
         mc._ended_np = (beendete_karte, "Song 1")
         mc.current_track = ("https://x/2", "Song 2", 100)

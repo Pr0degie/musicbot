@@ -2,9 +2,10 @@ import asyncio
 import uuid
 from collections import deque
 import discord
-from discord.ui import Button, View
+from discord.ui import ActionRow, Button, Container, LayoutView, Section, TextDisplay, Thumbnail, View
 from utils.logger import logger
 from utils.voice import stop_playback
+from utils.checks import same_voice_allowed
 from utils.i18n import t
 
 # Prozessweiter Marker in jeder Button-custom_id: unterscheidet Buttons dieses
@@ -13,35 +14,82 @@ from utils.i18n import t
 # laufenden Prozesses matchen sein Template nie (negative lookahead unten).
 BOOT_ID = uuid.uuid4().hex[:8]
 _CUSTOM_ID_PREFIX = "musicctl"
+# Feste Komponenten-ID der Titelzeile: StaleControlsFallback findet darüber
+# in alten Karten den Titel für den Rückbau.
+NP_HEADING_ID = 1
 
 
-class MusicControlView(View):
-    """Discord-UI-Buttons, die an jede 'Jetzt läuft'-Nachricht angehängt werden.
+class MusicControlView(LayoutView):
+    """Now-Playing-Karte als Components-V2-Layout samt Steuer-Buttons.
 
-    timeout=None bedeutet, dass die Buttons nie ablaufen – auch nach einem
-    Bot-Neustart sind alte Nachrichten theoretisch noch klickbar, solange
-    der Bot läuft (die View-Instanz ist dann allerdings weg). Klicks auf
+    Aufbau (ein Container in Akzentfarbe):
+      Section  [Titel, Fortschrittsbalken]       → Accessory: grauer Button mit rotem ❌ (= !clear)
+      Section  [Dauer · EQ · Format, Uploader]   → Accessory: Thumbnail (falls vorhanden)
+      ActionRow [Pause, Resume, Skip, Autoplay, Loop]
+
+    Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ✖
+    oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
+    tragen nie content/embeds, und das Flag lässt sich nicht mehr entfernen.
+    Rückbau daher über retired_card(), nie über content=/embed=/view=None.
+
+    timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
     """
 
-    def __init__(self, music_cog, ctx, song=None):
+    def __init__(self, music_cog, ctx, song=None, *, heading="🎵", body=None,
+                 details=None, thumbnail=None, accent=0x1db954):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
         self.song = song  # (url, title) des Songs zu dem diese View gehört
         # custom_ids: eindeutig pro Nachricht (nonce) und pro Bot-Lauf (BOOT_ID).
         nonce = uuid.uuid4().hex[:8]
-        for action, item in (
-            ("pause", self.pause),
-            ("resume", self.resume),
-            ("skip", self.skip),
-            ("autoplay", self.autoplay_toggle),
-            ("loop", self.loop_toggle),
-        ):
-            item.custom_id = f"{_CUSTOM_ID_PREFIX}:{BOOT_ID}:{nonce}:{action}"
 
-    @discord.ui.button(label=t("button.pause"), style=discord.ButtonStyle.primary)
-    async def pause(self, interaction: discord.Interaction, button: Button):
+        def make(action, callback, **kwargs):
+            button = Button(custom_id=f"{_CUSTOM_ID_PREFIX}:{BOOT_ID}:{nonce}:{action}", **kwargs)
+            button.callback = callback
+            return button
+
+        S = discord.ButtonStyle
+        self.pause = make("pause", self._on_pause, label=t("button.pause"), style=S.primary)
+        self.resume = make("resume", self._on_resume, label=t("button.resume"), style=S.success)
+        self.skip = make("skip", self._on_skip, label=t("button.skip"), style=S.secondary)
+        self.autoplay_toggle = make("autoplay", self._on_autoplay, label=t("button.autoplay"), style=S.danger)
+        self.loop_toggle = make("loop", self._on_loop, label=t("button.loop"), style=S.secondary)
+        # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
+        self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
+
+        self._heading = TextDisplay(heading, id=NP_HEADING_ID)
+        self._body = TextDisplay(body) if body else None
+        self._top = Section(self._heading, accessory=self.clear)
+        if self._body:
+            self._top.add_item(self._body)
+        container = Container(self._top, accent_colour=accent)
+        if details:
+            # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
+            # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
+            if isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
+                container.add_item(Section(details, accessory=Thumbnail(thumbnail)))
+            else:
+                container.add_item(TextDisplay(details))
+        container.add_item(ActionRow(
+            self.pause, self.resume, self.skip, self.autoplay_toggle, self.loop_toggle,
+        ))
+        self.add_item(container)
+
+    @property
+    def body(self):
+        return self._body.content if self._body else None
+
+    def set_body(self, text):
+        """Fortschrittsbalken-Zeile setzen; danach msg.edit(view=self)."""
+        if self._body is None:
+            self._body = TextDisplay(text)
+            self._top.add_item(self._body)
+        else:
+            self._body.content = text
+
+    async def _on_pause(self, interaction: discord.Interaction):
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.ctx.voice_client.pause()
             self.music_cog._mark_paused()   # Fortschrittsbalken einfrieren
@@ -58,8 +106,7 @@ class MusicControlView(View):
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
-    @discord.ui.button(label=t("button.resume"), style=discord.ButtonStyle.success)
-    async def resume(self, interaction: discord.Interaction, button: Button):
+    async def _on_resume(self, interaction: discord.Interaction):
         if self.ctx.voice_client and self.ctx.voice_client.is_paused():
             self.ctx.voice_client.resume()
             self.music_cog._mark_resumed()   # Pausendauer einrechnen, Balken läuft ohne Sprung weiter
@@ -87,8 +134,7 @@ class MusicControlView(View):
         else:
             await interaction.response.send_message(t("error.no_song_to_resume"), ephemeral=True)
 
-    @discord.ui.button(label=t("button.skip"), style=discord.ButtonStyle.secondary)
-    async def skip(self, interaction: discord.Interaction, button: Button):
+    async def _on_skip(self, interaction: discord.Interaction):
         if self.music_cog.is_radio:
             self.music_cog._stop_radio()
             if self.ctx.voice_client and self.ctx.voice_client.is_playing():
@@ -105,8 +151,7 @@ class MusicControlView(View):
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
-    @discord.ui.button(label=t("button.autoplay"), style=discord.ButtonStyle.danger)
-    async def autoplay_toggle(self, interaction: discord.Interaction, button: Button):
+    async def _on_autoplay(self, interaction: discord.Interaction):
         """Schaltet Autoplay an oder aus.
 
         Wenn Autoplay aktiviert wird und gerade nichts läuft (leere Queue, Bot idle),
@@ -124,12 +169,31 @@ class MusicControlView(View):
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
             asyncio.create_task(self.music_cog.autoplay(self.ctx))
 
-    @discord.ui.button(label=t("button.loop"), style=discord.ButtonStyle.secondary)
-    async def loop_toggle(self, interaction: discord.Interaction, button: Button):
+    async def _on_loop(self, interaction: discord.Interaction):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
         self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
         loop_keys = {None: "status.loop_off", "song": "status.loop_song"}
         await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
+
+    async def _on_clear(self, interaction: discord.Interaction):
+        """Roter ✖ oben rechts: dasselbe wie !clear (inkl. REQUIRE_SAME_VOICE)."""
+        if not await same_voice_allowed(interaction.client, interaction.user, self.ctx.voice_client):
+            await interaction.response.send_message(t("error.same_voice_required"), ephemeral=True)
+            return
+        self.music_cog._clear_all(self.ctx.voice_client)
+        logger.info(f"[Queue] Geleert per ✖-Button von {interaction.user}")
+        await interaction.response.send_message(t("status.cleared"))
+
+
+def retired_card(title):
+    """Text-only-Layout für eine abgelöste Now-Playing-Karte: `🎶 Titel`, keine Buttons.
+
+    V2-Nachrichten lassen sich nicht auf content zurückbauen (Flag bleibt), und
+    leer darf die Nachricht nie werden (400) – also ein einzelnes TextDisplay.
+    """
+    view = LayoutView(timeout=None)
+    view.add_item(TextDisplay(f"🎶 {title or t('misc.unknown_title')}"))
+    return view
 
 
 class SearchAutoplayView(View):
@@ -241,7 +305,26 @@ class StaleControlsFallback(
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_message(t("error.stale_controls"), ephemeral=True)
+        msg = interaction.message
         try:
-            await interaction.message.edit(view=None)
+            if msg.flags.components_v2:
+                # V2-Karte: view=None ließe eine leere Nachricht zurück (400).
+                await msg.edit(view=retired_card(_stale_card_title(msg.components)))
+            else:
+                await msg.edit(view=None)   # Embed-Karte aus der Zeit vor V2
         except (discord.HTTPException, AttributeError):
             pass
+
+
+def _stale_card_title(components):
+    """Titel aus der Titelzeile (NP_HEADING_ID) einer alten V2-Karte holen:
+    `### 🎵 [Song – Artist](url)` → `[Song – Artist](url)`. None, wenn keine da."""
+    stack = list(components)
+    while stack:
+        comp = stack.pop(0)
+        if getattr(comp, "id", None) == NP_HEADING_ID and hasattr(comp, "content"):
+            text = comp.content.lstrip("#").strip()
+            rest = text.partition(" ")[2]   # Titelzeile ist immer "<Icon> <Titel>"
+            return rest.strip() or None
+        stack.extend(getattr(comp, "children", []) or [])
+    return None

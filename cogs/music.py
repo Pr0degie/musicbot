@@ -96,7 +96,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self._audit_seen = {}          # Audit-Log-Eintrag-ID → count (Move-Schutz)
         self._audit_warned = False     # fehlendes Audit-Log-Recht nur einmal loggen
         self.now_playing_msg = None # Aktuelle "Jetzt läuft"-Nachricht – für Button-Cleanup
-        self.now_playing_embed = None  # Embed-Referenz für Live-Edit des Fortschrittsbalkens
+        self.now_playing_view = None  # MusicControlView der Karte – für Live-Edit des Fortschrittsbalkens
         self._np_title = None       # Titel/Sender der aktuellen Karte – für ihren Rückbau zur Textzeile
         self.track_start_time = None  # Zeitstempel kurz vor play() – FFmpeg-Crash-Erkennung
         self._np_paused_total = 0.0   # aufsummierte Pausensekunden des aktuellen Songs
@@ -741,6 +741,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
     @require_same_voice()
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
+        self._clear_all(ctx.voice_client)
+        await ctx.send(t("status.cleared"))
+
+    def _clear_all(self, vc):
+        """Gemeinsamer Kern von !clear und dem ✖-Button der Now-Playing-Karte."""
         self._stop_radio()
         self.queue.clear()
         self.dl.clear_cache()
@@ -752,9 +757,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             self.prefetch_task.cancel()
         if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
             self._autoplay_prefetch_task.cancel()   # darf die geleerte Queue nicht neu befüllen
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            self._stop_for_advance(ctx.voice_client)
-        await ctx.send(t("status.cleared"))
+        if vc and vc.is_playing():
+            self._stop_for_advance(vc)
 
     @commands.command(usage="!remove <position>")
     @require_same_voice()

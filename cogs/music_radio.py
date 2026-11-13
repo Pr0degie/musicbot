@@ -134,10 +134,13 @@ class RadioMixin:
         self.track_start_time = started = time.monotonic()
         ctx.voice_client.play(source, after=after_radio)
 
-        embed = discord.Embed(title=f"📻 {name}", color=0xe74c3c)
-        embed.add_field(name=t("embed.status"), value=t("embed.radio_live"), inline=True)
-        embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-        self.now_playing_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx))
+        view = MusicControlView(
+            self, ctx,
+            heading=f"### 📻 {discord.utils.escape_markdown(name)}",
+            details=f"**{t('embed.status')}** {t('embed.radio_live')} · **{t('embed.eq')}** {self.equalizer}",
+            accent=0xe74c3c,
+        )
+        self.now_playing_msg = await ctx.send(view=view)
         self._np_title = name        # Sendername für den späteren Rückbau der Karte
         self.text_channel = ctx.channel
         logger.info(f"[Radio] Stream gestartet: {name} ({url})")

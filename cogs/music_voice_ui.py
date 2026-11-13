@@ -10,7 +10,7 @@ Zwei Mixins, per Mehrfachvererbung in MusicCommands eingebunden:
 
 Beide greifen auf denselben Instanz-State zu, der in cogs/music.py angelegt und
 verwaltet wird (u. a. self.current_track, self.now_playing_msg,
-self.now_playing_embed, self._track_generation, self.track_start_time,
+self.now_playing_view, self._track_generation, self.track_start_time,
 self.idle_leave_task, self.auto_leave_task, self._last_ctx, self.is_radio),
 sowie auf dort definierte Kern-Methoden (self.play_next, self._stop_for_advance,
 self._progress_bar). Die Loops werden von cog_load/cog_unload in cogs/music.py
@@ -26,6 +26,7 @@ from discord.ext import commands, tasks
 
 from utils.logger import logger
 from utils.i18n import t
+from views.music_controls import retired_card
 from utils.voice import connect_voice, dead_voice_poller, disconnect_voice, stop_playback
 
 # Ab so vielen Sekunden Funkstille gilt ein Gateway-Reconnect als echter
@@ -381,10 +382,9 @@ class PlaybackUiMixin:
         if msg is None:
             return
         try:
-            await msg.edit(
-                content=f"🎶 {title or t('misc.unknown_title')}",
-                embed=None, view=None,
-            )
+            # V2-Karte: content/embed sind tabu, das Flag bleibt – Rückbau
+            # über ein Layout mit nur einer Textzeile.
+            await msg.edit(view=retired_card(title))
         except Exception:
             pass   # Nachricht schon weg oder keine Berechtigung – egal
 
@@ -394,16 +394,16 @@ class PlaybackUiMixin:
         Wird beim natürlichen Songende aufgerufen, damit die Anzeige nicht bei
         z. B. '3:43 / 3:45' einfriert, sondern auf '🔘 ganz rechts, 3:45 / 3:45' springt.
         """
-        msg, embed = self.now_playing_msg, self.now_playing_embed
-        if not (msg and embed and self.current_track):
+        msg, view = self.now_playing_msg, self.now_playing_view
+        if not (msg and view and self.current_track):
             return
         duration = self.current_track[2]
         bar = self._progress_bar(duration, duration)   # elapsed == total → 🔘 ganz rechts
         if not bar or bar == self._np_last_desc:
             return
-        embed.description = bar
+        view.set_body(bar)
         try:
-            await msg.edit(embed=embed)
+            await msg.edit(view=view)
             self._np_last_desc = bar
         except Exception:
             pass
@@ -411,8 +411,8 @@ class PlaybackUiMixin:
     @tasks.loop(seconds=5)   # 5-s-Takt gegen 429-Rate-Limits; 21 Balken-Schritte bleiben
     async def _progress_loop(self):
         """Aktualisiert den Fortschrittsbalken in der aktuellen Now-Playing-Nachricht."""
-        msg, embed = self.now_playing_msg, self.now_playing_embed
-        if not (msg and embed and self.current_track and self.is_radio is False):
+        msg, view = self.now_playing_msg, self.now_playing_view
+        if not (msg and view and self.current_track and self.is_radio is False):
             return
         # Nur editieren, wenn wirklich etwas läuft: is_playing ODER pausiert
         # (der Pause-Button setzt is_playing=False, der Balken soll aber das
@@ -434,9 +434,9 @@ class PlaybackUiMixin:
             bar = "⏸ " + bar
         if bar == self._np_last_desc:        # nichts Neues → kein API-Call
             return
-        embed.description = bar
+        view.set_body(bar)
         try:
-            await msg.edit(embed=embed)      # view-Param weglassen → Buttons bleiben
+            await msg.edit(view=view)        # dieselbe View → Buttons bleiben lebendig
             self._np_last_desc = bar
         except discord.RateLimited:
             self._disable_np_edits(msg)
@@ -461,7 +461,7 @@ class PlaybackUiMixin:
             # danach editiert der Progress-Loop nichts mehr.)
             self._ended_np = (msg, self._np_title)
             self.now_playing_msg = None
-            self.now_playing_embed = None
+            self.now_playing_view = None
             self._np_title = None
 
     @_progress_loop.before_loop

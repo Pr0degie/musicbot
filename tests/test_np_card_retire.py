@@ -1,6 +1,6 @@
 """Tests für den Rückbau der Now-Playing-Karte.
 
-Regel: Karte (Embed + Buttons) gibt es **nur für den aktuellen Song**. Jede
+Regel: Karte (V2-Layout + Buttons) gibt es **nur für den aktuellen Song**. Jede
 Nachricht, die ein Track hinterlässt, wird zur Textzeile `🎶 Titel` –
 Trackwechsel, Queue-Ende, Radio-Übernahme und die 429-Abschaltung gehen alle
 durch `_retire_np_message`. Der Inhalt darf dabei nie leer werden: eine
@@ -10,7 +10,7 @@ schlüge still fehl und die Karte bliebe samt Buttons stehen.
 
 import asyncio
 
-from conftest import FakeCtx, FakeMessage, build_cog
+from conftest import FakeCtx, FakeMessage, build_cog, retired_text
 from utils.i18n import t
 
 
@@ -21,10 +21,7 @@ def last_edit(msg):
 
 def assert_reduced_to_text(msg, expected_title=None):
     """Karte weg, Buttons weg, Inhalt nicht leer."""
-    edit = last_edit(msg)
-    assert edit["embed"] is None, "Embed muss verschwinden"
-    assert edit["view"] is None, "Buttons muss die alte Nachricht verlieren"
-    content = edit.get("content")
+    content = retired_text(last_edit(msg))   # prüft auch: keine Buttons mehr
     assert content, "Inhalt darf nie leer sein – Discord lehnt das mit 400 ab"
     assert content.startswith("🎶 ")
     if expected_title is not None:
@@ -89,13 +86,13 @@ def test_rate_limited_card_is_handed_over_for_retirement():
     mc = build_cog()
     msg = FakeMessage()
     mc.now_playing_msg = msg
-    mc.now_playing_embed = object()
+    mc.now_playing_view = object()
     mc._np_title = "Gedrosselt"
 
     mc._disable_np_edits(msg)
 
     assert mc.now_playing_msg is None, "Live-Edits müssen aufhören"
-    assert mc.now_playing_embed is None
+    assert mc.now_playing_view is None
     assert mc._ended_np == (msg, "Gedrosselt"), \
         "Karte muss dem nächsten Track zum Rückbau übergeben werden"
     assert mc._np_title is None
@@ -124,7 +121,7 @@ def test_queue_empty_hands_card_over_with_its_own_title():
         mc = build_cog()
         msg = FakeMessage()
         mc.now_playing_msg = msg
-        mc.now_playing_embed = object()
+        mc.now_playing_view = object()
         mc._np_title = "Letzter Song"
         mc.current_track = None
         mc.last_played = None

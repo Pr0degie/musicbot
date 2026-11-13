@@ -196,7 +196,7 @@ def build_cog(dl=None):
     mc._audit_seen = {}
     mc._audit_warned = False
     mc.now_playing_msg = None
-    mc.now_playing_embed = None
+    mc.now_playing_view = None
     mc._np_title = None
     mc.track_start_time = None
     mc._np_paused_total = 0.0
@@ -258,3 +258,12 @@ def make_cog():
 @pytest.fixture
 def fake_ctx():
     return FakeCtx()
+
+
+def retired_text(edit):
+    """Text der zurückgebauten Karte: V2-Layout mit genau einer Textzeile, ohne Buttons.
+    content/embed dürfen bei V2-Nachrichten nicht mitgeschickt werden."""
+    assert "content" not in edit and "embed" not in edit
+    comps = edit["view"].to_components()
+    assert [c["type"] for c in comps] == [10], "nur eine Textzeile, keine Buttons"
+    return comps[0]["content"]

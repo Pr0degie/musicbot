@@ -13,6 +13,7 @@ from collections import deque
 import discord
 import pytest
 
+from conftest import retired_text
 from cogs.music import MusicCommands
 from cogs.presets import EQ_PRESETS
 
@@ -168,7 +169,7 @@ def make_cog(dl):
     mc._stopped_by_user = False
     mc.text_channel = None
     mc.now_playing_msg = None
-    mc.now_playing_embed = None
+    mc.now_playing_view = None
     mc._np_title = None
     mc.track_start_time = None
     mc._np_paused_total = 0.0
@@ -240,13 +241,13 @@ def test_race_track_dies_before_now_playing_send(monkeypatch, tmp_path):
         # Der verspätete Durchlauf darf den toten Track nicht wiederbeleben:
         assert mc.current_track is None
         assert mc.now_playing_msg is None
-        assert mc.now_playing_embed is None
+        assert mc.now_playing_view is None
         assert mc.track_start_time is None
         assert mc.is_playing is False
-        # Die verwaiste Nachricht wurde entschärft (Buttons/Embed entfernt).
+        # Die verwaiste Nachricht wurde entschärft (Karte samt Buttons → Textzeile).
         assert ctx.messages, "Now-Playing-Nachricht wurde gesendet"
         assert ctx.messages[-1].edits
-        assert ctx.messages[-1].edits[-1].get("view") is None
+        assert retired_text(ctx.messages[-1].edits[-1]) == "🎶 Testsong"
 
         _cleanup(mc)
 

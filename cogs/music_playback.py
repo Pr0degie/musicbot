@@ -12,7 +12,7 @@ Alle Methoden greifen auf denselben Instanz-State zu, der in cogs/music.py
 angelegt und verwaltet wird (u. a. self.queue, self.current_track,
 self._track_generation, self._playback_done, self.is_playing, self.is_radio,
 self._seek_offset, self._suppress_resume, self._progressive_resume_count,
-self.now_playing_msg/now_playing_embed, self.prefetch_task,
+self.now_playing_msg/now_playing_view, self.prefetch_task,
 self._autoplay_prefetch_task, self._autoplay_queued_url) sowie auf den
 Downloader-Cog (self.dl) inklusive dessen In-Flight-Registry und auf die in
 cogs/music.py verbliebenen Klassen-Aliase self._ffmpeg_header_opts/
@@ -256,10 +256,10 @@ class PlaybackMixin:
             if is_loop_repeat:
                 _bar = self._progress_bar(0, duration)
                 if _bar and _bar != self._np_last_desc:
-                    self.now_playing_embed.description = _bar
+                    self.now_playing_view.set_body(_bar)
                     self._np_last_desc = _bar
                     try:
-                        await self.now_playing_msg.edit(embed=self.now_playing_embed)
+                        await self.now_playing_msg.edit(view=self.now_playing_view)
                     except Exception:
                         pass
             else:
@@ -278,8 +278,8 @@ class PlaybackMixin:
                         # Track ist während des awaits gestorben, der Cleanup lief schon –
                         # keinen Zustand des toten Durchlaufs mehr anfassen.
                         return
-                embed = self._build_np_embed(info, title, duration)
-                new_msg = await ctx.send(embed=embed, view=MusicControlView(self, ctx, song=(url, title)))
+                view = self._build_np_view(ctx, info, url, title, duration)
+                new_msg = await ctx.send(view=view)
                 if generation != self._track_generation:
                     # Track ist während des ctx.send gestorben und der Cleanup lief bereits:
                     # Die frisch gesendete Nachricht NICHT als aktiv registrieren (sonst
@@ -287,7 +287,7 @@ class PlaybackMixin:
                     await self._retire_np_message(new_msg, title)
                     return
                 self.now_playing_msg = new_msg
-                self.now_playing_embed = embed   # Referenz für den Live-Edit im _progress_loop
+                self.now_playing_view = view    # Referenz für den Live-Edit im _progress_loop
                 self._np_title = title           # Titel für den späteren Rückbau der Karte
 
             if generation != self._track_generation:
@@ -303,27 +303,34 @@ class PlaybackMixin:
             await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_error", "Exception")
             return
 
-    def _build_np_embed(self, info, title, duration):
-        """Now-Playing-Embed eines frisch gestarteten Tracks (synchron, ohne Nebenwirkung)."""
+    def _build_np_view(self, ctx, info, url, title, duration):
+        """Now-Playing-Karte (Components V2) eines frisch gestarteten Tracks
+        (synchron, ohne Nebenwirkung)."""
         duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
         if " - " in title:
             _artist, _song = title.split(" - ", 1)
-            embed_title = f"🎵 {_song.strip()} – {_artist.strip()}"
+            card_title = f"{_song.strip()} – {_artist.strip()}"
         elif info.get("uploader"):
-            embed_title = f"🎵 {title} – {info.get('uploader')}"
+            card_title = f"{title} – {info.get('uploader')}"
         else:
-            embed_title = f"🎵 {title}"
-        embed = discord.Embed(title=embed_title, url=info.get("webpage_url"), color=0x1db954)
-        _bar = self._progress_bar(0, duration)   # Fortschrittsbalken sofort bei 0:00 anzeigen
-        if _bar:
-            embed.description = _bar
-        embed.set_thumbnail(url=info.get("thumbnail"))
-        embed.add_field(name=t("embed.duration"), value=duration_str, inline=True)
-        embed.add_field(name=t("embed.eq"), value=self.equalizer, inline=True)
-        embed.add_field(name=t("embed.format"), value=self.audio_format, inline=True)
+            card_title = title
+        # Eckige Klammern im Titel würden den Markdown-Link der Titelzeile zerreißen.
+        card_title = discord.utils.escape_markdown(card_title).replace("[", "\\[").replace("]", "\\]")
+        page = info.get("webpage_url")
+        heading = f"### 🎵 [{card_title}](<{page}>)" if page else f"### 🎵 {card_title}"
+        details = (
+            f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
+            f" · **{t('embed.format')}** {self.audio_format}"
+        )
         if info.get("uploader"):
-            embed.set_footer(text=info.get("uploader"))
-        return embed
+            details += f"\n-# {discord.utils.escape_markdown(info['uploader'])}"
+        return MusicControlView(
+            self, ctx, song=(url, title),
+            heading=heading,
+            body=self._progress_bar(0, duration),   # Fortschrittsbalken sofort bei 0:00 anzeigen
+            details=details,
+            thumbnail=info.get("thumbnail"),
+        )
 
     def _schedule_background_work(self, ctx):
         """Nach einem erfolgreichen Start: Wartung, Prefetch, Autoplay-Prefetch.
@@ -401,7 +408,7 @@ class PlaybackMixin:
         if self.now_playing_msg is not None:
             self._ended_np = (self.now_playing_msg, self._np_title)
         self.now_playing_msg = None
-        self.now_playing_embed = None
+        self.now_playing_view = None
         self._np_title = None
         self.track_start_time = None
         # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
@@ -672,7 +679,7 @@ class PlaybackMixin:
         is_loop_repeat = (
             self.loop_mode == "song"
             and self.now_playing_msg is not None
-            and self.now_playing_embed is not None
+            and self.now_playing_view is not None
             and prev_track is not None
             and prev_track[0] == url
         )

@@ -8,7 +8,7 @@
 Untermethoden → [ADR 0009](../adr/0009-music-cog-mixin-zerlegung.md): `_handle_queue_empty` (Leere-Queue-Fall
 + Autoplay-Handoff), `_build_audio_source` (FFmpeg-Options + stderr-Temp + Source, synchron),
 `_snapshot_track_state` (Track-Zustand vor `vc.play()`, synchron), `_make_after_playing` (Factory, die den
-`after_playing`-Callback baut), `_build_np_embed` (Now-Playing-Embed, synchron), `_schedule_background_work`
+`after_playing`-Callback baut), `_build_np_view` (Now-Playing-Karte als Components-V2-Layout, synchron), `_schedule_background_work`
 (Wartung alle 50 Songs, Prefetch, Autoplay-Prefetch, synchron) und `_skip_broken_track` (Fehlerpfad:
 merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Orchestrator.
 
@@ -36,13 +36,13 @@ bis zum normalen Track-Ende bzw. Trackwechsel; der Marker-Reset läuft **nach** 
 Tracks ist der progressive Download → [ADR 0001](../adr/0001-progressiver-download-statt-cdn-stream.md). Der
 Stream-Pfad reicht `info["http_headers"]` via `-headers` an FFmpeg durch.
 
-**Now-Playing-Karte:** Embed samt Buttons gibt es **nur für den aktuellen Song**. Jede Nachricht, die ein
+**Now-Playing-Karte:** Die Karte ist ein Components-V2-Layout (`MusicControlView`, `views/music_controls.py`): Titel + Fortschrittsbalken mit rotem ✖ oben rechts (= `!clear`, gemeinsamer Kern `_clear_all`), darunter Details + Thumbnail und die Button-Zeile. Ein Embed kann keinen Button tragen, deshalb V2 — mit der Folge, dass die Nachricht nie `content`/`embed` bekommt und das V2-Flag nicht mehr entfernbar ist: Live-Edits gehen über `view.set_body()` + `msg.edit(view=view)`, der Rückbau über `retired_card(title)`. Karte samt Buttons gibt es **nur für den aktuellen Song**. Jede Nachricht, die ein
 Track hinterlässt, geht durch `_retire_np_message(msg, title)` (`PlaybackUiMixin`) und wird zur Textzeile `🎶
 Titel` — beim Trackwechsel, beim Queue-Ende (`_ended_np`), bei der Radio-Übernahme und bei der 429-Abschaltung
 (`_disable_np_edits` übergibt die Nachricht an `_ended_np`, statt sie zu vergessen). Zwei Fallstricke, die
 dabei je eine Karte für immer stehen ließen: `now_playing_msg` und `_ended_np` können **gleichzeitig** belegt
-sein (beide zurückbauen, nicht `elif`), und der Inhalt darf nie leer werden — eine Nachricht ohne Text, Embed
-und Anhang lehnt Discord mit 400 ab, der Rückbau schlägt still fehl. Der Titel dafür steht in `_np_title` (mit
+sein (beide zurückbauen, nicht `elif`), und der Inhalt darf nie leer werden — eine Nachricht ohne Text, Embed,
+Komponenten und Anhang lehnt Discord mit 400 ab (bei V2 also nie `view=None`), der Rückbau schlägt still fehl. Der Titel dafür steht in `_np_title` (mit
 der Karte gesetzt), nicht in `last_played`/`prev_track`, die zum Rückbauzeitpunkt schon geleert sein können.
 
 Background tasks: `prefetch_task` downloads the next two queued songs sequentially (`_prefetch_next(0)` then
