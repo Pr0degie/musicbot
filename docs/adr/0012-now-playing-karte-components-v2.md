@@ -15,7 +15,7 @@ Die Karte ist ein Components-V2-Layout (`MusicControlView` als `LayoutView`, `vi
 - Section `[Details, „Als Nächstes", Uploader]` → Accessory: Thumbnail,
 - ActionRow `[Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]`.
 
-Gilt für Song- und Radio-Karte. Alle Zustandsänderungen der Karte laufen über die View selbst: `set_body()` für den Balken, `sync_state()` für Button-Farben/-Beschriftung und „Als Nächstes" (Zurück blau, Pause blau ↔ Fortsetzen grün, Autoplay rot = an, Loop grün = an). Weil der Zustand an den Buttons ablesbar ist, quittieren die Umschalter stumm: `_push_state` nutzt den Karten-Edit als Interaktions-Antwort, sonst `defer()`.
+Gilt für Song- und Radio-Karte. Alle Zustandsänderungen der Karte laufen über die View selbst: `set_body()` für den Balken, `sync_state()` für Button-Farben/-Beschriftung und „Als Nächstes" (Zurück fest rot, Pause blau ↔ Fortsetzen grün, Autoplay rot = an, Loop grün = an). Weil der Zustand an den Buttons ablesbar ist, quittieren die Umschalter stumm: `_push_state` nutzt den Karten-Edit als Interaktions-Antwort, sonst `defer()`.
 
 ## Konsequenzen
 

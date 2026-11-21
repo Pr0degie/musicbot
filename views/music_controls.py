@@ -33,7 +33,7 @@ class MusicControlView(LayoutView):
     tragen nie content/embeds, und das Flag lässt sich nicht mehr entfernen.
     Rückbau daher über retired_card(), nie über content=/embed=/view=None.
 
-    Die Buttons spiegeln den Zustand (Pause blau ↔ Fortsetzen grün, Autoplay
+    Zurück ist fest rot. Die übrigen Buttons spiegeln den Zustand (Pause blau ↔ Fortsetzen grün, Autoplay
     rot = an, Loop grün = an): sync_state() gleicht sie an den Cog an und
     meldet, ob sich etwas geändert hat – der _progress_loop schickt die Karte
     dann mit. Weil der Zustand an den Buttons ablesbar ist, quittieren
@@ -67,7 +67,7 @@ class MusicControlView(LayoutView):
             return button
 
         S = discord.ButtonStyle
-        self.back = make("back", self._on_back, label=t("button.back"), style=S.primary)
+        self.back = make("back", self._on_back, label=t("button.back"), style=S.danger)
         # Ein Button für Pause und Fortsetzen; Beschriftung/Farbe setzt sync_state().
         self.pause = make("pause", self._on_pause_toggle, label=t("button.pause"), style=S.primary)
         self.skip = make("skip", self._on_skip, label=t("button.skip"), style=S.secondary)

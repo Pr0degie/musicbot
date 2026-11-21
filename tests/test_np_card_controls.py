@@ -83,7 +83,7 @@ def _details(view):
 def test_buttons_mirror_cog_state():
     view, cog, vc, _stopped, _ctx = _setup(playing=True)
     assert (view.pause.label, view.pause.style) == (t("button.pause"), S.primary)
-    assert view.back.style == S.primary
+    assert view.back.style == S.danger
     assert view.autoplay_toggle.style == S.secondary and view.loop_toggle.style == S.secondary
     assert view.sync_state() is False, "nichts geändert → kein Edit nötig"
 
