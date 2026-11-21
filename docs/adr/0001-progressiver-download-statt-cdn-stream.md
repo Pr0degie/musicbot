@@ -22,3 +22,11 @@ Gates: kein mp3-Modus, `ext` in webm/opus, URL nicht geblockt, kein `force_downl
 - **Absichtliche Stopps** (Skip, `!now`, `!eq`, `!seek`, `!stop`, `!clear`, Auto-Leave, Skip-Button, Musik-weicht-Radio) laufen über `_stop_for_advance()` — One-Shot-Flag `_suppress_resume`, konsumiert in `after_playing` —, sonst würde jeder Skip die wachsende Datei des aktuellen Tracks wieder vorn einreihen. Neue `vc.stop()`-Aufrufe auf Musik-Quellen daher immer über diesen Helper (Radio-Quellen nicht: deren Callback `after_radio` konsumiert das Flag nicht).
 - **Blockliste:** Fehlgeschlagene Downloads löschen die Teil-Datei via `safe_unlink` (bei Sharing-Violation bleiben Marker + Sidecar liegen, die URL wird sofort via `block_progressive` gesperrt → Neustart räumt auf).
 - **Schnellstart:** Hat das Info-Dict `formats` (frisch extrahiert, nicht der reduzierte Disk-Cache), lädt `_download_progressive_sync` direkt via `process_ie_result` (wie `--load-info-json`) — spart die Zweit-Extraktion samt JS-Challenge (~5–10 s vor dem ersten Byte); scheitert das (abgelaufene URL), Teil-Datei weg + einmal frische Extraktion. Geht die Teil-Datei dabei nicht weg (Windows: FFmpeg liest sie noch), wird der progressive Versuch abgebrochen statt anzuhängen — yt_dlps `continuedl` würde sonst einen korrupten Mischling erzeugen; die URL landet auf der Blockliste, der Stream-Fallback übernimmt.
+
+## Nachtrag 21.11.2026: eine Ursache der FFmpeg-403s
+
+Zumindest ein Teil der 403s hatte eine konkrete Ursache: URLs des YouTube-TV-Clients (`c=TVHTML5`, mit Node-JS-Runtime
+der Standard) tragen ein `available_at` und sind erst ab dann abrufbar. yt_dlps Downloader wartet das ab („Sleeping …
+as required by the site"), deshalb traf es ihn nie, FFmpeg im Stream-Pfad dagegen jedes Mal. Der Stream-Pfad
+(>20-min-Tracks, Stream bei Cache-Miss) wartet jetzt vorher (`utils/ffmpeg.stream_wait_seconds`). Die Entscheidung
+für den progressiven Download bleibt davon unberührt.

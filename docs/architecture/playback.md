@@ -24,7 +24,10 @@ merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Or
 Generationszähler `_track_generation` → [ADR 0007](../adr/0007-track-zustand-vor-play-generationszaehler.md).
 FFmpeg-stderr läuft in eine Temp-Datei; der `after_playing`-Callback (gebaut von `_make_after_playing`) loggt
 bei Fehler/Kurzläufer (<2 s) die letzten 20 Zeilen und klassifiziert sie (`_classify_ffmpeg_error`: `input`
-vs. `filter`). Stream-Track <1 s + Input-Fehler (z. B. 403 vom CDN) → genau **ein** Retry mit frischer URL
+vs. `filter`). Vor jedem Stream-Start wartet `play_next` bis zum `available_at` des Info-Dicts
+(`utils/ffmpeg.stream_wait_seconds`, max. 15 s): TV-Client-URLs von YouTube (`c=TVHTML5`) liefern vorher 403,
+yt_dlps Downloader wartet das selbst ab, FFmpeg nicht (am 21.11.2026 reproduziert: sofort 403, nach ~4 s 200).
+Stream-Track <1 s + Input-Fehler (z. B. 403 vom CDN) → genau **ein** Retry mit frischer URL
 (`_stream_retry_url`, `dl.invalidate()`), kein doppelter Play-Count; schlägt auch der fehl, folgt **ein**
 letzter Anlauf als lokaler Download (`_force_download_url` → `resolve_track(force_download=True)`;
 yt_dlp-eigener HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen; Meldung

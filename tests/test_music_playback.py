@@ -777,3 +777,33 @@ def test_pause_resume_resets_stopped_by_user(monkeypatch, tmp_path):
         _cleanup(mc)
 
     asyncio.run(run())
+
+
+def test_stream_waits_for_available_at_before_ffmpeg(monkeypatch, tmp_path):
+    """TV-Client-URLs von YouTube sind erst ab available_at abrufbar, vorher 403.
+    play_next darf FFmpeg erst danach starten (live reproduziert 21.11.2026)."""
+    import time
+    monkeypatch.chdir(tmp_path)
+    started = []
+
+    class _TimedSource:
+        def __init__(self, source, *args, **kwargs):
+            started.append(time.time())
+
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", _TimedSource)
+
+    async def run():
+        available_at = time.time() + 0.3
+        info = {**STREAM_INFO, "available_at": available_at}
+        dl = FakeDownloader((info, "https://cdn.example/stream", "Testsong", 200))
+        vc = FakeVoiceClient()
+        mc = make_cog(dl)
+        mc.queue.append(("https://www.youtube.com/watch?v=test", "Testsong"))
+
+        await mc.play_next(FakeCtx(vc))
+
+        assert len(vc.play_calls) == 1
+        assert started and started[0] >= available_at, "FFmpeg vor available_at gestartet → 403"
+        _cleanup(mc)
+
+    asyncio.run(run())

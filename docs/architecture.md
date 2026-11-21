@@ -77,7 +77,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
   [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`),
   **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`), **`utils/i18n.py`** (`t()`).
-- **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`; `music.py`
+- **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`/`stream_wait_seconds`
+  (Wartezeit bis `available_at` einer YouTube-Stream-URL, sonst 403); `music.py`
   spiegelt sie (plus `utils/text.progress_bar`) als Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/
   `_classify_ffmpeg_error`/`_progress_bar`, damit bestehende Aufrufer und Tests unverändert bleiben.
 - **`utils/voice.py`** — `stop_playback`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,

@@ -35,6 +35,7 @@ from utils.logger import logger
 from utils.voice import stop_playback
 from utils.i18n import t
 from utils.text import normalize_title
+from utils.ffmpeg import stream_wait_seconds
 from views.music_controls import MusicControlView, SearchAutoplayView
 
 # Max. Seek-Resumes pro Track, wenn FFmpeg die wachsende Datei eines progressiven
@@ -189,6 +190,13 @@ class PlaybackMixin:
             # Dritter Anlauf nach zwei toten Stream-Versuchen → Download erzwingen.
             force_download = url == self._force_download_url
             info, filename, title, duration = await self._resolve_track(url, title, force_download=force_download)
+
+            # Stream-URL erst ab available_at abrufbar, sonst 403 (utils/ffmpeg.py).
+            # Vor dem _skip_resolving-Check, damit ein Skip im Wartefenster greift.
+            wait = stream_wait_seconds(info) if isinstance(filename, str) and not force_download else 0
+            if wait > 0:
+                logger.info(f"[Stream] Warte {wait:.1f}s bis YouTube die URL freigibt: {title}")
+                await asyncio.sleep(wait)
 
             if self._skip_resolving:
                 self._skip_resolving = False

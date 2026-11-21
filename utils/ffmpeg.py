@@ -6,6 +6,25 @@ Klassen-Aliase weiterhin als MusicCommands._ffmpeg_header_opts o. ä. erreichbar
 """
 
 import shlex
+import time
+
+# Obergrenze fürs Warten auf available_at: YouTube nennt üblicherweise wenige
+# Sekunden; ein ausreißender Wert soll die Wiedergabe nicht ewig blockieren.
+STREAM_AVAILABLE_MAX_WAIT = 15.0
+
+
+def stream_wait_seconds(info, now=None) -> float:
+    """Sekunden, bis die Stream-URL laut YouTube abrufbar ist (0 = sofort).
+
+    URLs mancher YouTube-Clients (TVHTML5) tragen ein `available_at`; vorher
+    antwortet googlevideo mit 403 Forbidden. yt_dlps eigener Downloader wartet
+    das ab („Sleeping … as required by the site"), FFmpeg im Stream-Pfad
+    bekommt die URL dagegen direkt – also vorher selbst warten."""
+    available_at = info.get("available_at") if info else None
+    if not isinstance(available_at, (int, float)):
+        return 0.0
+    wait = available_at - (time.time() if now is None else now)
+    return min(max(wait, 0.0), STREAM_AVAILABLE_MAX_WAIT)
 
 
 def ffmpeg_header_opts(info) -> str:
