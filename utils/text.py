@@ -78,3 +78,23 @@ def progress_bar(elapsed, total, length=21):
     bar = "▬" * pos + "🔘" + "▬" * (length - 1 - pos)
     fmt = lambda s: f"{int(s) // 60}:{int(s) % 60:02d}"
     return f"{bar} {fmt(elapsed)} / {fmt(total)}"
+
+
+# Ersatz für Zeichen, die einen Markdown-Link [Text](<url>) zerreißen oder als
+# Formatierung greifen würden. Backslash-Escapes (\| \[ \*) gehen nicht:
+# Discord stellt den Link dann gar nicht dar, sondern zeigt [Text](<url>) roh.
+_LINK_LABEL_MAP = str.maketrans({"[": "(", "]": ")", "\\": "/", "`": "'", "*": "∗"})
+
+
+def link_label(text: str) -> str:
+    r"""Titel als Text eines Discord-Markdown-Links, ganz ohne Backslash-Escapes.
+
+    Klammern werden zu runden Klammern, ``*``/`` ` ``/``\`` zu harmlosen
+    Lookalikes. Doppelte ``|``/``_``/``~`` (Spoiler, Unterstrich,
+    Durchstreichen) werden mit einem Leerzeichen aufgebrochen; einzelne
+    bleiben, wie sie sind – „Song | Künstler" sieht unverändert aus."""
+    label = (text or "").translate(_LINK_LABEL_MAP)
+    for pair in ("||", "__", "~~"):
+        while pair in label:
+            label = label.replace(pair, f"{pair[0]} {pair[1]}")
+    return label

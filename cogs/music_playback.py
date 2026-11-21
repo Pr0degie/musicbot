@@ -34,7 +34,7 @@ import discord
 from utils.logger import logger
 from utils.voice import stop_playback
 from utils.i18n import t
-from utils.text import normalize_title
+from utils.text import link_label, normalize_title
 from utils.ffmpeg import stream_wait_seconds
 from views.music_controls import MusicControlView, SearchAutoplayView
 
@@ -323,10 +323,13 @@ class PlaybackMixin:
             card_title = f"{title} – {info.get('uploader')}"
         else:
             card_title = title
-        # Eckige Klammern im Titel würden den Markdown-Link der Titelzeile zerreißen.
-        card_title = discord.utils.escape_markdown(card_title).replace("[", "\\[").replace("]", "\\]")
         page = info.get("webpage_url")
-        heading = f"### 🎵 [{card_title}](<{page}>)" if page else f"### 🎵 {card_title}"
+        # Im Link-Text keine Backslash-Escapes: mit „\|" oder „\[" zeigt Discord den
+        # Link nicht an, sondern [Titel](<url>) als Rohtext (utils/text.link_label).
+        if page:
+            heading = f"### 🎵 [{link_label(card_title)}](<{page}>)"
+        else:
+            heading = f"### 🎵 {discord.utils.escape_markdown(card_title)}"
         details = (
             f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
             f" · **{t('embed.format')}** {self.audio_format}"
