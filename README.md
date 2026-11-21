@@ -14,7 +14,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 - Audio format: `webm` (default, lossless) or `mp3`
 - Internet radio via direct stream
 - Queue management with save/load, shuffle and loop mode
-- Short songs are cached; long songs (>20 min) start instantly via stream
+- Fast start: new songs play after ~3 s (playback begins while downloading); short songs are cached, long songs (>20 min) are streamed
 - Auto-leave: bot leaves voice when all users go, or after 2 h of inactivity
 - Voice stability: reconnect watchdog recovers playback after Discord drops (code 1006); after a network outage the bot rebuilds the voice connection itself and posts a note in chat
 - Move guard (optional): only the owner may move or kick the bot, anyone else's move or kick gets undone
@@ -95,7 +95,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── music_radio.py         # RadioMixin: internet radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
-│   ├── downloader.py          # yt_dlp instances, cookie mode, download cache, streaming
+│   ├── downloader.py          # yt_dlp instances (fast YouTube client), cookie mode, download cache, streaming
 │   ├── downloader_progressive.py # Progressive download (playback starts while downloading)
 │   ├── presets.py             # EQ filter chains
 │   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart

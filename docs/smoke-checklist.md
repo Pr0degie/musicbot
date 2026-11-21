@@ -62,9 +62,12 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Kein Doppel-Download: während ein progressiver Download läuft, denselben Track erneut anstoßen (Loop/`!replay`/`!eq`-Restart) → es startet kein zweiter Download; die INFO-Zeile `[Download] Bereits in Arbeit über <pfad> – kein zweiter Start` bleibt im Normalbetrieb aus (erscheint sie, wurde ein Kollisionsversuch abgewehrt — Ursache prüfen)
 - [ ] Langer Track (> 20 min) → streamt direkt (kein Download startet, `downloads/` wächst nicht)
 
-## Startlatenz & Cookie-Modus (ADR 0010)
+## Startlatenz & Cookie-Modus (ADR 0010, 0013)
 
-- [ ] `!p <Suchbegriff>` bei leerer Queue → Ton nach ~3 s. Im Log steht **kein** `Sleeping 5.00 seconds as required by the site` und der Puffer ist nach ~1 s erreicht (`[Progressiv] Puffer erreicht (… nach …s)`)
+- [ ] `!p <Suchbegriff>` bei leerer Queue → Ton nach ~3 s. Im Log steht **kein** `Sleeping … seconds as required by the site` und der Puffer ist nach ~1 s erreicht (`[Progressiv] Puffer erreicht (… nach …s)`)
+- [ ] Erstes `!p`, Bot noch nicht im Channel → Suche läuft parallel zum Beitritt: `[p] Eingabe erhalten` → `[Nächster Track]` nicht länger als ~1,5 s; „Suche läuft…" erscheint kurz und verschwindet
+- [ ] Kein `[yt-dlp] visionos scheiterte …` bei normalen Songs; taucht es öfter auf → `FAST_PLAYER_CLIENTS` neu messen (ADR 0013)
+- [ ] Langer Track (> 20 min, z. B. Mix) → startet ohne 403; falls doch die TV-URL kommt, steht `[Stream] Warte …s bis YouTube die URL freigibt` im Log
 - [ ] Reihenfolge im Log: `[Progressiv] Starte Hintergrund-Download` erscheint **vor** `[Progressiv] Laufenden Download adoptiert` — der Frühstart per `prime_first_hit` greift und `resolve_track` adoptiert ihn (kein zweiter Download)
 - [ ] Alterssperre: bekanntes altersbeschränktes Video per `!p <URL>` → einmal `[Cookies] YouTube verlangt eine angemeldete Session (…)` + `[Cookies] Zweitversuch mit Cookies`, danach spielt der Track
 - [ ] Nach diesem Umschalten laufen Folge-Tracks weiter (im Cookie-Modus, also wieder mit Werbepause — erwartet); erst ein Bot-Neustart geht zurück auf cookielos

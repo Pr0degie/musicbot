@@ -78,7 +78,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
   [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`),
-  **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`), **`utils/i18n.py`** (`t()`).
+  **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`/`link_label` — Kartentitel als Link ohne Emojis, [ADR 0012](adr/0012-now-playing-karte-components-v2.md)), **`utils/i18n.py`** (`t()`).
 - **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`/`stream_wait_seconds`
   (Wartezeit bis `available_at` einer YouTube-Stream-URL, sonst 403); `music.py`
   spiegelt sie (plus `utils/text.progress_bar`) als Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/

@@ -14,7 +14,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 - Audioformat: `webm` (Standard, verlustfrei) oder `mp3`
 - Internet-Radio via direktem Stream
 - Queue-Verwaltung mit Speichern/Laden, Shuffle, Loop-Modus
-- Kurze Songs werden gecacht, lange Songs (>20 min) starten sofort per Stream
+- Schneller Start: neue Songs laufen nach ~3 s (Wiedergabe beginnt schon während des Downloads); kurze Songs werden gecacht, lange (>20 min) gestreamt
 - Auto-Leave: Bot verlässt den Voice-Channel wenn alle User weg sind oder nach 2 h Inaktivität
 - Voice-Stabilität: Reconnect-Watchdog setzt die Wiedergabe nach Discord-Abbrüchen (Code 1006) fort; nach einem Netzabbruch baut der Bot die Sprachverbindung selbst neu auf und schreibt einen Hinweis in den Chat
 - Move-Schutz (optional): nur der Owner darf den Bot verschieben oder rauswerfen, alles andere macht er rückgängig
@@ -95,7 +95,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── music_radio.py         # RadioMixin: Internet-Radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
-│   ├── downloader.py          # yt_dlp-Instanzen, Cookie-Modus, Download-Cache, Streaming
+│   ├── downloader.py          # yt_dlp-Instanzen (schneller YouTube-Client), Cookie-Modus, Download-Cache, Streaming
 │   ├── downloader_progressive.py # Progressiver Download (Wiedergabe startet schon während des Downloads)
 │   ├── presets.py             # EQ-Filterketten
 │   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart
