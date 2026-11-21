@@ -1,12 +1,21 @@
 """Tests für die Status-Nachricht ("Suche läuft..." / "Verarbeite...") in
 _extract_info_or_report: Sie wird nach Abschluss gelöscht – bei Erfolg wie
-im Fehlerfall, und auch wenn Discord das Löschen verweigert (kein Crash)."""
+im Fehlerfall, und auch wenn Discord das Löschen verweigert (kein Crash).
+
+Senden und Löschen laufen parallel bzw. im Hintergrund (nicht im kritischen
+Pfad von Suche und Download-Start) – die Tests holen die Hintergrund-Tasks
+deshalb erst ein (_settle), bevor sie prüfen."""
 
 import asyncio
 
 from conftest import FakeCtx, build_cog
 from cogs.music import _YTDLP_FAILED
+from cogs.music_playback import _BACKGROUND_TASKS
 from utils.i18n import t
+
+
+async def _settle():
+    await asyncio.gather(*list(_BACKGROUND_TASKS))
 
 
 class FakeYdl:
@@ -40,6 +49,7 @@ def test_status_message_deleted_on_success():
         info = {"entries": [{"title": "Treffer"}]}
 
         result = await _call(mc, ctx, FakeYdl(result=info))
+        await _settle()
 
         assert result is info
         assert ctx.texts == [t("status.searching")]
@@ -54,6 +64,7 @@ def test_status_message_deleted_on_error():
         ctx = FakeCtx()
 
         result = await _call(mc, ctx, FakeYdl(exc=RuntimeError("kaputt")))
+        await _settle()
 
         assert result is _YTDLP_FAILED
         assert ctx.texts == [t("status.searching"), t("error.search_error")]
@@ -84,6 +95,7 @@ def test_delete_failure_does_not_crash():
         ctx.send = send_with_broken_delete
 
         result = await _call(mc, ctx, FakeYdl(result=info))
+        await _settle()   # das fehlschlagende Löschen darf auch im Hintergrund nicht krachen
         assert result is info
 
     asyncio.run(run())
@@ -97,6 +109,7 @@ def test_none_from_ytdlp_reports_error_instead_of_crashing():
         ctx = FakeCtx()
 
         result = await _call(mc, ctx, FakeYdl(result=None))
+        await _settle()
 
         assert result is _YTDLP_FAILED
         assert ctx.texts == [t("status.searching"), t("error.search_error")]
@@ -111,8 +124,58 @@ def test_timeout_reports_error():
         ctx = FakeCtx()
 
         result = await _call(mc, ctx, FakeYdl(exc=asyncio.TimeoutError()))
+        await _settle()
 
         assert result is _YTDLP_FAILED
         assert ctx.texts == [t("status.searching"), t("error.search_timeout")]
+
+    asyncio.run(run())
+
+
+def test_search_does_not_wait_for_status_message():
+    """Die Abfrage startet sofort und das Ergebnis kommt zurück, ohne auf das
+    Senden oder Löschen der Status-Nachricht zu warten (Discord-Roundtrips)."""
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+        gate = asyncio.Event()
+        orig_send = ctx.send
+
+        async def slow_send(*args, **kwargs):
+            await gate.wait()             # Discord hängt
+            return await orig_send(*args, **kwargs)
+
+        ctx.send = slow_send
+        info = {"entries": [{"title": "Treffer"}]}
+
+        result = await asyncio.wait_for(_call(mc, ctx, FakeYdl(result=info)), 1)
+        assert result is info, "Ergebnis darf nicht hinter der Status-Nachricht warten"
+
+        gate.set()
+        await _settle()
+        assert ctx.texts == [t("status.searching")]
+        assert ctx.messages[0].deleted is True, "wird nachträglich trotzdem gelöscht"
+
+    asyncio.run(run())
+
+
+def test_pending_query_is_used_instead_of_a_new_one():
+    async def run():
+        mc = build_cog()
+        ctx = FakeCtx()
+        ydl = FakeYdl(result={"entries": []})
+        mc.dl = ydl
+
+        async def early():
+            return {"entries": [{"title": "früh"}]}
+
+        result = await mc._extract_info_or_report(
+            ctx, "ytsearch3:test", "search",
+            status_key="status.searching", timeout_key="error.search_timeout",
+            error_key="error.search_error", log_msg="[test]", pending=asyncio.ensure_future(early()),
+        )
+        await _settle()
+        assert result == {"entries": [{"title": "früh"}]}
+        assert ydl.calls == [], "keine zweite Abfrage"
 
     asyncio.run(run())

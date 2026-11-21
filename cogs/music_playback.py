@@ -47,6 +47,26 @@ PROGRESSIVE_MAX_RESUMES = 2
 # bisher selbst krachen lassen).
 _YTDLP_FAILED = object()
 
+# Laufende Hintergrund-Aufräumarbeiten (Status-Nachricht löschen): asyncio hält
+# Tasks nur schwach – ohne Referenz könnte der GC sie mitten im Lauf abräumen.
+_BACKGROUND_TASKS: set = set()
+
+
+def search_query(eingabe: str) -> str:
+    """yt_dlp-Suchanfrage für einen Suchbegriff: 3 Treffer (1 spielt, 2 Alternativen)."""
+    return f"ytsearch3:{eingabe}"
+
+
+def start_early(coro) -> "asyncio.Task":
+    """Abfrage sofort als Task starten (läuft parallel z. B. zum Voice-Join).
+
+    Wird sie nie abgeholt (Join scheitert), schluckt der Callback das
+    Ergebnis bzw. die Exception – sonst meldet asyncio „Task exception was
+    never retrieved"."""
+    task = asyncio.create_task(coro)
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return task
+
 
 class PlaybackMixin:
     async def _prefetch_next(self, idx: int = 0):
@@ -770,7 +790,7 @@ class PlaybackMixin:
             self._playback_done.clear()
 
     async def _extract_info_or_report(self, ctx, query, kind, *,
-                                      status_key, timeout_key, error_key, log_msg):
+                                      status_key, timeout_key, error_key, log_msg, pending=None):
         """Ruft yt_dlp-Infos ab und meldet Timeout/Fehler direkt im Channel.
 
         Gemeinsamer Fetch-Teil der Such- und URL-Zweige von !p, !next und !now.
@@ -784,34 +804,53 @@ class PlaybackMixin:
         Die Status-Nachricht ("Suche läuft..." bzw. "Verarbeite...") wird nach
         Abschluss wieder gelöscht – bei Erfolg wie im Fehlerfall (dann steht
         die Fehlermeldung im Channel).
+
+        Senden und Löschen liegen nicht im kritischen Pfad: die Abfrage läuft
+        parallel zum Senden, gelöscht wird im Hintergrund – sonst warteten
+        Suche und Download-Start auf zwei Discord-Roundtrips. `pending` ist
+        eine bereits gestartete Abfrage (z. B. von !p parallel zum Voice-Join).
         """
-        status_msg = None
+        status_task = asyncio.create_task(ctx.send(t(status_key)))
         try:
-            status_msg = await ctx.send(t(status_key))
-            info = await self.dl.extract_info_async(query, kind)
+            info = await (pending if pending is not None else self.dl.extract_info_async(query, kind))
             if info is None:
                 logger.warning(f"{log_msg}: yt_dlp lieferte keine Infos für {query[:120]}")
-                await ctx.send(t(error_key))
+                await self._report_after_status(ctx, status_task, t(error_key))
                 return _YTDLP_FAILED
             return info
         except asyncio.TimeoutError:
             logger.warning(f"{log_msg}: Timeout für {query[:120]}")
-            await ctx.send(t(timeout_key))
+            await self._report_after_status(ctx, status_task, t(timeout_key))
             return _YTDLP_FAILED
         except Exception:
             logger.exception(log_msg)
-            await ctx.send(t(error_key))
+            await self._report_after_status(ctx, status_task, t(error_key))
             return _YTDLP_FAILED
         finally:
-            if status_msg is not None:
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    pass   # schon weg oder keine Berechtigung – egal
+            cleanup = asyncio.create_task(self._delete_status(status_task))
+            _BACKGROUND_TASKS.add(cleanup)   # starke Referenz, sonst kann der GC ihn abräumen
+            cleanup.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    @staticmethod
+    async def _report_after_status(ctx, status_task, text):
+        """Fehlermeldung erst nach der Status-Nachricht senden – sonst stünde
+        sie bei einem schnellen Fehlschlag vor „Suche läuft…" im Channel.
+        Im Fehlerpfad kostet das Warten nichts, was zählt."""
+        await asyncio.wait([status_task])
+        await ctx.send(text)
+
+    @staticmethod
+    async def _delete_status(status_task):
+        """Status-Nachricht löschen, sobald sie gesendet ist (Hintergrund-Task)."""
+        try:
+            msg = await status_task
+            await msg.delete()
+        except Exception:
+            pass   # nie gesendet, schon weg oder keine Berechtigung – egal
 
     async def _search_and_enqueue(self, ctx, eingabe, *, log_tag, timeout_key,
                                   insert, with_alts_key, no_alts_key,
-                                  base_content_key=None):
+                                  base_content_key=None, pending=None):
         """Gemeinsamer Suchbegriff-Zweig von !p, !next und !now.
 
         ytsearch3 → ersten Treffer vorab auflösen und einreihen, Treffer 2
@@ -831,13 +870,15 @@ class PlaybackMixin:
                  danach selbst.
 
         Gibt True zurück wenn ein Treffer eingereiht wurde, sonst False
-        (die Fehlermeldung wurde dann bereits gesendet).
+        (die Fehlermeldung wurde dann bereits gesendet). `pending`: bereits
+        gestartete Suche (search_query()), siehe !p.
         """
         results = await self._extract_info_or_report(
-            ctx, f"ytsearch3:{eingabe}", "search",
+            ctx, search_query(eingabe), "search",
             status_key="status.searching", timeout_key=timeout_key,
             error_key="error.search_error",
             log_msg=f"[{log_tag}] Fehler bei Suche",
+            pending=pending,
         )
         if results is _YTDLP_FAILED:
             return False

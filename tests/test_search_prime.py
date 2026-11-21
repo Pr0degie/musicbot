@@ -74,3 +74,58 @@ def test_search_uses_search_instance():
         assert mc.dl.extract_calls == [("ytsearch3:irgendein song", "search")]
 
     asyncio.run(run())
+
+
+def test_p_starts_search_before_voice_join_and_only_once():
+    """!p startet die yt_dlp-Suche parallel zum Voice-Join (beim ersten !p ein
+    voller Handshake) – nicht dahinter – und fragt dabei nicht doppelt ab."""
+    from cogs.music import MusicCommands
+
+    async def run():
+        mc, ctx = build(is_playing=False)
+        order = []
+        real_extract = mc.dl.extract_info_async
+
+        async def extract(query, kind="main", **kw):
+            order.append("suche")
+            return await real_extract(query, kind, **kw)
+
+        async def ensure_voice(_ctx):
+            await asyncio.sleep(0.05)   # Voice-Handshake
+            order.append("voice")
+            return True
+
+        async def noop(*a, **k):
+            return None
+
+        mc.dl.extract_info_async = extract
+        mc._ensure_voice = ensure_voice
+        mc._stop_radio_for_takeover = noop
+        mc.play_next = noop
+
+        await MusicCommands.p.callback(mc, ctx, eingabe="irgendein song")
+
+        assert order == ["suche", "voice"], "Suche muss vor dem Ende des Voice-Joins laufen"
+        assert mc.dl.extract_calls == [("ytsearch3:irgendein song", "search")]
+        assert mc.dl.primed == [(URL, "Treffer")]
+
+    asyncio.run(run())
+
+
+def test_p_without_voice_drops_early_search_quietly():
+    from cogs.music import MusicCommands
+
+    async def run():
+        mc, ctx = build(is_playing=False)
+
+        async def no_voice(_ctx):
+            return False
+
+        mc._ensure_voice = no_voice
+        await MusicCommands.p.callback(mc, ctx, eingabe="irgendein song")
+        await asyncio.sleep(0)
+
+        assert list(mc.queue) == [], "ohne Voice nichts einreihen"
+        assert mc.dl.primed == []
+
+    asyncio.run(run())

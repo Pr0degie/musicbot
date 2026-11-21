@@ -48,6 +48,10 @@ Im Cookie-Modus bleibt es bei yt_dlps Defaults für angemeldete Sessions — `vi
 ## Konsequenzen
 
 - Erster Ton bei neuen Songs: **~9,5 s → ~3,5 s** (Suche 1,5 s + Extraktion 1,3 s + Puffer 0,5 s).
+- Nachgezogen am selben Tag: Suche und Abruf zusammenzulegen (`ytsearch1` mit voller Extraktion) ist gemessen **nicht**
+  schneller (1,35–1,72 s gegenüber 1,38–1,70 s nacheinander) — der Player-Request braucht die Video-ID aus der Suche.
+  Stattdessen sind die Discord-Wartezeiten aus dem kritischen Pfad geflogen: „Suche läuft…" senden/löschen und der
+  Voice-Join laufen jetzt parallel zur Abfrage (siehe `docs/architecture/playback.md` → *Sofortstart des ersten Treffers*).
 - Lange Tracks (Stream-Pfad) laufen ohne die Wartezeit aus `stream_wait_seconds`; die bleibt als Sicherung für den Rückfall.
 - Ändert YouTube/yt_dlp das Verhalten von `visionos`, greift der Rückfall automatisch (Log: `[yt-dlp] visionos scheiterte …`).
   Taucht die Zeile häufig auf, `FAST_PLAYER_CLIENTS` neu messen (Messskript-Vorgehen siehe Kontext).

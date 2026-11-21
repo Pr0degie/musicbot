@@ -81,6 +81,11 @@ des ersten Suchtreffers (bzw. der `!p <url>`-Eingabe) sofort an — er läuft da
 Discord-Nachrichten statt hinter ihnen; `resolve_track` adoptiert den laufenden Task über die
 In-Flight-Registry → [ADR 0010](../adr/0010-cookielos-zuerst-cookie-fallback.md). Dass der Puffer dann nach ~0,5 s
 steht, verdankt er dem YouTube-Client `visionos` ohne `available_at`-Sperre → [ADR 0013](../adr/0013-schneller-youtube-client-visionos.md).
+Auch davor wartet nichts auf Discord: `!p` startet die yt_dlp-Abfrage (`start_early`) schon vor `_ensure_voice`, also parallel
+zum Voice-Handshake, und `_extract_info_or_report` sendet „Suche läuft…" parallel zur Abfrage und löscht es im Hintergrund
+(`_BACKGROUND_TASKS`); nur Fehlermeldungen warten die Status-Nachricht ab, damit die Reihenfolge im Channel stimmt.
+Suche und Metadaten-Abruf in **einen** yt_dlp-Aufruf zu legen (`ytsearch1` voll) bringt nichts — gemessen gleich schnell,
+weil der zweite Request die Video-ID aus dem ersten braucht.
 
 **Prefetch-Kick:** Titel, die mitten im Song eingereiht werden (`!p`/`!next`/`!loadq`), starten via
 `_kick_prefetch()` sofort den Vorlade-Task (`_prefetch_upcoming`, von `play_next` wiederverwendet) — sonst

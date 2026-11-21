@@ -29,7 +29,7 @@ from cogs.music_stats import StatsMixin
 from cogs.music_queue_io import QueuePersistenceMixin
 from cogs.music_voice_ui import VoiceLifecycleMixin, PlaybackUiMixin
 from cogs.music_voice_guard import VoiceGuardMixin
-from cogs.music_playback import PlaybackMixin, _YTDLP_FAILED
+from cogs.music_playback import PlaybackMixin, _YTDLP_FAILED, search_query, start_early
 
 SCORE_FILE = Path("play_counts.json")
 
@@ -393,6 +393,18 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             return
         logger.info(f"[p] Eingabe erhalten: {eingabe}")
 
+        # yt_dlp-Abfrage sofort starten – parallel zum Voice-Join (beim ersten
+        # !p ein voller Handshake) statt dahinter. Scheitert der Join, läuft sie
+        # ins Leere (start_early schluckt das Ergebnis).
+        is_search = not eingabe.startswith("http")
+        # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
+        # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
+        is_playlist = "playlist?" in eingabe or "list=" in eingabe
+        if is_search:
+            pending = start_early(self.dl.extract_info_async(search_query(eingabe), "search"))
+        else:
+            pending = start_early(self.dl.extract_info_async(eingabe, "playlist" if is_playlist else "url"))
+
         if not await self._ensure_voice(ctx):
             return
 
@@ -401,11 +413,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         # Wenn kein http am Anfang → Suchbegriff → ersten Treffer sofort abspielen,
         # Treffer 2 und 3 als Buttons anzeigen falls es der Falsche war.
         # Insert-Semantik ("evict_or_back"): siehe _search_and_enqueue-Docstring.
-        if not eingabe.startswith("http"):
+        if is_search:
             queued = await self._search_and_enqueue(
                 ctx, eingabe, log_tag="p", timeout_key="error.search_timeout",
                 insert="evict_or_back", with_alts_key="status.playing_with_alts",
-                no_alts_key="status.added",
+                no_alts_key="status.added", pending=pending,
             )
             if not queued:
                 return
@@ -418,15 +430,12 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
 
         # --- Ab hier: direkte URL oder Playlist ---
 
-        # Einfache Heuristik: Wenn "playlist?" oder "list=" in der URL steht,
-        # ist es eine Playlist. Funktioniert für alle gängigen YouTube-Playlist-URLs.
-        is_playlist = "playlist?" in eingabe or "list=" in eingabe
-
         info = await self._extract_info_or_report(
             ctx, eingabe, "playlist" if is_playlist else "url",
             status_key="status.processing", timeout_key="error.processing_timeout",
             error_key="error.url_error",
             log_msg="[p] Fehler beim Abrufen von yt_dlp-Infos",
+            pending=pending,
         )
         if info is _YTDLP_FAILED:
             return
