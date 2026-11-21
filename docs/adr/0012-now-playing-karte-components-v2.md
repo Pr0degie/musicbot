@@ -12,7 +12,9 @@ Die Now-Playing-Karte war ein Embed mit angehängter Button-Zeile. Gewünscht wa
 Die Karte ist ein Components-V2-Layout (`MusicControlView` als `LayoutView`, `views/music_controls.py`): ein Container in Akzentfarbe mit
 
 - Section `[Titel, Fortschrittsbalken]` → Accessory: grauer Button mit rotem ❌ (= `!clear`),
-- Section `[Details, „Als Nächstes", Uploader]` → Accessory: Thumbnail,
+- bei YouTube: MediaGallery mit dem Video-Thumbnail in 320×180 (`mqdefault`, `compact_card_image()`). Das Thumbnail-Accessory
+  hat bei Discord eine feste, kleine Größe; ein einzelnes Galeriebild lässt sich nicht skalieren, die kleine Bildvariante hält die Karte kompakt,
+- TextDisplay `[Details, „Als Nächstes", Uploader]` (ohne YouTube-Bild: Section mit kleinem Thumbnail-Accessory),
 - ActionRow `[Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]`.
 
 Gilt für Song- und Radio-Karte. Alle Zustandsänderungen der Karte laufen über die View selbst: `set_body()` für den Balken, `sync_state()` für Button-Farben/-Beschriftung und „Als Nächstes" (Zurück fest rot, Pause blau ↔ Fortsetzen grün, Autoplay rot = an, Loop grün = an). Weil der Zustand an den Buttons ablesbar ist, quittieren die Umschalter stumm: `_push_state` nutzt den Karten-Edit als Interaktions-Antwort, sonst `defer()`.

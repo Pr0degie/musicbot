@@ -183,3 +183,27 @@ def test_stale_title_is_read_from_heading():
 
 def test_stale_title_missing_heading():
     assert _stale_card_title([_comp(id=7, children=[_comp(id=8, content="x")])]) is None
+
+
+def test_youtube_thumbnail_becomes_compact_gallery_image_below_progress_bar():
+    """Das Thumbnail-Accessory ist bei Discord fest klein – YouTube-Bilder kommen
+    deshalb als Galeriebild zwischen Balken und Details, in 320×180 (kompakt)."""
+    view = MusicControlView(
+        MagicMock(), MagicMock(), song=("https://www.youtube.com/watch?v=abcdefghijk", "T"),
+        heading="### 🎵 T", body="▬● 0:00 / 3:30", details="d",
+        thumbnail="https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp",
+    )
+    parts = view.to_components()[0]["components"]
+    assert [p["type"] for p in parts] == [9, 12, 10, 1], "Titel-Section, Galerie, Details, Buttons"
+    assert parts[1]["items"][0]["media"]["url"] == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
+    assert parts[2] == {"type": 10, "content": "d"}
+
+
+def test_non_youtube_thumbnail_stays_small_accessory():
+    view = MusicControlView(
+        MagicMock(), MagicMock(), song=("https://soundcloud.com/a/b", "T"),
+        heading="### 🎵 T", details="d", thumbnail="https://i1.sndcdn.com/artworks-x.jpg",
+    )
+    parts = view.to_components()[0]["components"]
+    assert [p["type"] for p in parts] == [9, 9, 1]
+    assert parts[1]["accessory"]["type"] == 11

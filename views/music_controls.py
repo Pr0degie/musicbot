@@ -1,8 +1,9 @@
 import asyncio
+import re
 import uuid
 from collections import deque
 import discord
-from discord.ui import ActionRow, Button, Container, LayoutView, Section, TextDisplay, Thumbnail, View
+from discord.ui import ActionRow, Button, Container, LayoutView, MediaGallery, Section, TextDisplay, Thumbnail, View
 from utils.logger import logger
 from utils.voice import stop_playback
 from utils.checks import same_voice_allowed
@@ -19,13 +20,32 @@ _CUSTOM_ID_PREFIX = "musicctl"
 NP_HEADING_ID = 1
 _KEEP = object()   # Sentinel: „Als Nächstes" unverändert lassen
 
+_YT_THUMB = re.compile(r"^https?://i\d?\.ytimg\.com/vi(?:_webp)?/([A-Za-z0-9_-]{11})/")
+_YT_URL = re.compile(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})")
+
+
+def compact_card_image(thumbnail, song_url=None):
+    """YouTube-Thumbnail in 320×180 (`mqdefault`) für das Kartenbild, sonst None.
+
+    Ein einzelnes Galeriebild zieht Discord höchstens bis zur Kartenbreite auf,
+    eine Größe lässt sich nicht angeben – kleine Bilder bleiben aber klein. Die
+    320er-Variante hält die Karte kompakt und hat, anders als `hqdefault`,
+    keine schwarzen Balken."""
+    for text, pattern in ((thumbnail, _YT_THUMB), (song_url, _YT_URL)):
+        m = pattern.search(text) if isinstance(text, str) else None
+        if m:
+            return f"https://i.ytimg.com/vi/{m.group(1)}/mqdefault.jpg"
+    return None
+
 
 class MusicControlView(LayoutView):
     """Now-Playing-Karte als Components-V2-Layout samt Steuer-Buttons.
 
     Aufbau (ein Container in Akzentfarbe):
       Section  [Titel, Fortschrittsbalken]        → Accessory: grauer Button mit rotem ❌ (= !clear)
-      Section  [Details, Als Nächstes, Uploader]  → Accessory: Thumbnail (falls vorhanden)
+      MediaGallery [Video-Thumbnail 320×180]      (nur YouTube, siehe compact_card_image)
+      TextDisplay [Details, Als Nächstes, Uploader]
+        – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
@@ -84,11 +104,16 @@ class MusicControlView(LayoutView):
         container = Container(self._top, accent_colour=accent)
         self._details_base, self._footer, self._up_next = details, footer, up_next
         self._details = None
+        # Das Thumbnail-Accessory hat bei Discord eine feste, kleine Größe; größer
+        # geht nur als Galeriebild zwischen Balken und Details.
+        image = compact_card_image(thumbnail, song[0] if song else None)
+        if image:
+            container.add_item(MediaGallery(discord.MediaGalleryItem(image)))
         if details:
             self._details = TextDisplay(self._details_text())
             # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
             # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
-            if isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
+            if not image and isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
                 container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
             else:
                 container.add_item(self._details)
