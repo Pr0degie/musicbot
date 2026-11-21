@@ -44,6 +44,26 @@ COOKIE_ERROR_MARKERS = (
     "--cookies-from-browser",
 )
 
+# Schneller YouTube-Client für den cookielosen Modus. Mit Node-Runtime nimmt
+# yt_dlp sonst tv_samsung/visionos/web und wählt die TV-URL: deren
+# available_at sperrt den Abruf ~4–5 s (yt_dlp schläft so lange vor dem
+# Download, FFmpeg bekommt 403). visionos liefert dieselbe Opus-Spur (itag 251)
+# ohne Sperrfrist und extrahiert schneller (gemessen 22.11.2026: 1,3 s statt
+# 2,1 s + 4,3 s Wartezeit). yt_dlps eigener Default ohne JS-Runtime ist
+# ebenfalls nur visionos. Im Cookie-Modus bleiben yt_dlps authed-Defaults.
+FAST_PLAYER_CLIENTS = ("visionos",)
+
+# Fehler, nach denen sich ein Zweitversuch mit den Standard-Clients lohnt:
+# der schnelle Client lieferte für dieses Video nichts Brauchbares.
+CLIENT_FALLBACK_MARKERS = (
+    "requested format is not available",
+    "no video formats found",
+    "only images are available",
+    "po token",
+    "http error 403",
+    "this video is not available",
+)
+
 # Nur diese Felder werden nach metadata_cache.json persistiert – ermittelt per
 # grep über alle info.get()/info[...]-Zugriffe plus prepare_filename-Bedarf
 # (outtmpl "%(title)s.%(ext)s"). Volle yt_dlp-Info-Dicts haben ~90 Keys und
@@ -357,12 +377,34 @@ class Downloader(ProgressiveDownloadMixin):
         except asyncio.TimeoutError:
             raise
         except Exception as e:
-            if not (self._needs_cookies(e) and self.enable_cookie_mode(str(e)[:120])):
+            if self._needs_cookies(e) and self.enable_cookie_mode(str(e)[:120]):
+                logger.info(f"[Cookies] Zweitversuch mit Cookies: {query[:80]}")
+            elif self._player_opts() and kind in ("main", "url", "playlist") and self._needs_client_fallback(e):
+                # Schneller Client kann dieses Video nicht → einmal mit den
+                # yt_dlp-Standard-Clients (frische Wegwerf-Instanz, threadsicher).
+                logger.info(f"[yt-dlp] {'/'.join(FAST_PLAYER_CLIENTS)} scheiterte ({str(e)[:80]}) – "
+                            f"Zweitversuch mit Standard-Clients: {query[:80]}")
+                fallback = self._build_ydl(kind, fast=False)
+                return await asyncio.wait_for(
+                    asyncio.to_thread(fallback.extract_info, query, download=False), timeout=timeout
+                )
+            else:
                 raise
-            logger.info(f"[Cookies] Zweitversuch mit Cookies: {query[:80]}")
         return await asyncio.wait_for(_extract(), timeout=timeout)
 
-    def _build_base_opts(self) -> dict:
+    def _player_opts(self, fast: bool = True) -> dict:
+        """extractor_args für den schnellen YouTube-Client (FAST_PLAYER_CLIENTS).
+        Leer im Cookie-Modus oder wenn fast=False (Rückfall auf yt_dlp-Defaults)."""
+        if not fast or self._cookie_mode:
+            return {}
+        return {"extractor_args": {"youtube": {"player_client": list(FAST_PLAYER_CLIENTS)}}}
+
+    @staticmethod
+    def _needs_client_fallback(exc: BaseException) -> bool:
+        msg = str(exc).lower()
+        return any(marker in msg for marker in CLIENT_FALLBACK_MARKERS)
+
+    def _build_base_opts(self, fast: bool = True) -> dict:
         _cookies = self._cookie_opts()
         return {
             "quiet": True,
@@ -383,6 +425,7 @@ class Downloader(ProgressiveDownloadMixin):
             # Node.js als JS-Runtime für den EJS-Signature-Solver aktivieren.
             "js_runtimes": {"node": {}},
             **_cookies,
+            **self._player_opts(fast),
         }
 
     def _make_progressive_ydl(self) -> "yt_dlp.YoutubeDL":
@@ -399,31 +442,49 @@ class Downloader(ProgressiveDownloadMixin):
         """
         return yt_dlp.YoutubeDL({**self._build_base_opts(), "nopart": True, "noplaylist": True})
 
-    def _init_ydl(self):
-        base_opts = self._build_base_opts()
-        if self.audio_format == "mp3":
-            # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
-            base_opts["postprocessors"] = [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ]
-        self.ydl = yt_dlp.YoutubeDL(base_opts)
+    def _build_ydl(self, kind: str, fast: bool = True) -> "yt_dlp.YoutubeDL":
+        """yt_dlp-Instanz für einen Abfrage-Typ aus _YDL_KINDS bauen.
 
-        # Gecachte Instanzen für Suche und URL-Abfragen.
+        fast=False baut sie ohne den schnellen Client – für den einmaligen
+        Rückfall in extract_info_async. search/autoplay sind flach (keine
+        Player-Abfrage), dort ändert fast nichts."""
         _cookies = self._cookie_opts()
         _js = {"js_runtimes": {"node": {}}}
-        self.search_ydl = yt_dlp.YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "skip_download": True,
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-        })
+        if kind == "main":
+            base_opts = self._build_base_opts(fast)
+            if self.audio_format == "mp3":
+                # MP3-Konvertierung läuft über FFmpeg als Post-Processing-Schritt.
+                base_opts["postprocessors"] = [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ]
+            return yt_dlp.YoutubeDL(base_opts)
+        if kind == "search":
+            return yt_dlp.YoutubeDL({
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "socket_timeout": 15,
+                **_cookies,
+                **_js,
+            })
+        if kind == "autoplay":
+            # Autoplay: nur Metadaten, max. 10 Einträge – kein vollständiger Playlist-Scan.
+            return yt_dlp.YoutubeDL({
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "skip_download": True,
+                "noplaylist": False,
+                "playlistend": 10,
+                "socket_timeout": 15,
+                **_cookies,
+                **_js,
+            })
         _url_base = {
             "quiet": True,
             "no_warnings": True,
@@ -432,21 +493,18 @@ class Downloader(ProgressiveDownloadMixin):
             "socket_timeout": 15,
             **_cookies,
             **_js,
+            **self._player_opts(fast),
         }
-        self.url_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
-        self.playlist_ydl = yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
-        # Autoplay: nur Metadaten, max. 10 Einträge – kein vollständiger Playlist-Scan.
-        self.autoplay_ydl = yt_dlp.YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "skip_download": True,
-            "noplaylist": False,
-            "playlistend": 10,
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-        })
+        if kind == "url":
+            return yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
+        if kind == "playlist":
+            return yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
+        raise ValueError(f"Unbekannter yt_dlp-Typ: {kind}")
+
+    def _init_ydl(self):
+        # Gecachte Instanzen je Abfrage-Typ (Suche, URL, Playlist, Autoplay, Haupt).
+        for kind, attr in self._YDL_KINDS.items():
+            setattr(self, attr, self._build_ydl(kind))
 
     # ------------------------------------------------------------------
     # Downloads-Cleanup (DOWNLOADS_MAX_MB, 0 = aus)

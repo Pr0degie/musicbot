@@ -79,7 +79,8 @@ Resume, `_stop_for_advance`, Blockliste und Schnellstart → [ADR
 **Sofortstart des ersten Treffers:** Läuft gerade nichts, stößt `prime_first_hit()` den progressiven Download
 des ersten Suchtreffers (bzw. der `!p <url>`-Eingabe) sofort an — er läuft damit parallel zu den
 Discord-Nachrichten statt hinter ihnen; `resolve_track` adoptiert den laufenden Task über die
-In-Flight-Registry → [ADR 0010](../adr/0010-cookielos-zuerst-cookie-fallback.md).
+In-Flight-Registry → [ADR 0010](../adr/0010-cookielos-zuerst-cookie-fallback.md). Dass der Puffer dann nach ~0,5 s
+steht, verdankt er dem YouTube-Client `visionos` ohne `available_at`-Sperre → [ADR 0013](../adr/0013-schneller-youtube-client-visionos.md).
 
 **Prefetch-Kick:** Titel, die mitten im Song eingereiht werden (`!p`/`!next`/`!loadq`), starten via
 `_kick_prefetch()` sofort den Vorlade-Task (`_prefetch_upcoming`, von `play_next` wiederverwendet) — sonst

@@ -60,3 +60,9 @@ Zusätzlich verschwindet die Serialisierung im Suchpfad: Startet gerade nichts, 
 - Timeouts werden **nicht** wiederholt — sie deuten nicht auf fehlende Authentifizierung, und der Aufrufer meldet sie selbst.
 - Bandbreite: `prime_first_hit` lädt nur, wenn gerade nichts läuft. Wählt der Nutzer danach eine Alternative (Button B/C), war der Download des ersten Treffers umsonst — die Datei bleibt aber als Cache liegen.
 - Tests: `tests/test_cookie_mode.py`, `tests/test_prime_first_hit.py`, `tests/test_search_prime.py`.
+
+## Nachtrag 22.11.2026
+
+Mit neueren yt_dlp-Versionen trat dieselbe `available_at`-Sperre auch cookielos wieder auf: Der TV-Client (`tv_samsung`)
+bekommt sie immer. Inzwischen gibt es mit `visionos` einen Client, der Format 251 ohne Sperre liefert — siehe
+[ADR 0013](0013-schneller-youtube-client-visionos.md). Die obige Aussage, ein `player_client`-Vergleich bringe nichts, ist damit überholt.

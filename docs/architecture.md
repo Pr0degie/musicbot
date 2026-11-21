@@ -45,8 +45,10 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
-  `playlist_ydl`, `autoplay_ydl` — aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
-  `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md)), `_url_cache`, `resolve_track()`, `prefetch_next()`,
+  `playlist_ydl`, `autoplay_ydl` — gebaut von `_build_ydl(kind)`, aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
+  `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md); cookielos nur YouTube-Client `visionos`
+  (`FAST_PLAYER_CLIENTS`, keine `available_at`-Sperre), bei Client-Fehlern ein Zweitversuch mit yt_dlp-Standard →
+  [ADR 0013](adr/0013-schneller-youtube-client-visionos.md)), `_url_cache`, `resolve_track()`, `prefetch_next()`,
   `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`. `resolve_track()` läuft in vier Phasen:
   `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`.
 - **`cogs/downloader_progressive.py`** — `ProgressiveDownloadMixin` (Basis von `Downloader`): In-Flight-Registry
