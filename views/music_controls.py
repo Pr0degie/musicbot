@@ -33,9 +33,11 @@ class MusicControlView(LayoutView):
     tragen nie content/embeds, und das Flag lässt sich nicht mehr entfernen.
     Rückbau daher über retired_card(), nie über content=/embed=/view=None.
 
-    Die Buttons spiegeln den Zustand (Pause ↔ Fortsetzen, Autoplay/Loop grün =
-    an): sync_state() gleicht sie an den Cog an und meldet, ob sich etwas
-    geändert hat – der _progress_loop schickt die Karte dann mit.
+    Die Buttons spiegeln den Zustand (Pause blau ↔ Fortsetzen grün, Autoplay
+    rot = an, Loop grün = an): sync_state() gleicht sie an den Cog an und
+    meldet, ob sich etwas geändert hat – der _progress_loop schickt die Karte
+    dann mit. Weil der Zustand an den Buttons ablesbar ist, quittieren
+    Pause/Fortsetzen/Autoplay/Loop stumm (keine ephemere Bestätigung).
 
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
@@ -65,7 +67,7 @@ class MusicControlView(LayoutView):
             return button
 
         S = discord.ButtonStyle
-        self.back = make("back", self._on_back, label=t("button.back"), style=S.secondary)
+        self.back = make("back", self._on_back, label=t("button.back"), style=S.primary)
         # Ein Button für Pause und Fortsetzen; Beschriftung/Farbe setzt sync_state().
         self.pause = make("pause", self._on_pause_toggle, label=t("button.pause"), style=S.primary)
         self.skip = make("skip", self._on_skip, label=t("button.skip"), style=S.secondary)
@@ -131,7 +133,8 @@ class MusicControlView(LayoutView):
         wanted = (
             (self.pause, t("button.pause") if playing else t("button.resume"),
              S.primary if playing else S.success),
-            (self.autoplay_toggle, t("button.autoplay"), S.success if cog.autoplay_enabled else S.secondary),
+            # Rot wie früher, als Autoplay noch ein fest roter Button war.
+            (self.autoplay_toggle, t("button.autoplay"), S.danger if cog.autoplay_enabled else S.secondary),
             (self.loop_toggle, t("button.loop"), S.success if cog.loop_mode == "song" else S.secondary),
         )
         changed = False
@@ -151,14 +154,23 @@ class MusicControlView(LayoutView):
     async def _push_state(self, interaction):
         """Nach einem Klick die Karte sofort nachziehen (Farben, Beschriftung).
 
+        Ist der Klick noch unbeantwortet (stumme Umschalter), dient der Edit
+        zugleich als Antwort – sonst quittiert ein defer() ohne Meldung, damit
+        Discord nicht „Interaktion fehlgeschlagen" zeigt.
+
         Nur wenn dies noch die aktive Karte ist: hat der Klick einen neuen Song
         gestartet, ist diese Nachricht schon zur Textzeile zurückgebaut – ein
         Edit mit der View würde die alte Karte samt Buttons wiederbeleben."""
-        if not self.sync_state():
-            return
+        changed = self.sync_state()
         try:
             active = self.music_cog.now_playing_msg
-            if active is not None and active.id == interaction.message.id:
+            edit = changed and active is not None and active.id == interaction.message.id
+            if not interaction.response.is_done():
+                if edit:
+                    await interaction.response.edit_message(view=self)
+                else:
+                    await interaction.response.defer()
+            elif edit:
                 await interaction.message.edit(view=self)
         except Exception:
             pass   # Karte weg oder Rate-Limit – der nächste Progress-Tick holt es nach
@@ -190,15 +202,8 @@ class MusicControlView(LayoutView):
             self.ctx.voice_client.pause()
             self.music_cog._mark_paused()   # Fortschrittsbalken einfrieren
             # is_playing syncen, damit !resume und !p den richtigen Zustand sehen.
+            # Keine Meldung: Button wird grün „Fortsetzen", der Balken steht.
             self.music_cog.is_playing = False
-            # Position ist durch _mark_paused eingefroren; ohne track_start_time
-            # (z. B. Radio) bleibt es bei der Meldung ohne Position.
-            elapsed = self.music_cog._elapsed_seconds()
-            if elapsed is None:
-                msg = t("status.paused_eph")
-            else:
-                msg = t("status.paused_at_eph", position=f"{int(elapsed) // 60}:{int(elapsed) % 60:02d}")
-            await interaction.response.send_message(msg, ephemeral=True)
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 
@@ -210,7 +215,6 @@ class MusicControlView(LayoutView):
             # Pause hatte _stopped_by_user gesetzt – ohne Reset blieben Autoplay,
             # Progressive-Resume und Watchdog bis zum Songende unterdrückt.
             self.music_cog._stopped_by_user = False
-            await interaction.response.send_message(t("status.resumed_eph"), ephemeral=True)
         elif not self.music_cog.is_playing and self.music_cog.queue and not self.music_cog.is_radio:
             # Queue vorhanden, aber nichts läuft → starten
             self.music_cog.is_playing = True
@@ -257,10 +261,8 @@ class MusicControlView(LayoutView):
             await interaction.response.send_message(t("error.autoplay_radio"), ephemeral=True)
             return
         self.music_cog.autoplay_enabled = not self.music_cog.autoplay_enabled
-        status = t("misc.enabled") if self.music_cog.autoplay_enabled else t("misc.disabled")
-        logger.info(f"[Autoplay] {status.capitalize()} per Button")
-        await interaction.response.send_message(f"🔁 Autoplay {status}.", ephemeral=True)
-        await self._push_state(interaction)
+        logger.info(f"[Autoplay] {'Aktiviert' if self.music_cog.autoplay_enabled else 'Deaktiviert'} per Button")
+        await self._push_state(interaction)   # stumm: der Button wird rot bzw. grau
 
         # Sofort loslegen, wenn Autoplay gerade eingeschaltet wurde und die Queue leer ist.
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
@@ -269,9 +271,7 @@ class MusicControlView(LayoutView):
     async def _on_loop(self, interaction: discord.Interaction):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
         self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
-        loop_keys = {None: "status.loop_off", "song": "status.loop_song"}
-        await interaction.response.send_message(t(loop_keys[self.music_cog.loop_mode]), ephemeral=True)
-        await self._push_state(interaction)
+        await self._push_state(interaction)   # stumm: der Button wird grün bzw. grau
 
     async def _on_clear(self, interaction: discord.Interaction):
         """❌ oben rechts: dasselbe wie !clear."""

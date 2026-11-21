@@ -33,9 +33,12 @@ class FakeInteraction:
     def __init__(self, message=None):
         self.sent = []
         self.edited = []
+        self.deferred = 0
         self.message = message or FakeMessage()
         self.user = types.SimpleNamespace(voice=None)
-        self.response = types.SimpleNamespace(send_message=self._send, edit_message=self._edit)
+        self.response = types.SimpleNamespace(
+            send_message=self._send, edit_message=self._edit, defer=self._defer, is_done=self._is_done,
+        )
 
         async def _is_owner(_user):
             return False
@@ -47,6 +50,12 @@ class FakeInteraction:
 
     async def _edit(self, **kwargs):
         self.edited.append(kwargs)
+
+    async def _defer(self):
+        self.deferred += 1
+
+    def _is_done(self):
+        return bool(self.sent or self.edited or self.deferred)
 
 
 def _setup(playing=True):
@@ -74,6 +83,7 @@ def _details(view):
 def test_buttons_mirror_cog_state():
     view, cog, vc, _stopped, _ctx = _setup(playing=True)
     assert (view.pause.label, view.pause.style) == (t("button.pause"), S.primary)
+    assert view.back.style == S.primary
     assert view.autoplay_toggle.style == S.secondary and view.loop_toggle.style == S.secondary
     assert view.sync_state() is False, "nichts geändert → kein Edit nötig"
 
@@ -82,7 +92,8 @@ def test_buttons_mirror_cog_state():
     vc._playing = False
     assert view.sync_state() is True
     assert (view.pause.label, view.pause.style) == (t("button.resume"), S.success)
-    assert view.autoplay_toggle.style == S.success and view.loop_toggle.style == S.success
+    assert view.autoplay_toggle.style == S.danger, "Autoplay an = rot wie früher"
+    assert view.loop_toggle.style == S.success
 
 
 def test_row_has_one_pause_toggle_and_back_button():
@@ -105,7 +116,8 @@ def test_toggle_resumes_when_paused():
 
         assert resumed == [True]
         assert cog.is_playing is True
-        assert interaction.sent == [(t("status.resumed_eph"), {"ephemeral": True})]
+        assert interaction.sent == [], "Fortsetzen meldet sich nicht mehr im Chat"
+        assert interaction.deferred == 1, "aber der Klick wird quittiert"
 
     asyncio.run(run())
 
@@ -118,12 +130,16 @@ def test_click_updates_active_card_only():
         aktive, alte = FakeMessage(1), FakeMessage(2)
         cog.now_playing_msg = aktive
 
-        await view.loop_toggle.callback(FakeInteraction(message=aktive))
-        assert aktive.edits == [{"view": view}]
+        klick = FakeInteraction(message=aktive)
+        await view.loop_toggle.callback(klick)
+        assert klick.edited == [{"view": view}], "Edit der Karte ist zugleich die Antwort"
+        assert klick.sent == [], "keine Loop-Meldung im Chat"
         assert view.loop_toggle.style == S.success
 
-        await view.loop_toggle.callback(FakeInteraction(message=alte))
-        assert alte.edits == [], "fremde/alte Karte bleibt unangetastet"
+        klick = FakeInteraction(message=alte)
+        await view.loop_toggle.callback(klick)
+        assert klick.edited == [] and alte.edits == [], "fremde/alte Karte bleibt unangetastet"
+        assert klick.deferred == 1, "trotzdem stumm quittiert"
 
     asyncio.run(run())
 
@@ -324,5 +340,26 @@ def test_undo_does_not_interrupt_running_song():
 
         assert list(cog.queue) == [("u1", "Eins")]
         assert started == []
+
+    asyncio.run(run())
+
+
+def test_autoplay_toggle_is_silent_and_turns_red():
+    async def run():
+        view, cog, _vc, _stopped, _ctx = _setup()
+        aktive = FakeMessage(1)
+        cog.now_playing_msg = aktive
+        cog.queue.append(("u", "t"))   # sonst startet der Klick sofort autoplay()
+
+        klick = FakeInteraction(message=aktive)
+        await view.autoplay_toggle.callback(klick)
+        assert cog.autoplay_enabled is True
+        assert klick.sent == [] and klick.edited == [{"view": view}]
+        assert view.autoplay_toggle.style == S.danger
+
+        klick = FakeInteraction(message=aktive)
+        await view.autoplay_toggle.callback(klick)
+        assert cog.autoplay_enabled is False
+        assert view.autoplay_toggle.style == S.secondary
 
     asyncio.run(run())

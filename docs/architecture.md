@@ -102,8 +102,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel` via `retired_card()`).
   Fortsetzen: (1) paused →
   resume, (2) queue has songs → `play_next`, (3) queue empty → Song dieser Karte vorne einreihen, (4) autoplay
-  on → `autoplay()`. Pause bestätigt ephemer mit Position (`Pausiert bei m:ss` via
-  `_elapsed_seconds()`; ohne `track_start_time`, z. B. Radio, ohne Position). `SearchAutoplayView`: first
+  on → `autoplay()`. Pause/Fortsetzen, Autoplay und Loop quittieren stumm (`_push_state`: Karten-Edit als
+  Antwort, sonst `defer()`) — der Zustand steht an den Buttons. `SearchAutoplayView`: first
   search result plays immediately, alternatives as buttons (30 s timeout). Stale-Buttons-Fallback nach
   Neustart (`custom_id`-Schema, `StaleControlsFallback`-DynamicItem) → [ADR
   0006](adr/0006-stale-buttons-dynamicitem.md).
