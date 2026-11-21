@@ -80,21 +80,29 @@ def progress_bar(elapsed, total, length=21):
     return f"{bar} {fmt(elapsed)} / {fmt(total)}"
 
 
-# Ersatz für Zeichen, die einen Markdown-Link [Text](<url>) zerreißen oder als
-# Formatierung greifen würden. Backslash-Escapes (\| \[ \*) gehen nicht:
-# Discord stellt den Link dann gar nicht dar, sondern zeigt [Text](<url>) roh.
+# Emojis im Link-Text: Discord stellt den Markdown-Link [Text](<url>) dann gar
+# nicht dar, sondern zeigt ihn als Rohtext (live getestet 22.11.2026: derselbe
+# Titel ohne Emojis wird Link, mit – auch kurz – nicht). Erfasst Piktogramme,
+# Flaggen, Hauttöne, Variation Selector, ZWJ und Keycap.
+_EMOJI = re.compile(
+    "[\U0001F000-\U0001FAFF\U0001FC00-\U0001FFFF☀-➿⬀-⯿"
+    "⌀-⏿︎️‍⃣\U000E0020-\U000E007F]"
+)
+# Klammern zerreißen die Link-Syntax; Backslash-Escapes (\| \[) vermeiden wir
+# vorsorglich ganz und ersetzen kritische Zeichen durch harmlose Lookalikes.
 _LINK_LABEL_MAP = str.maketrans({"[": "(", "]": ")", "\\": "/", "`": "'", "*": "∗"})
 
 
 def link_label(text: str) -> str:
-    r"""Titel als Text eines Discord-Markdown-Links, ganz ohne Backslash-Escapes.
+    r"""Titel als Text eines Discord-Markdown-Links: ohne Emojis, ohne Backslash-Escapes.
 
-    Klammern werden zu runden Klammern, ``*``/`` ` ``/``\`` zu harmlosen
-    Lookalikes. Doppelte ``|``/``_``/``~`` (Spoiler, Unterstrich,
-    Durchstreichen) werden mit einem Leerzeichen aufgebrochen; einzelne
-    bleiben, wie sie sind – „Song | Künstler" sieht unverändert aus."""
-    label = (text or "").translate(_LINK_LABEL_MAP)
+    Emojis fliegen raus (sonst kein Link), Klammern werden zu runden Klammern,
+    ``*``/`` ` ``/``\`` zu harmlosen Lookalikes. Doppelte ``|``/``_``/``~``
+    (Spoiler, Unterstrich, Durchstreichen) werden mit einem Leerzeichen
+    aufgebrochen; einzelne bleiben – „Song | Künstler" sieht unverändert aus.
+    Leerer String, wenn nichts übrig bleibt (Titel nur aus Emojis)."""
+    label = _EMOJI.sub("", text or "").translate(_LINK_LABEL_MAP)
     for pair in ("||", "__", "~~"):
         while pair in label:
             label = label.replace(pair, f"{pair[0]} {pair[1]}")
-    return label
+    return " ".join(label.split())

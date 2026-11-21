@@ -17,9 +17,10 @@ Die Karte ist ein Components-V2-Layout (`MusicControlView` als `LayoutView`, `vi
 - TextDisplay `[Details, „Als Nächstes", Uploader]` (ohne YouTube-Bild: Section mit kleinem Thumbnail-Accessory),
 - ActionRow `[Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]`.
 
-Der Link-Text der Titelzeile darf keine Backslash-Escapes enthalten: mit `\|` oder `\[` (wie `escape_markdown` sie erzeugt)
-stellt Discord den Link nicht dar, sondern zeigt `[Titel](<url>)` als Rohtext. Deshalb `utils/text.link_label()` statt
-`escape_markdown` – es ersetzt die kritischen Zeichen durch harmlose Lookalikes.
+Der Link-Text der Titelzeile darf **keine Emojis** enthalten: dann stellt Discord den Link nicht dar, sondern zeigt
+`[Titel](<url>)` als Rohtext (live getestet 22.11.2026 — derselbe Titel ohne Emojis wurde Link, mit Emojis auch kurz nicht;
+Länge und `<>` um die URL spielen keine Rolle). `utils/text.link_label()` entfernt deshalb Emojis, ersetzt Klammern und
+vermeidet vorsorglich Backslash-Escapes; bleibt nichts übrig, steht der Titel ohne Link da.
 
 Gilt für Song- und Radio-Karte. Alle Zustandsänderungen der Karte laufen über die View selbst: `set_body()` für den Balken, `sync_state()` für Button-Farben/-Beschriftung und „Als Nächstes" (Zurück fest rot, Pause blau ↔ Fortsetzen grün, Autoplay rot = an, Loop grün = an). Weil der Zustand an den Buttons ablesbar ist, quittieren die Umschalter stumm: `_push_state` nutzt den Karten-Edit als Interaktions-Antwort, sonst `defer()`.
 

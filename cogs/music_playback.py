@@ -324,10 +324,11 @@ class PlaybackMixin:
         else:
             card_title = title
         page = info.get("webpage_url")
-        # Im Link-Text keine Backslash-Escapes: mit „\|" oder „\[" zeigt Discord den
-        # Link nicht an, sondern [Titel](<url>) als Rohtext (utils/text.link_label).
-        if page:
-            heading = f"### 🎵 [{link_label(card_title)}](<{page}>)"
+        # Link-Text ohne Emojis: sonst zeigt Discord [Titel](<url>) als Rohtext
+        # statt als Link (utils/text.link_label). Nur-Emoji-Titel → ohne Link.
+        label = link_label(card_title)
+        if page and label:
+            heading = f"### 🎵 [{label}](<{page}>)"
         else:
             heading = f"### 🎵 {discord.utils.escape_markdown(card_title)}"
         details = (
