@@ -161,6 +161,8 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
 
         # Seek-Offset in Sekunden für den nächsten play_next()-Aufruf.
         self._seek_offset: int = 0
+        # Track, für den der Offset gilt – ein anderer Track erbt ihn nie.
+        self._seek_offset_url = None
         # Startposition des laufenden Tracks (der konsumierte _seek_offset) –
         # die Voice-Reparatur braucht sie, um an der Hörposition fortzusetzen.
         self._current_seek_offset: int = 0
@@ -964,6 +966,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         url, title, duration = self.current_track
         mins, secs = divmod(offset, 60)
         self._seek_offset = offset
+        self._seek_offset_url = url
         self.current_track = None
         self.queue.appendleft((url, title))
         self._stop_for_advance(ctx.voice_client)

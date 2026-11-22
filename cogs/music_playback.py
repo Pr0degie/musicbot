@@ -69,6 +69,23 @@ def start_early(coro) -> "asyncio.Task":
 
 
 class PlaybackMixin:
+    # URL des Tracks, für den _seek_offset gesetzt wurde (!seek, Progressive-
+    # Resume, Voice-Reparatur). None = ungebunden. Klassen-Default, damit auch
+    # ohne __init__ erzeugte Instanzen (Tests via __new__) definiert sind.
+    _seek_offset_url = None
+
+    def _take_seek_offset(self, url: str) -> int:
+        """Konsumiert den anstehenden Seek-Offset für den gerade aus der Queue
+        genommenen Track. Der Offset gilt nur für den Track, für den er gesetzt
+        wurde: er wird hier in jedem Fall gelöscht (auch wenn der Resolve danach
+        scheitert oder der Track übersprungen wird) und nur zurückgegeben, wenn
+        er zu dieser URL gehört."""
+        offset, self._seek_offset = self._seek_offset, 0
+        bound_url, self._seek_offset_url = self._seek_offset_url, None
+        if bound_url is not None and bound_url != url:
+            return 0
+        return offset
+
     async def _prefetch_next(self, idx: int = 0):
         """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
         await self.dl.prefetch_next(self.queue, idx)
@@ -137,18 +154,18 @@ class PlaybackMixin:
         self._suppress_resume = True
         stop_playback(voice_client)
 
-    async def _resolve_track(self, url: str, title: str, force_download: bool = False):
+    async def _resolve_track(self, url: str, title: str, force_download: bool = False, seek_offset: int = 0):
         """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
 
         Returns: (info, filename, title, duration)
         """
-        # _seek_offset wird erst NACH diesem Aufruf in play_next konsumiert
-        # (Swap auf 0) – hier lesen ist also der Wert des anstehenden -ss.
-        # Der progressive Pfad puffert entsprechend mehr, damit die Bytes bis
-        # zum Seek-Ziel in der wachsenden Datei existieren.
+        # seek_offset ist das anstehende -ss dieses Tracks (play_next hat es
+        # beim Entnehmen aus der Queue konsumiert). Der progressive Pfad
+        # puffert entsprechend mehr, damit die Bytes bis zum Seek-Ziel in der
+        # wachsenden Datei existieren.
         return await self.dl.resolve_track(
             url, title,
-            force_download=force_download, min_buffer_seconds=self._seek_offset,
+            force_download=force_download, min_buffer_seconds=seek_offset,
         )
 
     async def play_next(self, ctx):
@@ -204,12 +221,18 @@ class PlaybackMixin:
         if url == self._autoplay_queued_url:
             self._autoplay_queued_url = None
         logger.info(f"[Nächster Track] {title} ({url})")
+        # Seek-Offset sofort konsumieren: er gehört genau diesem Track. Bliebe
+        # er bis nach dem Resolve stehen, erbte ihn bei einem Resolve-Fehler
+        # oder im _skip_resolving-Pfad der nächste Track.
+        seek_offset = self._take_seek_offset(url)
 
         stderr_buf = None
         try:
             # Dritter Anlauf nach zwei toten Stream-Versuchen → Download erzwingen.
             force_download = url == self._force_download_url
-            info, filename, title, duration = await self._resolve_track(url, title, force_download=force_download)
+            info, filename, title, duration = await self._resolve_track(
+                url, title, force_download=force_download, seek_offset=seek_offset
+            )
 
             # Stream-URL erst ab available_at abrufbar, sonst 403 (utils/ffmpeg.py).
             # Vor dem _skip_resolving-Check, damit ein Skip im Wartefenster greift.
@@ -224,7 +247,6 @@ class PlaybackMixin:
                 return
 
             eq_filter = self.eq_presets.get(self.equalizer, "")
-            seek_offset, self._seek_offset = self._seek_offset, 0
             is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
             # Wachsende Datei eines progressiven Downloads? Snapshot zum Start-
             # zeitpunkt – der Download kann während der Wiedergabe fertig werden.
@@ -587,6 +609,7 @@ class PlaybackMixin:
                 )
                 if still_incomplete and duration and played < duration - 5:
                     self._seek_offset = max(0, int(played) - 1)  # 1 s Überlappung gegen Schnittkante
+                    self._seek_offset_url = url
                     self._progressive_resume_url = url           # kein doppelter Play-Count
                     if (self._progressive_resume_count < PROGRESSIVE_MAX_RESUMES
                             and prog_task is not None and not prog_task.done()):

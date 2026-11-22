@@ -273,6 +273,7 @@ class VoiceLifecycleMixin:
             url, title, *_ = self.current_track
             pos = self._current_seek_offset + (self._elapsed_seconds() or 0)
             self._seek_offset = max(0, int(pos) - 1)   # 1 s Überlappung
+            self._seek_offset_url = url
             frozen.resume_at = (title, int(pos))
             self.current_track = None   # kein Doppel-Insert durch die Loop-Logik
             self.queue.appendleft((url, title))
@@ -285,6 +286,7 @@ class VoiceLifecycleMixin:
         if frozen.restart_track and self.queue:
             self.queue.popleft()
             self._seek_offset = 0
+            self._seek_offset_url = None
         self.is_playing = False
 
     async def _wait_frozen(self, frozen):
