@@ -12,7 +12,8 @@ Untermethoden → [ADR 0009](../adr/0009-music-cog-mixin-zerlegung.md): `_handle
 (Wartung alle 50 Songs, Prefetch, Autoplay-Prefetch, synchron) und `_skip_broken_track` (Fehlerpfad:
 merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Orchestrator.
 
-1. `after` callback (aus `_make_after_playing`) uses `run_coroutine_threadsafe()` to call `play_next`. Errors
+1. `after` callback (aus `_make_after_playing`) runs in discord.py's player thread and only hands over: the
+   logic (`on_track_end`) runs on the event loop and uses `run_coroutine_threadsafe()` to call `play_next`. Errors
    skip via `asyncio.create_task()` — not direct recursion (avoids stack overflow on many bad URLs).
 2. `last_queue.json` written after each track — intentionally not reloaded on startup.
 3. Queue empty → `play_next` delegiert an `_handle_queue_empty`: sets `is_playing = False`, saves

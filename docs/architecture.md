@@ -77,13 +77,13 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`tools/multi_bots.py`** — mehrere Instanzen parallel, je eigener Ordner `multi_bots/botN/` als cwd, Bridge-Port 8765+N → [multi-bots.md](multi-bots.md); **`utils/env_check.py`** — `missing_env_keys()`
   gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
-  [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`),
+  [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`, `atomic_write_text`), **`utils/tasks.py`** (`spawn` – Hintergrund-Tasks mit gehaltener Referenz und Fehler-Log),
   **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`/`link_label` — Kartentitel als Link ohne Emojis, [ADR 0012](adr/0012-now-playing-karte-components-v2.md)), **`utils/i18n.py`** (`t()`).
 - **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`/`stream_wait_seconds`
   (Wartezeit bis `available_at` einer YouTube-Stream-URL, sonst 403); `music.py`
   spiegelt sie (plus `utils/text.progress_bar`) als Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/
   `_classify_ffmpeg_error`/`_progress_bar`, damit bestehende Aufrufer und Tests unverändert bleiben.
-- **`utils/voice.py`** — `stop_playback`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,
+- **`utils/voice.py`** — `stop_playback`, `PlayerToken`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,
   `SafeVoiceRecvClient`), `dead_voice_poller`; **`utils/diagnostics.py`** — `snapshot()` für `GET /debug`.
 - **`utils/autoplay.py`** — zustandslose Autoplay-Kandidatenauswahl (→ [autoplay-radio.md](architecture/autoplay-radio.md));
   **`utils/ytdlp_update.py`** — `check_ytdlp_update()`, einmaliger PyPI-Vergleich nach `on_ready`.
