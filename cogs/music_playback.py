@@ -430,7 +430,15 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         self._track_generation += 1
         generation = self._track_generation
         self.is_playing = True
-        self.last_played = prev_track  # vorherigen Song merken, bevor er überschrieben wird
+        # Vorherigen Song merken, bevor er überschrieben wird – aber nur einen
+        # ANDEREN Song. Startet derselbe erneut (Loop, Stream-Retry, Resume) oder
+        # ist current_track vor dem Neustart None (!seek, !eq, Voice-Reparatur),
+        # bleibt der bisherige Vorgänger stehen. Der laufende Song ist nie sein
+        # eigener Vorgänger (!replay nach Queue-Ende).
+        if prev_track is not None and prev_track[0] != url:
+            self.last_played = prev_track
+        elif self.last_played is not None and self.last_played[0] == url:
+            self.last_played = None
         self.current_track = (url, title, duration)
         self.track_start_time = time.monotonic()
         self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
