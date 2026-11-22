@@ -197,8 +197,9 @@ class PlaybackMixin:
         stop_playback(voice_client)
 
     def _discard_paused_player(self, voice_client):
-        """Stoppt einen pausierten Player, unmittelbar bevor play_next einen
-        neuen startet (!x, dann !p/!replay/!loadq/Buttons). Ohne diesen Stopp
+        """Stoppt einen pausierten Player, unmittelbar bevor play_next oder
+        _play_radio_stream einen neuen startet (!x, dann
+        !p/!replay/!loadq/!radio/Buttons). Ohne diesen Stopp
         ersetzt discord.py den pausierten Player nur – Thread und FFmpeg-Prozess
         leaken.
 

@@ -146,8 +146,9 @@ class RadioMixin:
 
         def after_radio(error):
             if token.discarded:
-                # Pausierter Radio-Player wurde von play_next durch einen Song
-                # ersetzt (_discard_paused_player) – dessen Zustand nicht anfassen.
+                # Pausierter Radio-Player wurde durch einen Song (play_next) oder
+                # einen anderen Sender ersetzt (_discard_paused_player) – dessen
+                # Zustand nicht anfassen.
                 return
             self.bot.loop.call_soon_threadsafe(self._playback_done.set)
             if error:
@@ -175,6 +176,11 @@ class RadioMixin:
 
         self._playback_done.clear()
         self.track_start_time = started = time.monotonic()
+        # Pausierter Player (!x, dann !radio – Song oder anderer Sender):
+        # discord.py würde ihn in play() nur ersetzen, nicht stoppen. Synchron,
+        # direkt vor play() – wie in play_next.
+        if ctx.voice_client.is_paused():
+            self._discard_paused_player(ctx.voice_client)
         ctx.voice_client.play(source, after=after_radio)
         self._player_token = token
 
