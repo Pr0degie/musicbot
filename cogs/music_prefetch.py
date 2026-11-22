@@ -1,7 +1,8 @@
 """Prefetch-Subsystem der Wiedergabe – Mixin für PlaybackMixin.
 
 Stößt das Vorladen der nächsten Queue-Songs und des nächsten Autoplay-Songs
-an (geladen wird im Downloader, cogs/downloader_prefetch.py) und nimmt einen
+an – beim Trackstart und wenn Autoplay mitten im Song eingeschaltet wird
+(geladen wird im Downloader, cogs/downloader_prefetch.py) – und nimmt einen
 von Autoplay vorgereihten Song wieder aus der Queue.
 """
 
@@ -73,6 +74,22 @@ class PrefetchMixin:
             self.queue.append((url, title))
             self._autoplay_queued_url = url
             logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
+
+    def _kick_autoplay_prefetch(self, ctx):
+        """Autoplay wurde MITTEN im Song eingeschaltet: play_next stößt die
+        Suche nach dem nächsten Autoplay-Song nur beim Trackstart an. Ohne
+        diesen Anstoß bliebe „Als Nächstes" bis zum Songende leer, und der
+        Übergang liefe über autoplay() (Suche + Download erst am Songende)
+        statt über die vorgeladene Datei."""
+        if not (self.autoplay_enabled and self.is_playing and self.current_track):
+            return
+        if self.queue or self.is_radio:
+            return
+        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+            # Läuft noch (Autoplay aus und gleich wieder an): der Task prüft
+            # autoplay_enabled erst am Ende, sein Ergebnis zählt also wieder.
+            return
+        self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
     def _evict_autoplay_song(self) -> str | None:
         """Entfernt den von Autoplay vorgereihten Song aus der Queue (falls vorhanden).

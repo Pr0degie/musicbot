@@ -320,6 +320,8 @@ class MusicControlView(LayoutView):
 
         Wenn Autoplay aktiviert wird und gerade nichts läuft (leere Queue, Bot idle),
         wird sofort ein Song gesucht und gestartet – kein manuelles !p nötig.
+        Läuft gerade ein Song, wird der nächste Autoplay-Song sofort gesucht und
+        vorgeladen, damit er als „Als Nächstes" in der Karte steht.
         """
         if self.music_cog.is_radio:
             await interaction.response.send_message(t("error.autoplay_radio"), ephemeral=True)
@@ -331,6 +333,9 @@ class MusicControlView(LayoutView):
         # Sofort loslegen, wenn Autoplay gerade eingeschaltet wurde und die Queue leer ist.
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
             spawn(self.music_cog.autoplay(self.ctx), "autoplay")
+        else:
+            # Mitten im Song eingeschaltet: nächsten Song jetzt suchen statt erst am Songende.
+            self.music_cog._kick_autoplay_prefetch(self.ctx)
 
     async def _on_loop(self, interaction: discord.Interaction):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""

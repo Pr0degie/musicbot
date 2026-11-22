@@ -4,7 +4,9 @@
 
 ## Autoplay
 
-Toggled via `🔁 Autoplay` button. `_prefetch_autoplay` starts at song-begin (only if queue empty): fetches
+Toggled via `🔁 Autoplay` button. `_prefetch_autoplay` starts at song-begin (only if queue empty) – and right
+away when the button is switched on mid-song (`_kick_autoplay_prefetch`: nur bei laufendem Song, leerer Queue,
+kein Radio, kein noch laufender Prefetch-Task), damit der Nachfolger als „Als Nächstes" in der Karte steht: fetches
 YouTube Mix (`list=RD{video_id}`) via `autoplay_ydl` (max 10 entries), wählt via `choose_autoplay_candidate()`
 **gewichtet vorne** (Gewichte 4/3/2/1 über die ersten vier gefilterten Kandidaten — YouTubes Mix-Ranking ist
 die Genre-Kohärenz, Platz 1 ist bewusst wieder erlaubt), downloads chosen candidate, appends to queue. On song

@@ -41,7 +41,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
     (URL-Zweig von `!next`/`!now`; `!p` behält seinen eigenen wegen Playlist-Support + Duplikat-Warnung).
     Dazu `search_query` und `start_early`.
   - **`cogs/music_prefetch.py`** — `PrefetchMixin`: stößt das Vorladen an (`_prefetch_upcoming`, `_kick_prefetch`,
-    `_restart_prefetch`, `_prefetch_autoplay`) und nimmt den Autoplay-Song wieder aus der Queue
+    `_restart_prefetch`, `_prefetch_autoplay`, `_kick_autoplay_prefetch` beim Einschalten mitten im Song) und nimmt den Autoplay-Song wieder aus der Queue
     (`_evict_autoplay_song`). Geladen wird im Downloader.
   - **`cogs/music_voice_ui.py`** — `VoiceLifecycleMixin`: Auto-/Idle-Leave, `_voice_watchdog` (auch toter
     Voice-Poller), Voice-Reparatur nach Gateway-Abbruch (`on_socket_raw_receive`/`on_disconnect`/`on_resumed`/

@@ -38,6 +38,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 
 - [ ] Autoplay-Button an, Queue leer laufen lassen → Nachfolger aus dem YouTube-Mix spielt automatisch (kein Titel aus `_recently_played`/`_recently_played_titles`)
 - [ ] Autoplay über mehrere Songs: keine Cover-/Live-/Remix-/Sped-up-Variante eines kürzlich gespielten Songs, kein Genre-Bruch („kein Jazz nach Techno"), keine Schleifen
+- [ ] Einzelnen Song per `!p` starten, **mitten im Song** Autoplay-Button an → binnen ~10 s steht der Nachfolger als „Als Nächstes" in der Karte; am Songende startet er ohne Lücke
 - [ ] `!q` bei aktivem Autoplay mit vorgeladenem Kandidaten → Vorschau-Zeile „🔮 Als Nächstes (Autoplay): …" statt nummeriertem Eintrag
 - [ ] `!p` während Autoplay → vorgeladener Autoplay-Song wird evicted, neuer Song spielt als Nächstes
 - [ ] `!radio <Nr>` → Sender spielt; `!stop` → Radio aus, Queue bleibt erhalten

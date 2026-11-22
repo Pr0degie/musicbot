@@ -363,3 +363,100 @@ def test_autoplay_toggle_is_silent_and_turns_red():
         assert view.autoplay_toggle.style == S.secondary
 
     asyncio.run(run())
+
+
+def _autoplay_setup(ergebnis=("https://www.youtube.com/watch?v=bbbbbbbbbbb", "Nächster | [Song] 🎵")):
+    """Ein Song läuft, Queue leer, Autoplay aus – wie nach einem einzelnen !p."""
+    view, cog, _vc, _stopped, _ctx = _setup()
+    aktive = FakeMessage(1)
+    cog.now_playing_msg = aktive
+    cog.is_playing = True
+    cog.current_track = ("https://www.youtube.com/watch?v=aaaaaaaaaaa", "Läuft gerade", 200)
+    suchen = []
+    freigabe = asyncio.Event()
+
+    async def prefetch_autoplay(ref_url, ref_title, _recent, _recent_titles):
+        suchen.append((ref_url, ref_title))
+        await freigabe.wait()
+        return ergebnis
+
+    cog.dl.prefetch_autoplay = prefetch_autoplay
+    return view, cog, aktive, suchen, freigabe
+
+
+def test_autoplay_mitten_im_song_sucht_sofort_den_naechsten_song():
+    """Vorher startete die Suche erst beim nächsten Trackstart – „Als Nächstes"
+    blieb bis zum Songende leer."""
+    async def run():
+        view, cog, aktive, suchen, freigabe = _autoplay_setup()
+
+        await view.autoplay_toggle.callback(FakeInteraction(message=aktive))
+        await asyncio.sleep(0)
+        assert suchen == [("https://www.youtube.com/watch?v=aaaaaaaaaaa", "Läuft gerade")]
+        assert cog._up_next_title() is None, "noch nicht geladen → noch nichts anzeigen"
+
+        freigabe.set()
+        await cog._autoplay_prefetch_task
+        assert list(cog.queue) == [("https://www.youtube.com/watch?v=bbbbbbbbbbb", "Nächster | [Song] 🎵")]
+        # So zieht es der Progress-Loop spätestens nach 5 s in die Karte:
+        assert view.sync_state(up_next=cog._up_next_title()) is True
+        assert f"**{t('embed.up_next')}**" in _details(view) and "🎵" in _details(view)
+
+    asyncio.run(run())
+
+
+def test_autoplay_aus_und_wieder_an_startet_keine_zweite_suche():
+    async def run():
+        view, cog, aktive, suchen, freigabe = _autoplay_setup()
+        for _ in range(3):   # an, aus, an
+            await view.autoplay_toggle.callback(FakeInteraction(message=aktive))
+            await asyncio.sleep(0)
+        assert cog.autoplay_enabled is True and len(suchen) == 1
+
+        freigabe.set()
+        await cog._autoplay_prefetch_task
+        assert len(cog.queue) == 1
+
+    asyncio.run(run())
+
+
+def test_autoplay_wieder_aus_reiht_den_gefundenen_song_nicht_ein():
+    async def run():
+        view, cog, aktive, _suchen, freigabe = _autoplay_setup()
+        await view.autoplay_toggle.callback(FakeInteraction(message=aktive))   # an
+        await asyncio.sleep(0)
+        await view.autoplay_toggle.callback(FakeInteraction(message=aktive))   # aus
+        freigabe.set()
+        await cog._autoplay_prefetch_task
+        assert list(cog.queue) == [] and cog._up_next_title() is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("zustand", ["queue", "radio", "pausiert"])
+def test_autoplay_sucht_nicht_vor_wenn_es_nichts_vorzuladen_gibt(zustand):
+    """Queue nicht leer → deren erster Song ist „Als Nächstes"; Radio hat kein
+    Autoplay; pausiert (is_playing False) bleibt beim bisherigen autoplay()."""
+    async def run():
+        view, cog, aktive, suchen, _freigabe = _autoplay_setup()
+        gestartet = []
+
+        async def autoplay(_ctx):
+            gestartet.append(True)
+
+        cog.autoplay = autoplay
+        if zustand == "queue":
+            cog.queue.append(("u", "Schon eingereiht"))
+        elif zustand == "radio":
+            cog.autoplay_enabled, cog.is_radio = True, True
+            cog._kick_autoplay_prefetch(view.ctx)
+        else:
+            cog.is_playing = False
+        if zustand != "radio":
+            await view.autoplay_toggle.callback(FakeInteraction(message=aktive))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert suchen == [] and cog._autoplay_prefetch_task is None
+        assert gestartet == ([True] if zustand == "pausiert" else [])
+
+    asyncio.run(run())
