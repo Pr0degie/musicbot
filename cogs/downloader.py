@@ -283,7 +283,11 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         logger.warning(f"[Download-Fallback] Stream schlug zweimal fehl – lade lokal herunter: {r.title}")
         self._register_inflight(r.url, "Download-Fallback", r.title)
         try:
-            await asyncio.to_thread(self.ydl.download, [r.info.get("webpage_url") or r.url])
+            # Derselbe Lock wie die Prefetch-Downloads: läuft gerade einer
+            # (anderer Song), wartet der letzte Anlauf auf dessen Ende, statt
+            # parallel über dieselbe yt_dlp-Instanz zu laden.
+            async with self._download_lock():
+                await asyncio.to_thread(self.ydl.download, [r.info.get("webpage_url") or r.url])
             logger.info(f"[Download-Fallback] Fertig: {r.filename.name}")
         finally:
             self._inflight_done(r.url, asyncio.current_task())

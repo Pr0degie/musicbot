@@ -127,8 +127,11 @@ progressiv — und machte alle `_kick_prefetch`-Aufrufe zu No-Ops.
 `_restart_prefetch()` — laufenden Sammel-Task canceln (ein bereits schreibender Download-Worker wird adoptiert
 und läuft zu Ende → [ADR 0002](../adr/0002-inflight-registry.md), Cancel-Pfad) und neu kicken, weil der alte
 Task auf die alte Reihenfolge zielt. `_kick_prefetch` allein wäre wegen seines No-Op-Guards wirkungslos. Die
-Sequenzialität der Prefetch-Downloads (yt_dlp ist nicht thread-safe) sichert ein Lock um den Download-Aufruf
-in `_prefetch_one`.
+Sequenzialität der Downloads über die geteilte Haupt-Instanz `self.ydl` (yt_dlp ist nicht thread-safe) sichert
+ein Lock (`dl._download_lock()`): Queue-Prefetch (`_prefetch_one`), Autoplay-Download (`_download_autoplay`)
+und Download-Fallback (`_last_resort_download`) laufen nie gleichzeitig. Der Fallback wartet deshalb auf einen
+gerade laufenden Prefetch-Download eines anderen Songs. Nicht unter dem Lock stehen die Extraktionen
+(`extract_info_async`): sie laufen weiterhin parallel zu einem Download auf derselben Instanz.
 
 `play_next` detects streams via `isinstance(filename, str)` → adds FFmpeg reconnect options, skips
 `codec=copy`. Wachsende Dateien (`is_growing` via `dl.is_incomplete`): Wiedergabe- und Resume-Regeln → [ADR

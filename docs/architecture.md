@@ -61,7 +61,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   `PERSISTED_CACHE_FIELDS`, `FAST_PLAYER_CLIENTS`, `PROGRESSIVE_*`); was Tests patchen (`DOWNLOAD_DIR`,
   `DOWNLOADS_MAX_MB`, `YDL_COOKIES_FILE`, `YDL_BROWSER`), steht ausschließlich im Zielmodul.
 - **`cogs/downloader_prefetch.py`** — `PrefetchMixin`: `prefetch_next()` (eigener Task je URL, Shield),
-  `_prefetch_one` (Lock für sequenzielle yt_dlp-Downloads), `prefetch_autoplay()`.
+  `_prefetch_one`, `prefetch_autoplay()` (Download als eigener Task `_download_autoplay`), `_download_lock()`
+  (ein Lock für alle Downloads über `self.ydl`, auch für den Download-Fallback).
 - **`cogs/downloader_cleanup.py`** — `DownloadsCleanupMixin`: `cleanup_downloads()` (`DOWNLOADS_MAX_MB`,
   Schutz über `protected_provider`), `_purge_stale_progressive` (Sidecar-Reste beim Start).
 - **`cogs/downloader_ydl.py`** — `YdlMixin`: five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,

@@ -2,8 +2,8 @@
 
 Lädt den nächsten Queue-Song (prefetch_next) bzw. den nächsten Autoplay-Song
 (prefetch_autoplay) still im Hintergrund. Jeder Download steht in der
-In-Flight-Registry (ADR 0002); die Queue-Downloads laufen sequenziell unter
-dem Lock in _prefetch_one, weil yt_dlp nicht thread-safe ist.
+In-Flight-Registry (ADR 0002). Alle Downloads über self.ydl laufen
+sequenziell unter _download_lock(), weil yt_dlp nicht thread-safe ist.
 """
 import asyncio
 
@@ -17,11 +17,19 @@ AUTOPLAY_DOWNLOAD_TIMEOUT = 120.0
 
 
 class PrefetchMixin:
-    # Serialisiert die eigentlichen yt_dlp-Downloads der Prefetch-Tasks:
+    # Serialisiert alle yt_dlp-Downloads über die geteilte Haupt-Instanz
+    # self.ydl (Queue-Prefetch, Autoplay-Prefetch, Download-Fallback):
     # yt_dlp ist nicht thread-safe, und ein adoptierter (vom Aufrufer
     # gecancelter, aber weiterlaufender) Download darf nie parallel zu einem
-    # frisch gekickten laufen. Lazy angelegt (Tests via __new__).
+    # frisch gekickten laufen. Lazy angelegt (Tests via __new__), Zugriff
+    # über _download_lock().
     _prefetch_dl_lock = None
+
+    def _download_lock(self) -> asyncio.Lock:
+        """Der eine Lock, unter dem jeder Download über self.ydl läuft."""
+        if self._prefetch_dl_lock is None:
+            self._prefetch_dl_lock = asyncio.Lock()
+        return self._prefetch_dl_lock
 
     async def prefetch_next(self, queue, idx: int = 0):
         """Lädt Song an Position idx der Queue still im Hintergrund herunter.
@@ -72,12 +80,10 @@ class PrefetchMixin:
             if filename.exists():
                 logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
                 return
-            if self._prefetch_dl_lock is None:
-                self._prefetch_dl_lock = asyncio.Lock()
             # Lock statt Task-Reihenfolge: auch ein adoptierter Download
             # (Aufrufer gecancelt, Worker läuft weiter) bleibt so garantiert
             # der einzige aktive yt_dlp-Download (nicht thread-safe).
-            async with self._prefetch_dl_lock:
+            async with self._download_lock():
                 if filename.exists():
                     logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
                     return
@@ -202,7 +208,8 @@ class PrefetchMixin:
             # resolve_track() würden sonst fehlschlagen. Ohne eigenes Timeout: der
             # Thread ließe sich ohnehin nicht abbrechen, yt_dlps socket_timeout
             # begrenzt hängende Verbindungen.
-            full_info = await asyncio.to_thread(self.ydl.extract_info, url, download=True)
+            async with self._download_lock():
+                full_info = await asyncio.to_thread(self.ydl.extract_info, url, download=True)
             if full_info:
                 full_info = self._store_info(url, full_info)
             logger.info(f"[Autoplay Prefetch] Fertig: {title}")
