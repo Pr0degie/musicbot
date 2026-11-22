@@ -461,7 +461,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                     added_count += 1
             await ctx.send(t("status.playlist_added", count=added_count))
         else:
-            url = info.get("webpage_url")
+            # Ohne webpage_url (z. B. direkte Datei-/Stream-URL) zählt die Eingabe –
+            # wie in _fetch_single_track_info für !next/!now.
+            url = info.get("webpage_url") or eingabe
             title = info.get("title", t("misc.unknown_title"))
             # Warnen wenn der Titel schon in der Queue ist – könnte ein Versehen sein
             dup_pos = next((i + 1 for i, (_, qt) in enumerate(self.queue) if qt == title), None)
