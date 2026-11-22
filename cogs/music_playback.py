@@ -100,6 +100,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         seek_offset = self._take_seek_offset(url)
 
         stderr_buf = None
+        source = None   # die FFmpeg-Quelle, solange vc.play() sie noch nicht übernommen hat
         try:
             # Dritter Anlauf nach zwei toten Stream-Versuchen → Download erzwingen.
             force_download = url == self._force_download_url
@@ -166,7 +167,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
-                self._stderr_tail(stderr_buf)   # after_playing läuft nie → Puffer schließen
+                self._discard_source(source, stderr_buf)   # after_playing läuft nie
                 return
 
             # Zweite dm_speaking-Prüfung: Das Auflösen oben (await _resolve_track) kann ein
@@ -177,7 +178,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 self.is_playing = False
                 self.queue.appendleft((url, title))
                 self._track_generation += 1     # hängende Post-Play-awaits entwerten
-                self._stderr_tail(stderr_buf)   # after_playing läuft nie → Puffer schließen
+                self._discard_source(source, stderr_buf)   # after_playing läuft nie
                 return
 
             # Kompletten Track-Zustand synchron VOR vc.play() setzen (ADR 0007).
@@ -189,6 +190,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             if ctx.voice_client.is_paused():
                 self._discard_paused_player(ctx.voice_client)
             ctx.voice_client.play(source, after=after_playing)
+            source = None                # gehört jetzt dem Player; beendet wird sie über after_playing
             self._player_token = token   # erst nach geglücktem play(): gehört zum laufenden Player
             logger.info(f"[Wiedergabe] Starte: {title}")
 
@@ -218,10 +220,12 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             self._schedule_background_work(ctx)
 
         except asyncio.TimeoutError:
+            self._discard_source(source)
             await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_timeout", "TimeoutError")
             return
         except Exception:
             logger.exception("[Fehler bei play_next]")
+            self._discard_source(source)
             await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_error", "Exception")
             return
 
@@ -376,6 +380,22 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # Uhr des Players erst beim ersten Paket: sonst schiebt er FFmpegs
         # Anlaufzeit als Ton ohne Pause nach (Anfang klingt kurz zu schnell).
         return start_clock_at_first_packet(source), stderr_buf
+
+    def _discard_source(self, source, stderr_buf=None):
+        """Beendet eine Quelle, die nie an vc.play() ging: FFmpegOpusAudio
+        startet den Prozess schon im Konstruktor, und ohne cleanup() liefe er
+        weiter, bis der Garbage Collector die Quelle abräumt (unter Windows
+        bliebe so lange die Datei offen). Schließt auch den stderr-Puffer,
+        falls übergeben – after_playing läuft für diese Quelle nie.
+        source=None (noch nicht gebaut oder schon beim Player) ist ein No-Op."""
+        cleanup = getattr(source, "cleanup", None)
+        if cleanup is not None:
+            try:
+                cleanup()
+            except Exception as e:
+                logger.debug(f"[Wiedergabe] cleanup() der verworfenen Quelle scheiterte: {e}")
+        if stderr_buf is not None:
+            self._stderr_tail(stderr_buf)
 
     def _snapshot_track_state(self, ctx, url, title, duration):
         """Setzt den kompletten Track-Zustand synchron VOR vc.play() (ADR 0007).
