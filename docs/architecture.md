@@ -28,7 +28,9 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_playback.py`** — `PlaybackMixin`: `play_next`-Orchestrator (delegiert an
     `_handle_queue_empty`, `_build_audio_source`, `_make_after_playing`, `_snapshot_track_state`,
     `_build_np_view`, `_schedule_background_work`, `_skip_broken_track` → [playback.md](architecture/playback.md)),
-    `_stop_for_advance`. Erbt die zwei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
+    `_stop_for_advance`. Erbt die drei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
+  - **`cogs/music_track_end.py`** — `TrackEndMixin`: `_make_after_playing` (Thread-Callback, der die
+    Track-Ende-Logik per `_run_on_loop` auf den Event-Loop reicht) und `_write_last_queue`.
   - **`cogs/music_enqueue.py`** — `EnqueueMixin`: der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` in vier Helpern:
     `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
     Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als

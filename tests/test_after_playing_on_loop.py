@@ -17,7 +17,7 @@ from pathlib import Path
 import discord
 import pytest
 
-import cogs.music_playback as playback_mod
+import cogs.music_track_end as playback_mod
 from conftest import FakeCtx, FakeDownloader, FakeVoiceClient, build_cog, cleanup_cog, make_fake_source
 
 URL_A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"

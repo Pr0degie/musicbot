@@ -91,6 +91,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ├── cogs/
 │   ├── music.py               # Kern: Queue, EQ, Autoplay, !text, !format
 │   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg-Quellen, Now-Playing-Karte
+│   ├── music_track_end.py     # TrackEndMixin: Track-Ende (Resume, Stream-Retry, Loop, nächster Track)
 │   ├── music_enqueue.py       # EnqueueMixin: Such-/URL-Flow von !p, !next, !now
 │   ├── music_prefetch.py      # PrefetchMixin: stößt das Vorladen der nächsten Songs an
 │   ├── music_voice_ui.py      # Join/Leave/Idle, Watchdog, Voice-Reparatur, Fortschrittsbalken
