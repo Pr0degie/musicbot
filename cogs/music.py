@@ -105,7 +105,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self._np_paused_total = 0.0   # aufsummierte Pausensekunden des aktuellen Songs
         self._np_paused_at = None     # monotonic-Zeitstempel seit Pause-Beginn (None = läuft)
         self._np_last_desc = None     # zuletzt gesetzte Balken-Zeile – spart redundante Edits
-        self._skip_resolving = False  # Gesetzt von SearchAutoplayView wenn Alternative gewählt wird während resolve läuft
+        self._skip_resolving = False  # Gesetzt von SearchAutoplayView: Alternative gewählt, während ihr Treffer auflöst
         # Generationszähler gegen Race-Zuweisungen: Stirbt ein Track schneller als die
         # awaits im Post-Play-Teil von play_next, läuft der Leere-Queue-Cleanup zuerst –
         # späte Zuweisungen des toten Durchlaufs würden ihn sonst überschreiben (der

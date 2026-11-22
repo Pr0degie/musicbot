@@ -46,6 +46,10 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
     # Token des zuletzt gestarteten Players (Song oder Radio) – siehe
     # utils.voice.PlayerToken und _discard_paused_player.
     _player_token = None
+    # URL des Tracks, den play_next gerade auflöst (None = kein Resolve läuft).
+    # Die Alternativ-Buttons setzen _skip_resolving nur, wenn genau ihr Treffer
+    # hier steht; play_next verbraucht den Wunsch am Ende dieses Resolves.
+    _resolving_url = None
 
     async def _start_or_prefetch(self, ctx):
         """Nach dem Einreihen (!p, !next): Läuft nichts, die Wiedergabe
@@ -99,21 +103,30 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         try:
             # Dritter Anlauf nach zwei toten Stream-Versuchen → Download erzwingen.
             force_download = url == self._force_download_url
-            info, filename, title, duration = await self._resolve_track(
-                url, title, force_download=force_download, seek_offset=seek_offset
-            )
+            # Resolve-Fenster: solange es offen ist, kann ein Alternativ-Button
+            # diesen Track abwählen (_skip_resolving).
+            self._resolving_url = url
+            try:
+                info, filename, title, duration = await self._resolve_track(
+                    url, title, force_download=force_download, seek_offset=seek_offset
+                )
 
-            is_stream = isinstance(filename, str)  # Stream-URL statt lokaler Datei (z. B. Track > 20 min)
+                is_stream = isinstance(filename, str)  # Stream-URL statt lokaler Datei (z. B. Track > 20 min)
 
-            # Stream-URL erst ab available_at abrufbar, sonst 403 (utils/ffmpeg.py).
-            # Vor dem _skip_resolving-Check, damit ein Skip im Wartefenster greift.
-            wait = stream_wait_seconds(info) if is_stream and not force_download else 0
-            if wait > 0:
-                logger.info(f"[Stream] Warte {wait:.1f}s bis YouTube die URL freigibt: {title}")
-                await asyncio.sleep(wait)
+                # Stream-URL erst ab available_at abrufbar, sonst 403 (utils/ffmpeg.py).
+                # Noch im Resolve-Fenster, damit ein Skip im Wartefenster greift.
+                wait = stream_wait_seconds(info) if is_stream and not force_download else 0
+                if wait > 0:
+                    logger.info(f"[Stream] Warte {wait:.1f}s bis YouTube die URL freigibt: {title}")
+                    await asyncio.sleep(wait)
+            finally:
+                # Der Skip-Wunsch gilt nur für diesen Resolve: immer verbrauchen,
+                # auch wenn der Resolve scheitert – sonst überspränge der nächste
+                # Durchlauf genau die Alternative, die der Nutzer gewählt hat.
+                self._resolving_url = None
+                skip, self._skip_resolving = self._skip_resolving, False
 
-            if self._skip_resolving:
-                self._skip_resolving = False
+            if skip:
                 await self.play_next(ctx)
                 return
 

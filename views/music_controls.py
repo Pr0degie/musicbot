@@ -466,10 +466,14 @@ class SearchAutoplayView(View):
                     # Queue umgebaut → Prefetch auf die neue URL umlenken
                     self.music_cog._restart_prefetch()
                 if not replaced:
-                    # Song wurde bereits aus der Queue gepoppt – play_next löst ihn gerade auf.
-                    # Flag setzen damit play_next den resolvedn Track überspringt und stattdessen
-                    # die Alternative (jetzt vorne in der Queue) spielt.
-                    self.music_cog._skip_resolving = True
+                    # Song wurde bereits aus der Queue gepoppt. Löst play_next ihn
+                    # gerade auf, überspringt es ihn und spielt stattdessen die
+                    # Alternative (jetzt vorne in der Queue). Nur dann: ohne
+                    # laufenden Resolve des Treffers überspränge play_next später
+                    # die Alternative selbst.
+                    added_url = self.added_entry.get("webpage_url") or self.added_entry.get("url")
+                    if added_url and self.music_cog._resolving_url == added_url:
+                        self.music_cog._skip_resolving = True
                     self.music_cog.queue.appendleft((url, title))
                     # Startet gleich → Download sofort anstoßen (wie der !p-Erstreffer)
                     self.music_cog.dl.prime_first_hit(url, title)
