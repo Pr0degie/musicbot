@@ -44,11 +44,16 @@ Playlist additions evict nothing and append at end.
 
 Radio code lives in `cogs/music_radio.py` (`RadioMixin`). `RADIO_STATIONS_FILE` = `radio_stations.json` (key →
 `{name, url}`).
-State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`.
+State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`, `_radio_session`.
 `_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error or
 unexpected stream end (`_radio_should_reconnect`, `RADIO_MAX_RECONNECTS`). Der Zähler wird erst nach
 `RADIO_STABLE_SECONDS` (60 s) stabilem Lauf zurückgesetzt, nicht beim Start – sonst verbände ein sofort
 abbrechender Sender endlos neu (der Reconnect startet selbst über `_play_radio_stream`).
+Reconnecten darf nur der Sender, der gerade laufen soll: `_radio_session` hält dessen `PlayerToken`, `_stop_radio()`
+setzt es auf `None`. Der `after_radio`-Callback eines gestoppten Players läuft im Player-Thread oft erst, wenn der
+nächste Sender `is_radio` schon wieder gesetzt hat – `is_radio` allein hielte den Senderwechsel für einen Abbruch
+(Reconnect über den neuen Sender, „Voice-Client noch belegt", Radio-Zustand weg bei laufendem Stream). Auch der
+wartende `_reconnect_radio` prüft die Session nach seiner 2-s-Pause.
 `!radio <Nr|Name>` → aus Liste. `!radio <url> [Name]` → spielt + speichert automatisch (kein Duplikat).
 `!stop` beendet Radio oder aktuelle Wiedergabe (Queue bleibt erhalten). Radio-Modus und Song-Modus schließen
 sich gegenseitig aus.
