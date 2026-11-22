@@ -47,6 +47,10 @@ class _Resolution:
     def duration(self):
         return self.info.get("duration", 0)
 
+    def result(self, source):
+        """Rückgabe-Tupel von resolve_track; source ist Datei oder Stream-URL."""
+        return self.info, source, self.title, self.duration
+
 
 class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMixin,
                  ProgressiveDownloadMixin):
@@ -135,36 +139,17 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         """Ergebnis "als CDN-Stream spielen" – die aktive Quelle ist dann keine Datei."""
         logger.info(message)
         self.last_resolved_file = None
-        return r.info, r.info.get("url") or r.url, r.title, r.duration
+        return r.result(r.info.get("url") or r.url)
 
     def _file_result(self, r):
         self.last_resolved_file = r.filename
-        return r.info, r.filename, r.title, r.duration
+        return r.result(r.filename)
 
     async def _resolve_metadata(self, url, title):
         """Phase 1: Metadaten (Cache, laufender Prefetch-Resolve oder frisch)
         und Zieldatei. filename bleibt None für Tracks über
         STREAM_THRESHOLD_SECONDS."""
-        # Abgelaufene Einträge (CACHE_TTL) zählen als Cache-Miss, siehe
-        # _usable_cached_info.
-        info = self._usable_cached_info(url)
-        if info is not None:
-            logger.info(f"[Resolve] Metadaten aus Cache: {title}")
-        else:
-            if url in self._pending_resolves:
-                logger.info(f"[Resolve] Warte auf laufenden Prefetch-Task: {title}")
-                try:
-                    await self._pending_resolves[url]
-                except Exception:
-                    pass
-            info = self._usable_cached_info(url)
-            if info is not None:
-                logger.info(f"[Resolve] Metadaten aus Prefetch-Task: {title}")
-            else:
-                if url in self._url_cache:
-                    logger.info(f"[Resolve] Cache-Eintrag abgelaufen – extrahiere frisch: {title}")
-                info = await self._fetch_info(url)
-
+        info = await self._metadata_for(url, title)
         r = _Resolution(url, info)
         if r.duration > STREAM_THRESHOLD_SECONDS:
             return r
@@ -188,6 +173,31 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
             self.last_resolved_file = r.filename
         return r
 
+    async def _metadata_for(self, url, title):
+        """Metadaten aus dem Cache, vom laufenden Prefetch-Resolve oder frisch
+        extrahiert. Abgelaufene Einträge (CACHE_TTL) zählen als Cache-Miss,
+        siehe _usable_cached_info."""
+        info = self._usable_cached_info(url)
+        if info is not None:
+            logger.info(f"[Resolve] Metadaten aus Cache: {title}")
+            return info
+        pending = self._pending_resolves.get(url)
+        if pending is not None:
+            logger.info(f"[Resolve] Warte auf laufenden Prefetch-Task: {title}")
+            # Ohne shield (anders als _settle): ein Cancel des Aufrufers
+            # trifft auch den Resolve-Task.
+            try:
+                await pending
+            except Exception:
+                pass
+        info = self._usable_cached_info(url)
+        if info is not None:
+            logger.info(f"[Resolve] Metadaten aus Prefetch-Task: {title}")
+            return info
+        if url in self._url_cache:
+            logger.info(f"[Resolve] Cache-Eintrag abgelaufen – extrahiere frisch: {title}")
+        return await self._fetch_info(url)
+
     async def _adopt_inflight(self, r):
         """Phase 2: In-Flight-Registry zuerst – schreibt bereits irgendein Pfad
         Bytes für diese URL? Lebendig vs. Leiche entscheidet NUR die Registry
@@ -199,122 +209,152 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         b) Queue-/Autoplay-Prefetch o. Ä. → Task abwarten, danach normaler
            Datei-Check. None = weiter mit der nächsten Phase.
         """
-        url, title, filename = r.url, r.title, r.filename
-        prog_task = self.progressive_task_for(url)
-        entry = None if prog_task is not None else self.inflight_download(url)
-        if entry is not None:
-            if entry[1] == "progressiv":
-                prog_task = entry[0]
+        prog_task = self.progressive_task_for(r.url)
+        if prog_task is None and (entry := self.inflight_download(r.url)) is not None:
+            task, quelle = entry
+            if quelle == "progressiv":
+                prog_task = task
             else:
-                logger.info(f"[Download] Warte auf laufenden {entry[1]} für: {title}")
-                try:
-                    await asyncio.shield(entry[0])
-                except Exception:
-                    pass  # gescheitert → unten normaler Datei-Check, ggf. selbst laden
-        if prog_task is not None:
-            if await self._wait_for_buffer(filename, prog_task, r.min_buffer_seconds):
-                logger.info(f"[Progressiv] Laufenden Download adoptiert: {title}")
-                return self._file_result(r)
-            if not prog_task.done():
-                if r.force_download:
-                    # Letzter Anlauf nach zwei toten Streams: der lebende Task
-                    # IST der Download – zu Ende warten, Datei-Check unten.
-                    try:
-                        await asyncio.shield(prog_task)
-                    except Exception:
-                        pass
-                else:
-                    # Task lebt, puffert nur zu langsam → Stream-Fallback; der
-                    # Download läuft weiter und wird Cache. KEIN unlink, kein
-                    # Neustart: die wachsende Datei ist keine Leiche.
-                    return self._stream_result(
-                        r, f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {title}")
-            # Download inzwischen gescheitert → unten wie "Datei fehlt" behandeln
+                logger.info(f"[Download] Warte auf laufenden {quelle} für: {r.title}")
+                # Gescheitert → normaler Datei-Check in Phase 4, ggf. selbst laden.
+                await self._settle(task)
+        if prog_task is None:
+            return None
+        return await self._join_progressive(r, prog_task)
+
+    async def _join_progressive(self, r, prog_task):
+        """Fall a) von _adopt_inflight: am laufenden progressiven Download
+        teilnehmen. Vier Ausgänge, None = weiter mit der nächsten Phase."""
+        if await self._wait_for_buffer(r.filename, prog_task, r.min_buffer_seconds):
+            logger.info(f"[Progressiv] Laufenden Download adoptiert: {r.title}")
+            return self._file_result(r)
+        if prog_task.done():
+            # Download inzwischen gescheitert → wie "Datei fehlt" behandeln
             # (Aufräumen hat _run_progressive selbst erledigt).
+            return None
+        if not r.force_download:
+            # Task lebt, puffert nur zu langsam → Stream-Fallback; der
+            # Download läuft weiter und wird Cache. KEIN unlink, kein
+            # Neustart: die wachsende Datei ist keine Leiche.
+            return self._stream_result(
+                r, f"[Stream] Laufender Download puffert zu langsam – starte als Stream: {r.title}")
+        # Letzter Anlauf nach zwei toten Streams: der lebende Task IST der
+        # Download – zu Ende warten, Datei-Check in Phase 4.
+        await self._settle(prog_task)
         return None
 
     def _clear_corpse(self, r):
         """Phase 3: Leiche eines früheren Fehlschlags (unlink scheiterte, weil
         FFmpeg die Datei noch offen hatte): existiert, ist aber unvollständig,
         und die Registry kennt keinen lebenden Task mehr → wegräumen."""
-        filename = r.filename
-        if filename.exists() and self.is_incomplete(filename):
-            _resolved = filename.resolve()
-            if safe_unlink(filename):
-                safe_unlink(self._sidecar_for(filename))
-                self._incomplete_files.discard(_resolved)
-            else:
-                # Datei blockiert → als Stream ausweichen; der nächste Bot-Start
-                # räumt sie via _purge_stale_progressive weg.
-                return self._stream_result(
-                    r, f"[Stream] Unvollständige Datei blockiert – starte als Stream: {r.title}")
-        return None
+        if self._remove_corpse(r.filename):
+            return None
+        # Datei blockiert → als Stream ausweichen; der nächste Bot-Start
+        # räumt sie via _purge_stale_progressive weg.
+        return self._stream_result(
+            r, f"[Stream] Unvollständige Datei blockiert – starte als Stream: {r.title}")
 
     async def _acquire_file(self, r):
         """Phase 4: vorhandene Datei nehmen, sonst letzter Anlauf
         (force_download), progressiver Download oder CDN-Stream."""
-        url, info, title, filename, force_download = r.url, r.info, r.title, r.filename, r.force_download
-        if not filename.exists():
-            if force_download:
-                # Läuft (noch/inzwischen) ein lebender Download für die URL,
-                # IST der der letzte Anlauf – awaiten und Datei-Check
-                # wiederholen; nur wenn keiner läuft oder er scheitert,
-                # blockierend selbst laden.
-                other = self.inflight_download(url)
-                if other is not None:
-                    logger.info(f"[Download-Fallback] Warte auf laufenden {other[1]}: {title}")
-                    try:
-                        await asyncio.shield(other[0])
-                    except Exception:
-                        pass
-            if not filename.exists() and force_download:
-                # Letzter Anlauf: kein Stream mehr, Datei jetzt blockierend laden.
-                # Schlägt der Download fehl, propagiert die Exception zu play_next
-                # (Fehlerpfad überspringt den Track mit i18n-Meldung).
-                logger.warning(f"[Download-Fallback] Stream schlug zweimal fehl – lade lokal herunter: {title}")
-                self._register_inflight(url, "Download-Fallback", title)
-                try:
-                    await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
-                    logger.info(f"[Download-Fallback] Fertig: {filename.name}")
-                finally:
-                    self._inflight_done(url, asyncio.current_task())
-                await self.cleanup_downloads()
-            if not filename.exists():
-                # Primärpfad: progressiver Download – yt_dlp lädt sofort, FFmpeg
-                # spielt die wachsende Datei, sobald der Startpuffer steht. Gates:
-                # mp3-Modus konvertiert erst NACH dem Download; m4a/mp4 ist
-                # wachsend nicht lesbar (moov-Atom am Dateiende); geblockte URLs
-                # sind gerade erst progressiv gescheitert.
-                if not force_download and self._may_start_progressive(url, info):
-                    _t0 = time.monotonic()
-                    task = self._start_progressive(url, info, filename, title)
-                    if await self._wait_for_buffer(filename, task, r.min_buffer_seconds):
-                        try:
-                            _kb = filename.stat().st_size // 1024
-                        except OSError:
-                            _kb = 0
-                        logger.info(
-                            f"[Progressiv] Puffer erreicht ({_kb} KB nach {time.monotonic() - _t0:.1f}s) "
-                            f"– Wiedergabe startet: {title}"
-                        )
-                        return self._file_result(r)
-                    # Task NICHT canceln: bei bloßem Timeout darf er fertigladen
-                    # (Datei wird Cache); war er gescheitert, hat _run_progressive
-                    # bereits aufgeräumt.
-                    self.block_progressive(url)
-                    if task.done():
-                        logger.warning(f"[Progressiv] Download scheiterte sofort – Fallback auf CDN-Stream: {title}")
-                    else:
-                        logger.warning(
-                            f"[Progressiv] Pufferung nicht rechtzeitig ({PROGRESSIVE_WAIT_TIMEOUT:.0f}s) "
-                            f"– Fallback auf CDN-Stream: {title}"
-                        )
-                # Fallback: direkter CDN-Stream (früherer Primärpfad).
-                return self._stream_result(r, f"[Stream] Nicht gecacht – starte sofort als Stream: {title}")
-            else:
-                logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {filename.name}")
-        else:
-            logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {filename.name}")
+        # Die zwei Datei-Rückgaben bewusst ohne erneutes last_resolved_file
+        # (also nicht über _file_result): das setzte schon Phase 1.
+        if r.filename.exists():
+            logger.info(f"[Wiedergabe] Verwende vorhandene Datei: {r.filename.name}")
+            return r.result(r.filename)
+        if r.force_download:
+            await self._last_resort_download(r)
+        if r.filename.exists():
+            logger.info(f"[Wiedergabe] Prefetch erfolgreich – starte sofort: {r.filename.name}")
+            return r.result(r.filename)
+        # Primärpfad: progressiver Download – yt_dlp lädt sofort, FFmpeg
+        # spielt die wachsende Datei, sobald der Startpuffer steht. Gates:
+        # mp3-Modus konvertiert erst NACH dem Download; m4a/mp4 ist
+        # wachsend nicht lesbar (moov-Atom am Dateiende); geblockte URLs
+        # sind gerade erst progressiv gescheitert.
+        if not r.force_download and self._may_start_progressive(r.url, r.info):
+            result = await self._play_progressive(r)
+            if result is not None:
+                return result
+        # Fallback: direkter CDN-Stream (früherer Primärpfad).
+        return self._stream_result(r, f"[Stream] Nicht gecacht – starte sofort als Stream: {r.title}")
 
-        # Bewusst ohne erneutes last_resolved_file: das setzte schon Phase 1.
-        return r.info, r.filename, r.title, r.duration
+    async def _last_resort_download(self, r):
+        """Letzter Anlauf (force_download): kein Stream mehr, die Datei muss
+        lokal her. Läuft (noch/inzwischen) ein lebender Download für die URL,
+        IST der der letzte Anlauf – abwarten; nur wenn keiner läuft oder er
+        scheitert, blockierend selbst laden. Schlägt der eigene Download fehl,
+        propagiert die Exception zu play_next (Fehlerpfad überspringt den
+        Track mit i18n-Meldung)."""
+        other = self.inflight_download(r.url)
+        if other is not None:
+            logger.info(f"[Download-Fallback] Warte auf laufenden {other[1]}: {r.title}")
+            await self._settle(other[0])
+        if r.filename.exists():
+            return
+        logger.warning(f"[Download-Fallback] Stream schlug zweimal fehl – lade lokal herunter: {r.title}")
+        self._register_inflight(r.url, "Download-Fallback", r.title)
+        try:
+            await asyncio.to_thread(self.ydl.download, [r.info.get("webpage_url") or r.url])
+            logger.info(f"[Download-Fallback] Fertig: {r.filename.name}")
+        finally:
+            self._inflight_done(r.url, asyncio.current_task())
+        await self.cleanup_downloads()
+
+    async def _play_progressive(self, r):
+        """Startet den progressiven Download und wartet auf den Startpuffer.
+        None = Puffer kam nicht zustande, der Aufrufer weicht auf den Stream aus."""
+        _t0 = time.monotonic()
+        task = self._start_progressive(r.url, r.info, r.filename, r.title)
+        if await self._wait_for_buffer(r.filename, task, r.min_buffer_seconds):
+            try:
+                _kb = r.filename.stat().st_size // 1024
+            except OSError:
+                _kb = 0
+            logger.info(
+                f"[Progressiv] Puffer erreicht ({_kb} KB nach {time.monotonic() - _t0:.1f}s) "
+                f"– Wiedergabe startet: {r.title}"
+            )
+            return self._file_result(r)
+        # Task NICHT canceln: bei bloßem Timeout darf er fertigladen
+        # (Datei wird Cache); war er gescheitert, hat _run_progressive
+        # bereits aufgeräumt.
+        self.block_progressive(r.url)
+        if task.done():
+            logger.warning(f"[Progressiv] Download scheiterte sofort – Fallback auf CDN-Stream: {r.title}")
+        else:
+            logger.warning(
+                f"[Progressiv] Pufferung nicht rechtzeitig ({PROGRESSIVE_WAIT_TIMEOUT:.0f}s) "
+                f"– Fallback auf CDN-Stream: {r.title}"
+            )
+        return None
+
+    # ------------------------------------------------------------------
+    # Helfer, die auch der Prefetch benutzt
+    # ------------------------------------------------------------------
+
+    def _remove_corpse(self, filename: Path) -> bool:
+        """Räumt die Leiche eines gescheiterten progressiven Downloads weg:
+        Datei existiert, ist aber unvollständig. Nur aufrufen, wenn die
+        Registry keinen lebenden Writer für die URL kennt. True = keine Leiche
+        (mehr) im Weg, False = Datei blockiert (FFmpeg liest noch)."""
+        if not (filename.exists() and self.is_incomplete(filename)):
+            return True
+        resolved = filename.resolve()
+        if not safe_unlink(filename):
+            return False
+        safe_unlink(self._sidecar_for(filename))
+        self._incomplete_files.discard(resolved)
+        return True
+
+    async def _settle(self, task, timeout: float | None = None):
+        """Wartet auf das Ende eines fremden Tasks, ohne ihn mitzureißen
+        (shield) und ohne dass sein Fehler durchschlägt. Mit timeout wird
+        höchstens so lange gewartet; der Task läuft danach weiter."""
+        try:
+            if timeout is None:
+                await asyncio.shield(task)
+            else:
+                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except Exception:
+            pass

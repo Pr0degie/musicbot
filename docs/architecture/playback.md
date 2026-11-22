@@ -82,6 +82,12 @@ bug**:
 - Ein adoptierter, noch laufender progressiver Download puffert zu langsam (`_adopt_inflight`), oder eine
   unvollständige Datei (Leiche) lässt sich nicht löschen (`_clear_corpse`) → stream.
 
+Untermethoden der Phasen: `_resolve_metadata` holt die Metadaten über `_metadata_for` (Cache, laufender
+Resolve, frisch). `_adopt_inflight` wartet fremde Writer über `_settle` ab und nimmt über `_join_progressive`
+am laufenden progressiven Download teil. `_clear_corpse` räumt über `_remove_corpse` auf (teilt sich der
+Prefetch). `_acquire_file` nimmt die vorhandene Datei, sonst `_last_resort_download` (nur `force_download`),
+`_play_progressive` oder den Stream.
+
 Der progressive Download ist der Primärpfad für ungecachte Tracks ≤ 20 min; Puffer, Gates, Buchhaltung,
 Resume, `_stop_for_advance`, Blockliste und Schnellstart → [ADR
 0001](../adr/0001-progressiver-download-statt-cdn-stream.md).
