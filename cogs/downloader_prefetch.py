@@ -11,6 +11,10 @@ from utils.logger import logger
 from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
 from cogs.downloader_progressive import STREAM_THRESHOLD_SECONDS
 
+# So lange wartet prefetch_autoplay auf den Download des gewählten Songs.
+# Danach gibt nur der Aufrufer auf – der Download selbst läuft weiter.
+AUTOPLAY_DOWNLOAD_TIMEOUT = 120.0
+
 
 class PrefetchMixin:
     # Serialisiert die eigentlichen yt_dlp-Downloads der Prefetch-Tasks:
@@ -130,16 +134,27 @@ class PrefetchMixin:
             url, title = picked
 
             logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            existing = self._register_inflight(url, "Autoplay-Prefetch", title)
+            # Eigener Task für den Download, der auch in der Registry steht
+            # (wie prefetch_next, ADR 0002): Cancel oder Timeout des Aufrufers
+            # beenden den Worker-Thread nicht – der Download läuft zu Ende und
+            # bleibt bis dahin als Writer registriert.
+            worker = asyncio.create_task(self._download_autoplay(url, title))
+            # Scheitert ein verwaister Worker, holt niemand seine Exception ab.
+            worker.add_done_callback(lambda done: done.cancelled() or done.exception())
+            existing = self._register_inflight(url, "Autoplay-Prefetch", title, task=worker)
             if existing is not None:
                 # Anderer Pfad schreibt diese URL bereits – dessen Ende abwarten
                 # statt parallel zu laden; der Song wird trotzdem eingereiht.
-                await self._settle(existing[0], timeout=120.0)
+                # Der Worker hat noch keine Zeile ausgeführt → sauber abbrechen.
+                worker.cancel()
+                await self._settle(existing[0], timeout=AUTOPLAY_DOWNLOAD_TIMEOUT)
                 return url, title
             try:
-                await self._download_autoplay(url, title)
-            finally:
-                self._inflight_done(url, asyncio.current_task())
+                await asyncio.wait_for(asyncio.shield(worker), timeout=AUTOPLAY_DOWNLOAD_TIMEOUT)
+            except asyncio.CancelledError:
+                if not worker.done():
+                    logger.info(f"[Autoplay Prefetch] Aufrufer abgebrochen – laufender Download läuft zu Ende: {title}")
+                raise
             return url, title
 
         except asyncio.TimeoutError:
@@ -175,25 +190,30 @@ class PrefetchMixin:
         return entry_url(chosen), chosen.get("title", "Unbekannt")
 
     async def _download_autoplay(self, url: str, title: str):
-        """Lädt den gewählten Autoplay-Song, cached sein Info-Dict und stößt
-        den Cleanup an. Registrierung und Deregistrierung macht der Aufrufer."""
-        # extract_info(download=True) lädt die Datei herunter UND gibt das volle
-        # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
-        # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
-        # resolve_track() würden sonst fehlschlagen.
-        full_info = await asyncio.wait_for(
-            asyncio.to_thread(self.ydl.extract_info, url, download=True),
-            timeout=120.0,
-        )
-        if full_info:
-            full_info = self._store_info(url, full_info)
-        logger.info(f"[Autoplay Prefetch] Fertig: {title}")
-        # Der frisch geladene Song hängt noch nicht in der Queue (macht der
-        # Caller) → seine Datei explizit vor dem Cleanup schützen.
-        just_downloaded = None
-        if full_info:
-            try:
-                just_downloaded = self._target_path(full_info)
-            except Exception:
-                pass
-        await self.cleanup_downloads(extra_protected=just_downloaded)
+        """Der eigentliche Autoplay-Download (eigener Task, siehe
+        prefetch_autoplay): lädt den gewählten Song, cached sein Info-Dict
+        und stößt den Cleanup an. Deregistriert sich erst im finally –
+        solange der Worker-Thread schreibt, meldet die Registry also einen
+        lebenden Writer."""
+        try:
+            # extract_info(download=True) lädt die Datei herunter UND gibt das volle
+            # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
+            # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
+            # resolve_track() würden sonst fehlschlagen. Ohne eigenes Timeout: der
+            # Thread ließe sich ohnehin nicht abbrechen, yt_dlps socket_timeout
+            # begrenzt hängende Verbindungen.
+            full_info = await asyncio.to_thread(self.ydl.extract_info, url, download=True)
+            if full_info:
+                full_info = self._store_info(url, full_info)
+            logger.info(f"[Autoplay Prefetch] Fertig: {title}")
+            # Der frisch geladene Song hängt noch nicht in der Queue (macht der
+            # Caller) → seine Datei explizit vor dem Cleanup schützen.
+            just_downloaded = None
+            if full_info:
+                try:
+                    just_downloaded = self._target_path(full_info)
+                except Exception:
+                    pass
+            await self.cleanup_downloads(extra_protected=just_downloaded)
+        finally:
+            self._inflight_done(url, asyncio.current_task())

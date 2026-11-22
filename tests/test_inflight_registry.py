@@ -325,3 +325,88 @@ def test_registry_holds_per_url_task_not_batch_task(tmp_path, monkeypatch):
         assert target_b.exists()
 
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# h) Cancel bzw. Timeout des Autoplay-Prefetch: wie f) – der Worker-Thread
+#    schreibt weiter, die Registry muss den Writer bis zum Thread-Ende behalten
+# ---------------------------------------------------------------------------
+
+class OneHitYdl:
+    """autoplay_ydl-Ersatz: die Suche liefert genau einen Kandidaten (URL)."""
+
+    def extract_info(self, url, download=False):
+        return {"entries": [{"url": URL, "title": "Kurz"}]}
+
+
+def _autoplay_dl_mit_haengendem_download(tmp_path):
+    import threading
+
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(), target)
+    dl.autoplay_ydl = OneHitYdl()
+    started = threading.Event()
+    release = threading.Event()
+    downloads = []
+
+    def slow_extract(url, download=False):
+        downloads.append((url, download))
+        started.set()
+        assert release.wait(timeout=5), "Test-Deadlock: release wurde nie gesetzt"
+        Path(target).write_bytes(b"\0" * 4096)
+        return short_info()
+
+    dl.ydl.extract_info = slow_extract
+    return dl, target, started, release, downloads
+
+
+def test_autoplay_prefetch_cancel_keeps_writer_registered_until_thread_done(tmp_path, monkeypatch):
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    dl, target, started, release, downloads = _autoplay_dl_mit_haengendem_download(tmp_path)
+
+    async def run():
+        outer = asyncio.create_task(
+            dl.prefetch_autoplay("https://www.youtube.com/watch?v=bbbbbbbbbbb", "Referenz", []))
+        while not started.is_set():          # Worker-Thread schreibt jetzt
+            await asyncio.sleep(0.01)
+        outer.cancel()                       # !eq, !clear, Radio, neuer Trackstart
+        await asyncio.gather(outer, return_exceptions=True)
+
+        assert dl.inflight_download(URL) is not None, \
+            "Cancel darf den Writer nicht deregistrieren, solange der Thread schreibt"
+        # resolve_track wartet auf den lebenden Writer statt selbst zu starten.
+        resolving = asyncio.create_task(dl.resolve_track(URL, "Kurz"))
+        await asyncio.sleep(0.05)
+        assert not resolving.done(), "resolve_track muss den laufenden Download abwarten"
+
+        release.set()                        # Download zu Ende laufen lassen
+        _, filename, _, _ = await resolving
+        assert filename == target
+        assert dl.inflight_download(URL) is None, "nach Thread-Ende muss die Registry leer sein"
+        assert downloads == [(URL, True)], "genau ein Download"
+        assert dl.ydl.download_calls == []
+
+    asyncio.run(run())
+
+
+def test_autoplay_prefetch_timeout_keeps_writer_registered(tmp_path, monkeypatch):
+    """Nach dem Timeout gibt der Aufrufer auf (None) – der Download läuft
+    weiter und bleibt bis zu seinem Ende als Writer registriert."""
+    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    import cogs.downloader_prefetch as prefetch_mod
+    monkeypatch.setattr(prefetch_mod, "AUTOPLAY_DOWNLOAD_TIMEOUT", 0.05)
+    dl, target, started, release, downloads = _autoplay_dl_mit_haengendem_download(tmp_path)
+
+    async def run():
+        result = await dl.prefetch_autoplay("https://www.youtube.com/watch?v=bbbbbbbbbbb", "Referenz", [])
+        assert result is None
+        entry = dl.inflight_download(URL)
+        assert entry is not None, "Timeout darf den Writer nicht deregistrieren"
+
+        release.set()
+        await asyncio.gather(entry[0], return_exceptions=True)
+        assert dl.inflight_download(URL) is None
+        assert target.exists()
+        assert downloads == [(URL, True)]
+
+    asyncio.run(run())
