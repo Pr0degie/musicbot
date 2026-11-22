@@ -970,6 +970,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             return
 
         url, title, duration = self.current_track
+        if duration and offset >= duration:
+            # Hinter dem Songende gäbe es nichts zu spielen (FFmpeg endet sofort).
+            # Nur prüfbar, wenn die Dauer bekannt ist.
+            await ctx.send(t("error.seek_invalid"))
+            return
         mins, secs = divmod(offset, 60)
         self._seek_offset = offset
         self._seek_offset_url = url
