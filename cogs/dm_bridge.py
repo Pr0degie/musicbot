@@ -61,7 +61,9 @@ class DMBridge(commands.Cog):
         for stale in Path(tempfile.gettempdir()).glob("dm_recv_*.wav"):
             if safe_unlink(stale, defer=False):
                 logger.info(f"[DMBridge] Alte Temp-WAV entfernt: {stale.name}")
-        app = web.Application()
+        # client_max_size: aiohttps Standard (1 MiB) würde jede längere WAV mit 413
+        # abweisen, bevor der eigene Riegel in _speak_bytes überhaupt greift.
+        app = web.Application(client_max_size=_MAX_WAV_BYTES)
         app.router.add_get("/health", self._handle_health)
         app.router.add_get("/debug", self._handle_debug)
         app.router.add_post("/speak", self._handle_speak)
