@@ -691,7 +691,11 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         await ctx.send(t("status.searching_lyrics", display=display))
 
         try:
-            url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
+            # safe="": quote lässt sonst "/" durch – "AC/DC" ergäbe einen zusätzlichen Pfadabschnitt.
+            url = (
+                f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist, safe='')}"
+                f"/{urllib.parse.quote(song, safe='')}"
+            )
             # Geteilte Session (cog_load) statt pro Aufruf eine neue – spart
             # TLS-Handshake und Connection-Aufbau auf schwacher Hardware.
             async with self._http().get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
