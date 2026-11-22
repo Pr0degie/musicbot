@@ -11,8 +11,9 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
 - [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (keine Karte, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
 - [ ] Karte (Components V2): Titel als Link – auch bei Titeln mit Emojis, `|`, `[ ]` oder `*` (kein roher `[…](<url>)`-Text; Emojis fehlen im Titel), Fortschrittsbalken läuft mit, bei YouTube das Thumbnail als Bild zwischen Balken und Details (kompakt, nicht kartenfüllend), sonst klein rechts, grauer Button mit rotem ❌ **oben rechts**
+- [ ] 🔗 sitzt klein rechts neben den Details, die Karte ist nicht höher als vorher → Klick: nur für mich sichtbare Antwort mit dem Song-Link im Codeblock, am Desktop legt das Kopier-Symbol des Codeblocks ihn in die Zwischenablage; Karte und Wiedergabe bleiben unverändert. Nicht-YouTube mit kleinem Vorschaubild: 🔗 in eigener Zeile unter den Buttons; Radio-Karte ohne 🔗
 - [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`)
-- [ ] `REQUIRE_SAME_VOICE=true`: jeder Button der Karte (Zurück, Pause, Skip, Autoplay, Loop, ❌) sowie `!x`/`!resume`/`!loop`/`!replay` von außerhalb des Voice-Channels → nur Absage, nichts ändert sich; Owner kommt immer durch
+- [ ] `REQUIRE_SAME_VOICE=true`: jeder Button der Karte (Zurück, Pause, Skip, Autoplay, Loop, ❌, 🔗) sowie `!x`/`!resume`/`!loop`/`!replay` von außerhalb des Voice-Channels → nur Absage, nichts ändert sich; Owner kommt immer durch
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-Button funktioniert; Pause/Fortsetzen ist **ein** Button, der Beschriftung und Farbe wechselt (blau ↔ grün); Pause/Fortsetzen, Autoplay und Loop schreiben **nichts** in den Chat und zeigen kein „Interaktion fehlgeschlagen"

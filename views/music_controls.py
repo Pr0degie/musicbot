@@ -46,7 +46,9 @@ class MusicControlView(LayoutView):
       MediaGallery [Video-Thumbnail 320×180]      (nur YouTube, siehe compact_card_image)
       TextDisplay [Details, Als Nächstes, Uploader]
         – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
+        – mit Song-Link als Section, Accessory: grauer 🔗-Button (Link zum Kopieren)
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
+      ActionRow [🔗]                              (nur wenn das Thumbnail den Accessory-Platz belegt)
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
     oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
@@ -59,16 +61,22 @@ class MusicControlView(LayoutView):
     dann mit. Weil der Zustand an den Buttons ablesbar ist, quittieren
     Pause/Fortsetzen/Autoplay/Loop stumm (keine ephemere Bestätigung).
 
+    🔗 legt dem Klickenden den Song-Link ephemer als Codeblock hin: in die
+    Zwischenablage schreiben kann ein Bot nicht, der Codeblock hat am Desktop
+    aber ein Kopier-Symbol.
+
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
     """
 
     def __init__(self, music_cog, ctx, song=None, *, heading="🎵", body=None,
-                 details=None, footer=None, up_next=None, thumbnail=None, accent=0x1db954):
+                 details=None, footer=None, up_next=None, thumbnail=None, accent=0x1db954, link=None):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
         self.song = song  # (url, title) des Songs zu dem diese View gehört
+        # Link für den 🔗-Button; ohne brauchbare URL gibt es den Button nicht.
+        self._link = link if isinstance(link, str) and link.startswith(("http://", "https://")) else None
         # custom_ids: eindeutig pro Nachricht (nonce) und pro Bot-Lauf (BOOT_ID).
         nonce = uuid.uuid4().hex[:8]
 
@@ -95,6 +103,7 @@ class MusicControlView(LayoutView):
         self.loop_toggle = make("loop", self._on_loop, label=t("button.loop"), style=S.secondary)
         # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
         self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
+        self.link = make("link", self._on_link, emoji="🔗", style=S.secondary) if self._link else None
 
         self._heading = TextDisplay(heading, id=NP_HEADING_ID)
         self._body = TextDisplay(body) if body else None
@@ -109,17 +118,25 @@ class MusicControlView(LayoutView):
         image = compact_card_image(thumbnail, song[0] if song else None)
         if image:
             container.add_item(MediaGallery(discord.MediaGalleryItem(image)))
+        link_placed = False
         if details:
             self._details = TextDisplay(self._details_text())
             # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
             # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
             if not image and isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
                 container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
+            elif self.link:
+                # 🔗 rechts neben den Details – wie das ❌ am Titel, die Karte wird nicht höher.
+                container.add_item(Section(self._details, accessory=self.link))
+                link_placed = True
             else:
                 container.add_item(self._details)
         container.add_item(ActionRow(
             self.back, self.pause, self.skip, self.autoplay_toggle, self.loop_toggle,
         ))
+        if self.link and not link_placed:
+            # Eine Section hat nur ein Accessory, und die Button-Zeile ist mit fünf voll.
+            container.add_item(ActionRow(self.link))
         self.add_item(container)
         self.sync_state()
 
@@ -297,6 +314,12 @@ class MusicControlView(LayoutView):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
         self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
         await self._push_state(interaction)   # stumm: der Button wird grün bzw. grau
+
+    async def _on_link(self, interaction: discord.Interaction):
+        """🔗: Song-Link nur für den Klickenden, als Codeblock zum Kopieren."""
+        # Backticks kodiert: ein Link kann den Codeblock so nicht vorzeitig beenden.
+        link = self._link.replace("`", "%60")
+        await interaction.response.send_message(f"```\n{link}\n```", ephemeral=True)
 
     async def _on_clear(self, interaction: discord.Interaction):
         """❌ oben rechts: dasselbe wie !clear."""

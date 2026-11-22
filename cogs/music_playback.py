@@ -452,6 +452,7 @@ class PlaybackMixin:
             footer=discord.utils.escape_markdown(uploader) if uploader else None,
             up_next=self._up_next_title(),
             thumbnail=info.get("thumbnail"),
+            link=page or url,   # 🔗-Button: derselbe Link wie am Kartentitel
         )
 
     def _schedule_background_work(self, ctx):

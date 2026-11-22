@@ -14,7 +14,8 @@ Die Karte ist ein Components-V2-Layout (`MusicControlView` als `LayoutView`, `vi
 - Section `[Titel als Markdown-Link aufs Video, Fortschrittsbalken]` → Accessory: grauer Button mit rotem ❌ (= `!clear`),
 - bei YouTube: MediaGallery mit dem Video-Thumbnail in 320×180 (`mqdefault`, `compact_card_image()`). Das Thumbnail-Accessory
   hat bei Discord eine feste, kleine Größe; ein einzelnes Galeriebild lässt sich nicht skalieren, die kleine Bildvariante hält die Karte kompakt,
-- TextDisplay `[Details, „Als Nächstes", Uploader]` (ohne YouTube-Bild: Section mit kleinem Thumbnail-Accessory),
+- TextDisplay `[Details, „Als Nächstes", Uploader]` (ohne YouTube-Bild: Section mit kleinem Thumbnail-Accessory; sonst bei Songs
+  Section mit grauem 🔗-Accessory, das den Song-Link zum Kopieren liefert),
 - ActionRow `[Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]`.
 
 Der Link-Text der Titelzeile darf **keine Emojis** enthalten: dann stellt Discord den Link nicht dar, sondern zeigt
@@ -33,4 +34,5 @@ Gilt für Song- und Radio-Karte. Alle Zustandsänderungen der Karte laufen über
 - **Stale-Fallback** ([ADR 0006](0006-stale-buttons-dynamicitem.md)): alte V2-Karten werden über die Titelzeile (`NP_HEADING_ID`) zur Textzeile zurückgebaut; Embed-Karten aus der Zeit davor weiterhin per `view=None`.
 - **Buttons ohne Decorator:** Die Buttons entstehen in `__init__` (`make()`), weil sie in Section und ActionRow verschachtelt sind. Dort sitzt auch zentral die `REQUIRE_SAME_VOICE`-Prüfung für jeden Button ([ADR 0004](0004-security-flags-default-altverhalten.md)).
 - **`!clear`/❌ teilen sich `_clear_all`**, das einen Snapshot für den Rückgängig-Button liefert (`UndoClearView` → `_restore_cleared`, 30 s).
+- **🔗 kopiert nicht selbst** (Stand 22.11.2026): Ein Bot kann nicht in die Zwischenablage schreiben. Der Button antwortet ephemer mit dem Link als Codeblock (Desktop: Kopier-Symbol), Backticks kodiert. Er nimmt denselben Link wie der Kartentitel (`webpage_url`, sonst die Queue-URL) und fehlt ohne http(s)-URL sowie auf der Radio-Karte. Platz: Accessory der Details — die Button-Zeile ist mit fünf voll; belegt das kleine Thumbnail das Accessory, bekommt er eine eigene ActionRow darunter.
 - Setzt discord.py ≥ 2.6 voraus (`LayoutView`).
