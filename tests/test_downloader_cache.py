@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from cogs.downloader import CACHE_TTL, METADATA_CACHE_FILE, Downloader, yt_video_id
+from cogs.downloader import CACHE_TTL, METADATA_CACHE_FILE, Downloader
+from utils.autoplay import yt_video_id
 
 
 def bare_downloader():

@@ -1,15 +1,18 @@
-"""yt_dlp-Instanzen, Metadaten-Cache und Download-Logik für den MusicBot."""
+"""Downloader des MusicBot: resolve_track und seine vier Phasen.
+
+Die übrigen Themen liegen in Mixins: yt_dlp-Instanzen (downloader_ydl),
+Metadaten-Cache (downloader_cache), Downloads-Cleanup (downloader_cleanup),
+Prefetch (downloader_prefetch), In-Flight-Registry und progressiver Download
+(downloader_progressive).
+"""
 
 import asyncio
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from config import DOWNLOADS_MAX_MB
-from utils.files import drain_pending_deletes, safe_unlink
+from utils.files import safe_unlink
 from utils.logger import logger
-from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
 # Konstanten leben beim progressiven Download; hier re-exportiert für
 # bestehende Importe (music.py, Tests).
 from cogs.downloader_progressive import (  # noqa: F401
@@ -17,16 +20,14 @@ from cogs.downloader_progressive import (  # noqa: F401
     PROGRESSIVE_POLL_INTERVAL, PROGRESSIVE_SIDECAR_SUFFIX, PROGRESSIVE_WAIT_TIMEOUT,
     STREAM_THRESHOLD_SECONDS, ProgressiveDownloadMixin,
 )
-# Nur gelesene Konstanten werden re-exportiert. Was Tests patchen
-# (YDL_COOKIES_FILE, YDL_BROWSER), steht ausschließlich im Zielmodul.
+# Nur gelesene Konstanten werden re-exportiert. Was Tests patchen (DOWNLOAD_DIR,
+# DOWNLOADS_MAX_MB, YDL_COOKIES_FILE, YDL_BROWSER), steht ausschließlich im Zielmodul.
 from cogs.downloader_cache import (  # noqa: F401
     CACHE_TTL, METADATA_CACHE_FILE, PERSISTED_CACHE_FIELDS, MetadataCacheMixin,
 )
-from cogs.downloader_ydl import DOWNLOAD_DIR, FAST_PLAYER_CLIENTS, YdlMixin  # noqa: F401
-
-# Dateinamen in downloads/ enden auf " [<Video-ID>]" (siehe outtmpl). Der
-# Titel-Stem-Schutz des Cleanups vergleicht den Teil davor mit den Queue-Titeln.
-_ID_SUFFIX = re.compile(r" \[[^\]]*\]$")
+from cogs.downloader_ydl import FAST_PLAYER_CLIENTS, YdlMixin  # noqa: F401
+from cogs.downloader_cleanup import DownloadsCleanupMixin
+from cogs.downloader_prefetch import PrefetchMixin
 
 
 @dataclass
@@ -47,7 +48,8 @@ class _Resolution:
         return self.info.get("duration", 0)
 
 
-class Downloader(MetadataCacheMixin, YdlMixin, ProgressiveDownloadMixin):
+class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMixin,
+                 ProgressiveDownloadMixin):
     """Verwaltet alle yt_dlp-Instanzen, den Metadaten-Cache und Download-Logik.
 
     Wird von MusicCommands als self.dl gehalten. Alle Methoden sind zustandslos
@@ -60,9 +62,6 @@ class Downloader(MetadataCacheMixin, YdlMixin, ProgressiveDownloadMixin):
     # gerade abspielt (None wenn die aktive Quelle ein HTTP-Stream ist). Für den
     # Downloads-Cleanup tabu – auch wenn current_track schon weitergewandert ist.
     last_resolved_file = None
-    # Callable ohne Argumente → (urls, titles) der Songs in Queue/current_track;
-    # wird von MusicCommands gesetzt. None = Cleanup traut sich nichts zu löschen.
-    protected_provider = None
     # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
     # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
     _progressive = None          # dict[url → asyncio.Task]: laufende progressive Downloads
@@ -73,11 +72,6 @@ class Downloader(MetadataCacheMixin, YdlMixin, ProgressiveDownloadMixin):
     # Jeder Pfad, der Bytes für eine URL auf die Platte schreibt (Queue-Prefetch,
     # Autoplay-Prefetch, progressiv, Download-Fallback), registriert sich hier.
     _inflight = None             # dict[url → (asyncio.Task, quelle)]
-    # Serialisiert die eigentlichen yt_dlp-Downloads der Prefetch-Tasks:
-    # yt_dlp ist nicht thread-safe, und ein adoptierter (vom Aufrufer
-    # gecancelter, aber weiterlaufender) Download darf nie parallel zu einem
-    # frisch gekickten laufen. Lazy angelegt (Tests via __new__).
-    _prefetch_dl_lock = None
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
@@ -98,122 +92,6 @@ class Downloader(MetadataCacheMixin, YdlMixin, ProgressiveDownloadMixin):
         self._load_cache()
         self._drop_cache_entries_without_id()
         self._init_ydl()
-
-    # ------------------------------------------------------------------
-    # Downloads-Cleanup (DOWNLOADS_MAX_MB, 0 = aus)
-    # ------------------------------------------------------------------
-
-    async def cleanup_downloads(self, extra_protected: Path | None = None):
-        """Hält downloads/ unter DOWNLOADS_MAX_MB; läuft nach jedem Download.
-
-        Tabu sind: Dateien zu Songs in Queue/current_track (protected_provider,
-        gesetzt von MusicCommands – doppelt abgesichert über prepare_filename
-        UND den Titel als Datei-Stem), last_resolved_file (die aktive
-        FFmpeg-Quelle) sowie extra_protected (z. B. der frisch geladene
-        Autoplay-Song, der noch nicht in der Queue hängt). Jeder Fehler wird
-        geschluckt: Cleanup darf niemals einen neuen Fehlerpfad einführen –
-        im Zweifel bleibt eine Datei liegen.
-        """
-        # Aufgeschobene Löschungen (Windows: Datei war beim unlink in Benutzung)
-        # zuerst nachholen – unabhängig vom DOWNLOADS_MAX_MB-Flag. Tabu bleiben
-        # die aktive FFmpeg-Quelle und wachsende progressive Dateien: ein Pfad
-        # aus der Pending-Liste könnte inzwischen neu heruntergeladen worden
-        # und wieder aktiv sein.
-        _drain_protect = set()
-        for tabu in (self.last_resolved_file, *(self._progressive_files or {}).values()):
-            if tabu is not None:
-                try:
-                    _drain_protect.add(Path(tabu).resolve())
-                except OSError:
-                    pass
-        try:
-            await asyncio.to_thread(drain_pending_deletes, _drain_protect)
-        except Exception:
-            pass  # Drain darf nie einen neuen Fehlerpfad einführen
-
-        if DOWNLOADS_MAX_MB <= 0:
-            return  # Flag nicht gesetzt → heutiges Verhalten, kein Cleanup
-        if self.protected_provider is None:
-            return  # ohne Queue-Info lieber gar nichts löschen
-        try:
-            urls, titles = self.protected_provider()
-        except Exception:
-            return
-        protected_paths = set()
-        for u in urls:
-            info = self._url_cache.get(u)
-            if not info:
-                continue
-            try:
-                protected_paths.add(Path(self.ydl.prepare_filename(info)).resolve())
-            except Exception:
-                continue
-        # Wachsende Dateien laufender progressiver Downloads (samt Sidecars):
-        # last_resolved_file reicht nicht – nach einem weiteren Skip zeigt es
-        # schon auf den neuen Track, während der alte noch fertiglädt.
-        _prog_files = list((self._progressive_files or {}).values())
-        for tabu in (self.last_resolved_file, extra_protected, *_prog_files):
-            if tabu is not None:
-                try:
-                    protected_paths.add(Path(tabu).resolve())
-                    protected_paths.add(self._sidecar_for(Path(tabu)).resolve())
-                except Exception:
-                    pass
-        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel> [<id>].<ext>"):
-        # greift auch, wenn der Cache-Eintrag eines Queue-Songs fehlt/abgelaufen ist.
-        protected_stems = {t for t in titles if t}
-        try:
-            await asyncio.to_thread(self._cleanup_downloads_sync, protected_paths, protected_stems)
-        except Exception as e:
-            logger.warning(f"[Cleanup] Fehlgeschlagen (ignoriert): {e}")
-
-    def _cleanup_downloads_sync(self, protected_paths: set, protected_stems: set):
-        """Löscht die ältesten Dateien (mtime), bis das Limit eingehalten ist.
-        Läuft im Worker-Thread (asyncio.to_thread)."""
-        limit = DOWNLOADS_MAX_MB * 1024 * 1024
-        files = []
-        for p in DOWNLOAD_DIR.iterdir():
-            try:
-                if p.is_file():
-                    st = p.stat()
-                    files.append((st.st_mtime, st.st_size, p))
-            except OSError:
-                continue
-        total = sum(size for _, size, _ in files)
-        if total <= limit:
-            return
-        for _, size, p in sorted(files, key=lambda item: item[0]):
-            if total <= limit:
-                break
-            # Stem mit und ohne " [<id>]"-Suffix prüfen: neue Dateien tragen
-            # die Video-ID, ältere heißen noch nur "<Titel>.<ext>".
-            if (p.resolve() in protected_paths or p.stem in protected_stems
-                    or _ID_SUFFIX.sub("", p.stem) in protected_stems):
-                continue
-            # defer=False: der Größen-Cleanup bewertet jeden Lauf frisch – eine
-            # aufgeschobene Löschung könnte eine Datei treffen, die bis zum
-            # Drain wieder in der Queue hängt. Gesperrte Datei → überspringen.
-            if not safe_unlink(p, defer=False):
-                continue
-            total -= size
-            logger.info(f"[Cleanup] Gelöscht ({size / (1024 * 1024):.1f} MB): {p.name}")
-
-    def _purge_stale_progressive(self):
-        """Startup-Aufräumen: .inprogress-Sidecars aus einem früheren Lauf
-        markieren unvollständige Dateien (harter Crash mitten im Download,
-        oder unlink scheiterte, weil FFmpeg noch las) → beide löschen."""
-        purged = 0
-        for sidecar in DOWNLOAD_DIR.glob(f"*{PROGRESSIVE_SIDECAR_SUFFIX}"):
-            media = sidecar.with_name(sidecar.name[: -len(PROGRESSIVE_SIDECAR_SUFFIX)])
-            if not safe_unlink(media):
-                continue  # blockiert → Sidecar liegen lassen, nächster Start versucht es erneut
-            if safe_unlink(sidecar):
-                purged += 1
-        # Aufgeschobene Löschungen aus diesem Prozess nachholen (beim echten
-        # Start leer; relevant, wenn der Purge erneut aufgerufen wird).
-        drain_pending_deletes()
-        if purged:
-            logger.info(f"[Progressiv] {purged} unvollständige Datei(en) aus früherem Lauf entfernt")
 
     # ------------------------------------------------------------------
     # Download-Logik
@@ -440,168 +318,3 @@ class Downloader(MetadataCacheMixin, YdlMixin, ProgressiveDownloadMixin):
 
         # Bewusst ohne erneutes last_resolved_file: das setzte schon Phase 1.
         return r.info, r.filename, r.title, r.duration
-
-    async def prefetch_next(self, queue, idx: int = 0):
-        """Lädt Song an Position idx der Queue still im Hintergrund herunter.
-
-        Der eigentliche Download läuft als eigener Task pro URL, der auch in
-        der In-Flight-Registry steht: resolve_track wartet damit nur auf die
-        konkret gebrauchte URL statt auf den Sammel-Task des Aufrufers, und
-        ein Cancel des Aufrufers (play_next, !clear, Queue-Umbau) killt den
-        Worker-Thread nicht mitten im Schreiben – der Download wird adoptiert,
-        läuft zu Ende und deregistriert sich erst dann selbst (ADR 0002).
-        """
-        if len(queue) <= idx:
-            return
-        url, title = queue[idx]  # Peek – nicht aus der Queue entfernen
-        if self.progressive_task_for(url) is not None:
-            # Läuft bereits progressiv → nie zwei Downloads auf dieselbe Datei
-            # (das .part-Rename des Prefetch liefe gegen die offene FFmpeg-Datei).
-            logger.info(f"[Prefetch] Übersprungen – läuft bereits progressiv: {title}")
-            return
-        worker = asyncio.create_task(self._prefetch_one(url, title))
-        if self._register_inflight(url, "Queue-Prefetch", title, task=worker) is not None:
-            # Anderer Pfad schreibt diese URL bereits – kein zweiter Writer.
-            # Der Worker hat noch keine Zeile ausgeführt → sauber abbrechen.
-            worker.cancel()
-            return
-        try:
-            await asyncio.shield(worker)
-        except asyncio.CancelledError:
-            if not worker.done():
-                logger.info(f"[Prefetch] Aufrufer abgebrochen – laufender Download wird adoptiert und läuft zu Ende: {title}")
-            raise
-        except Exception:
-            pass  # Fehler hat _prefetch_one bereits geloggt – Prefetch ist nie fatal
-
-    async def _prefetch_one(self, url: str, title: str):
-        """Der eigentliche Prefetch-Download einer URL (siehe prefetch_next).
-        Deregistriert sich erst im finally – solange der Worker-Thread
-        schreibt, meldet die Registry also einen lebenden Writer."""
-        try:
-            info = self._usable_cached_info(url)   # abgelaufen (CACHE_TTL) = Cache-Miss
-            if info is not None:
-                logger.info(f"[Prefetch] Metadaten aus Cache: {title}")
-            else:
-                info = await self._fetch_info(url)
-            if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
-                logger.info(f"[Prefetch] Übersprungen – {info.get('title', title)} wird gestreamt")
-                return
-            try:
-                filename = Path(self.ydl.prepare_filename(info))
-            except Exception:
-                # Kaputter/reduzierter Cache-Eintrag → verwerfen, frisch
-                # extrahieren (Cache-Miss-Pfad). Schlägt auch das fehl, fängt
-                # der äußere except unten – Prefetch-Fehler sind nie fatal.
-                self.invalidate(url)
-                info = await self._fetch_info(url)
-                if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
-                    return
-                filename = Path(self.ydl.prepare_filename(info))
-            if filename.exists() and self.is_incomplete(filename):
-                # Leiche eines gescheiterten progressiven Downloads → erst weg,
-                # sonst hält yt_dlp die Datei für fertig. Blockiert (FFmpeg liest
-                # noch) → diesen Prefetch auslassen.
-                if not safe_unlink(filename):
-                    return
-                safe_unlink(self._sidecar_for(filename))
-                self._incomplete_files.discard(filename.resolve())
-            if not filename.exists():
-                if self._prefetch_dl_lock is None:
-                    self._prefetch_dl_lock = asyncio.Lock()
-                # Lock statt Task-Reihenfolge: auch ein adoptierter Download
-                # (Aufrufer gecancelt, Worker läuft weiter) bleibt so garantiert
-                # der einzige aktive yt_dlp-Download (nicht thread-safe).
-                async with self._prefetch_dl_lock:
-                    if filename.exists():
-                        logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
-                        return
-                    logger.info(f"[Prefetch] Lade vor: {info.get('title', title)}")
-                    await asyncio.to_thread(self.ydl.download, [info.get("webpage_url") or url])
-                logger.info(f"[Prefetch] Fertig: {filename.name}")
-                await self.cleanup_downloads()
-            else:
-                logger.info(f"[Prefetch] Bereits im Cache: {filename.name}")
-        except asyncio.TimeoutError:
-            logger.warning(f"[Prefetch] Timeout für: {title}")
-        except Exception as e:
-            # Prefetch-Fehler sind nicht fatal – resolve_track lädt im Zweifelsfall selbst.
-            logger.warning(f"[Prefetch] Vorladen fehlgeschlagen für: {title}: {e}")
-        finally:
-            self._inflight_done(url, asyncio.current_task())
-
-    async def prefetch_autoplay(self, ref_url, ref_title, recently_played, recently_played_titles=()):
-        """Sucht + lädt nächsten Autoplay-Song im Hintergrund.
-
-        Returns: (url, title) bei Erfolg, None bei Fehler/kein Ergebnis.
-        Der Caller entscheidet ob der Song in die Queue kommt (autoplay_enabled-Check).
-        """
-        yt_id = yt_video_id(ref_url)
-
-        fetch_url = (
-            f"https://www.youtube.com/watch?v={yt_id}&list=RD{yt_id}"
-            if yt_id
-            else (f"ytsearch5:{ref_title}" if ref_title else "ytsearch5:top music")
-        )
-        logger.info(f"[Autoplay Prefetch] Starte Hintergrundsuche für: {ref_title!r}")
-
-        try:
-            info = await self.extract_info_async(fetch_url, "autoplay")
-            entries = (info.get("entries") or []) if info else []
-
-            candidates = select_autoplay_candidates(
-                entries, ref_url, recently_played, recently_played_titles, ref_title=ref_title
-            )
-            if not candidates:
-                logger.warning("[Autoplay Prefetch] Keine nutzbaren Einträge")
-                return None
-
-            chosen = choose_autoplay_candidate(candidates)
-            url = entry_url(chosen)
-            title = chosen.get("title", "Unbekannt")
-
-            logger.info(f"[Autoplay Prefetch] Lade vor: {title}")
-            existing = self._register_inflight(url, "Autoplay-Prefetch", title)
-            if existing is not None:
-                # Anderer Pfad schreibt diese URL bereits – dessen Ende abwarten
-                # statt parallel zu laden; der Song wird trotzdem eingereiht.
-                try:
-                    await asyncio.wait_for(asyncio.shield(existing[0]), timeout=120.0)
-                except Exception:
-                    pass
-                return url, title
-            try:
-                # extract_info(download=True) lädt die Datei herunter UND gibt das volle
-                # Info-Dict zurück (inkl. ext, webpage_url). Das flache Entry aus autoplay_ydl
-                # hat diese Felder nicht – prepare_filename() und info["webpage_url"] in
-                # resolve_track() würden sonst fehlschlagen.
-                full_info = await asyncio.wait_for(
-                    asyncio.to_thread(self.ydl.extract_info, url, download=True),
-                    timeout=120.0,
-                )
-                if full_info:
-                    if "entries" in full_info:
-                        full_info = full_info["entries"][0]
-                    self._url_cache[url] = full_info
-                    self._cache_timestamps[url] = time.time()
-                    self._cache_dirty = True
-                logger.info(f"[Autoplay Prefetch] Fertig: {title}")
-                # Der frisch geladene Song hängt noch nicht in der Queue (macht der
-                # Caller) → seine Datei explizit vor dem Cleanup schützen.
-                just_downloaded = None
-                if full_info:
-                    try:
-                        just_downloaded = Path(self.ydl.prepare_filename(full_info))
-                    except Exception:
-                        pass
-                await self.cleanup_downloads(extra_protected=just_downloaded)
-            finally:
-                self._inflight_done(url, asyncio.current_task())
-            return url, title
-
-        except asyncio.TimeoutError:
-            logger.warning("[Autoplay Prefetch] Timeout – play_next fällt auf normales autoplay() zurück")
-            return None
-        except Exception as e:
-            logger.warning(f"[Autoplay Prefetch] Fehler: {e}")
-            return None

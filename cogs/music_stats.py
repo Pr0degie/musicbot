@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 
 from utils.i18n import t
-from cogs.downloader import DOWNLOAD_DIR
+from cogs.downloader_ydl import DOWNLOAD_DIR
 
 
 class StatsMixin:

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import cogs.downloader as dlmod
+import cogs.downloader_cleanup as cleanup_mod
 import utils.files as files_mod
 from cogs.downloader import (
     PROGRESSIVE_MIN_BYTES, PROGRESSIVE_SIDECAR_SUFFIX, Downloader,
@@ -107,7 +108,7 @@ def short_info(**extra):
 # ---------------------------------------------------------------------------
 
 def test_missing_webm_starts_progressive_and_returns_growing_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     writer = WriterYdl(target, write_bytes=PROGRESSIVE_MIN_BYTES + 1024, linger=0.3)
     dl = make_dl(short_info(), target, writer)
@@ -125,7 +126,7 @@ def test_missing_webm_starts_progressive_and_returns_growing_file(tmp_path, monk
 
 def test_short_download_finishes_before_threshold(tmp_path, monkeypatch):
     """Datei kleiner als der Startpuffer → fertiger Task zählt als 'genug'."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "mini.webm"
     dl = make_dl(short_info(), target, WriterYdl(target, write_bytes=10 * 1024))
 
@@ -136,7 +137,7 @@ def test_short_download_finishes_before_threshold(tmp_path, monkeypatch):
 
 
 def test_failed_download_cleans_up_blocks_and_streams(tmp_path, monkeypatch):
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "kaputt.webm"
     dl = make_dl(short_info(), target,
                  WriterYdl(target, write_bytes=None, partial_before_fail=10 * 1024))
@@ -153,7 +154,7 @@ def test_failed_download_cleans_up_blocks_and_streams(tmp_path, monkeypatch):
 def test_buffer_timeout_falls_back_to_stream_without_cancel(tmp_path, monkeypatch):
     """Download schreibt zu langsam → Stream-Fallback; der Task läuft weiter
     (Datei darf im Hintergrund fertig werden und wird Cache)."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     monkeypatch.setattr("cogs.downloader_progressive.PROGRESSIVE_WAIT_TIMEOUT", 0.2)
     target = tmp_path / "zaeh.webm"
     dl = make_dl(short_info(), target,
@@ -200,7 +201,7 @@ class InfoYdl:
 def test_full_info_uses_fast_start_without_second_extraction(tmp_path, monkeypatch):
     """Volles Info-Dict (mit formats) → Download startet direkt über
     process_ie_result, ohne zweite Extraktion (JS-Challenge = 5–10 s Latenz)."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     ydl = InfoYdl(target)
     dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
@@ -215,7 +216,7 @@ def test_full_info_uses_fast_start_without_second_extraction(tmp_path, monkeypat
 def test_fast_start_failure_falls_back_to_fresh_extract(tmp_path, monkeypatch):
     """Abgelaufene CDN-URL im Schnellstart → Teil-Datei weg, einmal frisch
     extrahieren (download über webpage_url) – kein User-sichtbarer Fehler."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     ydl = InfoYdl(target, fail_fast=True)
     dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
@@ -234,7 +235,7 @@ def test_fast_start_failure_with_blocked_unlink_aborts_and_blocks(tmp_path, monk
     offen → unlink schlägt fehl. Dann darf KEIN zweiter Download an dieselbe
     Datei anhängen (yt_dlp continuedl → korrupter Mischling); stattdessen wird
     die URL geblockt und der Stream-Fallback übernimmt."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "blockiert.webm"
     ydl = InfoYdl(target, fail_fast=True)
     dl = make_dl(short_info(formats=[{"format_id": "251"}]), target, ydl)
@@ -255,7 +256,7 @@ def test_fast_start_failure_with_blocked_unlink_aborts_and_blocks(tmp_path, monk
 def test_reduced_cache_entry_skips_fast_start(tmp_path, monkeypatch):
     """Reduzierter Eintrag aus metadata_cache.json (keine formats) → direkt
     frische Extraktion, process_ie_result wird nie versucht."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     ydl = InfoYdl(target)
     dl = make_dl(short_info(), target, ydl)
@@ -301,7 +302,7 @@ def test_blocked_url_keeps_stream_path(tmp_path):
 
 
 def test_block_expires_after_ttl(tmp_path, monkeypatch):
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     dl = make_dl(short_info(), target,
                  WriterYdl(target, write_bytes=10 * 1024))
@@ -342,7 +343,7 @@ def test_resolve_joins_running_progressive_task(tmp_path):
 def test_incomplete_leftover_is_deleted_and_redownloaded(tmp_path, monkeypatch):
     """Leiche eines gescheiterten Laufs (Datei existiert, gilt als unvollständig)
     → wird gelöscht und frisch progressiv geladen, nie als Cache missdeutet."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "song.webm"
     target.write_bytes(b"\0" * 512)
     dl = make_dl(short_info(), target,
@@ -359,7 +360,7 @@ def test_incomplete_leftover_is_deleted_and_redownloaded(tmp_path, monkeypatch):
 def test_unlink_failure_keeps_incomplete_marker(tmp_path, monkeypatch):
     """Kann die Teil-Datei nach einem Fehlschlag nicht gelöscht werden (FFmpeg
     liest noch), bleibt sie als unvollständig markiert + Sidecar liegen."""
-    monkeypatch.setattr(dlmod, "DOWNLOADS_MAX_MB", 0)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOADS_MAX_MB", 0)
     target = tmp_path / "blockiert.webm"
     dl = make_dl(short_info(), target)
     dl._make_progressive_ydl = lambda: WriterYdl(target, write_bytes=None, partial_before_fail=512)
@@ -376,7 +377,7 @@ def test_unlink_failure_keeps_incomplete_marker(tmp_path, monkeypatch):
 
 
 def test_purge_stale_progressive_removes_leftovers(tmp_path, monkeypatch):
-    monkeypatch.setattr(dlmod, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(cleanup_mod, "DOWNLOAD_DIR", tmp_path)
     media = tmp_path / "alt.webm"
     media.write_bytes(b"\0" * 512)
     sidecar = tmp_path / ("alt.webm" + PROGRESSIVE_SIDECAR_SUFFIX)

@@ -10,7 +10,7 @@ import asyncio
 import os
 import time
 
-import cogs.downloader as dlmod
+import cogs.downloader_cleanup as dlmod
 from cogs.downloader import Downloader
 from cogs.music import MusicCommands
 from conftest import build_cog

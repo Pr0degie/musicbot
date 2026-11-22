@@ -13,7 +13,7 @@ asyncio-Tasks und gemockten ydl-Instanzen, Callcounts als Doppel-Nachweis):
 import asyncio
 from pathlib import Path
 
-import cogs.downloader as dlmod
+import cogs.downloader_cleanup as dlmod
 from cogs.downloader import PROGRESSIVE_MIN_BYTES, Downloader
 
 URL = "https://www.youtube.com/watch?v=aaaaaaaaaaa"

@@ -44,11 +44,15 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
     `!radio`), `RADIO_STATIONS_FILE`
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`
-- **`cogs/downloader.py`** — `Downloader` (`self.dl`), zusammengesetzt aus den Mixins darunter. Selbst enthält die
-  Datei `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()` und den Downloads-Cleanup. `resolve_track()`
-  läuft in vier Phasen: `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`. Re-exportiert
-  nur gelesene Konstanten (`CACHE_TTL`, `METADATA_CACHE_FILE`, `PERSISTED_CACHE_FIELDS`, `FAST_PLAYER_CLIENTS`,
-  `PROGRESSIVE_*`); was Tests patchen, steht ausschließlich im Zielmodul.
+- **`cogs/downloader.py`** — `Downloader` (`self.dl`), zusammengesetzt aus den fünf Mixins darunter. Selbst enthält
+  die Datei nur noch `resolve_track()` mit seinen vier Phasen: `_resolve_metadata` → `_adopt_inflight` →
+  `_clear_corpse` → `_acquire_file`. Re-exportiert nur gelesene Konstanten (`CACHE_TTL`, `METADATA_CACHE_FILE`,
+  `PERSISTED_CACHE_FIELDS`, `FAST_PLAYER_CLIENTS`, `PROGRESSIVE_*`); was Tests patchen (`DOWNLOAD_DIR`,
+  `DOWNLOADS_MAX_MB`, `YDL_COOKIES_FILE`, `YDL_BROWSER`), steht ausschließlich im Zielmodul.
+- **`cogs/downloader_prefetch.py`** — `PrefetchMixin`: `prefetch_next()` (eigener Task je URL, Shield),
+  `_prefetch_one` (Lock für sequenzielle yt_dlp-Downloads), `prefetch_autoplay()`.
+- **`cogs/downloader_cleanup.py`** — `DownloadsCleanupMixin`: `cleanup_downloads()` (`DOWNLOADS_MAX_MB`,
+  Schutz über `protected_provider`), `_purge_stale_progressive` (Sidecar-Reste beim Start).
 - **`cogs/downloader_ydl.py`** — `YdlMixin`: five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
   `playlist_ydl`, `autoplay_ydl` — gebaut von `_build_ydl(kind)`, aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
   `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md); cookielos nur YouTube-Client `visionos`
@@ -61,7 +65,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   `_inflight` („pro URL maximal ein schreibender Download" → [ADR 0002](adr/0002-inflight-registry.md)),
   progressiver Download (`_start_progressive`, `_run_progressive`, `_wait_for_buffer`, `prime_first_hit`) und
   die Konstanten `STREAM_THRESHOLD_SECONDS`/`PROGRESSIVE_*` (von `downloader.py` re-exportiert). Zustand in
-  `Downloader.__init__`; `_purge_stale_progressive` bleibt im Downloader (braucht `DOWNLOAD_DIR`).
+  `Downloader.__init__`; `_purge_stale_progressive` liegt in `downloader_cleanup.py` (braucht `DOWNLOAD_DIR`).
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET`
   in `config.py`) so a separate DM-Bot (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
   empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for

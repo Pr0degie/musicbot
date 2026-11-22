@@ -4,8 +4,8 @@ Der Teil mit den heikelsten Invarianten (ADR 0001, ADR 0002): pro URL
 maximal ein schreibender Download, lebendig vs. Leiche entscheidet allein die
 Registry, eine wachsende Datei wird nie unlinkt oder neu gestartet. Der
 Zustand (_inflight, _progressive, _progressive_blocked, _incomplete_files …)
-wird in Downloader.__init__ angelegt; _purge_stale_progressive bleibt dort,
-weil es DOWNLOAD_DIR braucht.
+wird in Downloader.__init__ angelegt; _purge_stale_progressive liegt beim
+Downloads-Cleanup (downloader_cleanup), weil es DOWNLOAD_DIR braucht.
 """
 import asyncio
 import copy

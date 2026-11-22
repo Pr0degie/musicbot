@@ -13,7 +13,7 @@ import os
 import time
 from pathlib import Path
 
-import cogs.downloader as dlmod
+import cogs.downloader_cleanup as dlmod
 from cogs.downloader import Downloader, PERSISTED_CACHE_FIELDS
 
 URL_A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
