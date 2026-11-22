@@ -239,6 +239,30 @@ class Downloader(ProgressiveDownloadMixin):
         self._url_cache.pop(url, None)
         self._cache_timestamps.pop(url, None)
 
+    def _usable_cached_info(self, url: str):
+        """Cache-Eintrag für url, sofern er noch verwendbar ist – sonst None
+        (der Aufrufer behandelt das als Cache-Miss und extrahiert frisch).
+
+        Verwendbar heißt: innerhalb von CACHE_TTL (danach sind die CDN-URLs im
+        Eintrag abgelaufen) – oder abgelaufen, aber die lokale Datei liegt schon
+        vollständig vor: dann braucht niemand mehr eine CDN-URL, die Datei
+        spielt ohne neue Extraktion. Einträge ohne Timestamp gelten wie beim
+        Speichern (_serialize_cache) als frisch."""
+        info = self._url_cache.get(url)
+        if info is None:
+            return None
+        ts = self._cache_timestamps.get(url)
+        if ts is None or time.time() - ts < CACHE_TTL:
+            return info
+        if (info.get("duration") or 0) <= STREAM_THRESHOLD_SECONDS:
+            try:
+                filename = Path(self.ydl.prepare_filename(info))
+                if filename.exists() and not self.is_incomplete(filename):
+                    return info
+            except Exception:
+                pass   # unbrauchbarer Eintrag → wie abgelaufen behandeln
+        return None
+
     def _load_cache(self):
         """Lädt persistierten Metadaten-Cache vom letzten Bot-Lauf (TTL: 2h).
 
@@ -740,8 +764,10 @@ class Downloader(ProgressiveDownloadMixin):
         """Phase 1: Metadaten (Cache, laufender Prefetch-Resolve oder frisch)
         und Zieldatei. filename bleibt None für Tracks über
         STREAM_THRESHOLD_SECONDS."""
-        if url in self._url_cache:
-            info = self._url_cache[url]
+        # Abgelaufene Einträge (CACHE_TTL) zählen als Cache-Miss, siehe
+        # _usable_cached_info.
+        info = self._usable_cached_info(url)
+        if info is not None:
             logger.info(f"[Resolve] Metadaten aus Cache: {title}")
         else:
             if url in self._pending_resolves:
@@ -750,10 +776,12 @@ class Downloader(ProgressiveDownloadMixin):
                     await self._pending_resolves[url]
                 except Exception:
                     pass
-            if url in self._url_cache:
-                info = self._url_cache[url]
+            info = self._usable_cached_info(url)
+            if info is not None:
                 logger.info(f"[Resolve] Metadaten aus Prefetch-Task: {title}")
             else:
+                if url in self._url_cache:
+                    logger.info(f"[Resolve] Cache-Eintrag abgelaufen – extrahiere frisch: {title}")
                 info = await self._fetch_info(url)
 
         r = _Resolution(url, info)
@@ -948,8 +976,8 @@ class Downloader(ProgressiveDownloadMixin):
         Deregistriert sich erst im finally – solange der Worker-Thread
         schreibt, meldet die Registry also einen lebenden Writer."""
         try:
-            if url in self._url_cache:
-                info = self._url_cache[url]
+            info = self._usable_cached_info(url)   # abgelaufen (CACHE_TTL) = Cache-Miss
+            if info is not None:
                 logger.info(f"[Prefetch] Metadaten aus Cache: {title}")
             else:
                 info = await self._fetch_info(url)
