@@ -63,7 +63,7 @@ python tools/multi_bots.py status         # in einem zweiten Terminal: wer spiel
 | | Hauptbot | Instanz N |
 |---|---|---|
 | Arbeitsordner | Repo | `multi_bots/botN/` |
-| `bot.log`, `downloads/`, Playlists, Statistik | Repo | im Instanz-Ordner |
+| `logs/`, `data/` (Downloads, Playlists, Statistik) | Repo | im Instanz-Ordner |
 | Terminal-Ausgabe | Konsole | `multi_bots/botN/console.log` |
 | DM-Bridge / `/debug` | `DM_BRIDGE_PORT` (8765) | 8765 + N, immer nur localhost |
 | Sprachsteuerung | laut `.env` | aus |
@@ -71,7 +71,7 @@ python tools/multi_bots.py status         # in einem zweiten Terminal: wer spiel
 
 Die Fehlersuche funktioniert wie gewohnt, nur mit dem Pfad der Instanz:
 `curl http://127.0.0.1:8767/debug` (bot2) bzw.
-`python tools/logsummary.py multi_bots/bot2/bot.log`.
+`python tools/logsummary.py multi_bots/bot2/logs/bot.log`.
 
 ## Grenzen
 

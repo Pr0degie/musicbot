@@ -158,7 +158,7 @@ def test_alle_json_dateien_laufen_ueber_os_replace(tmp_path, monkeypatch):
     assert ersetzt.count("mix.json") == 1
     assert ersetzt.count("radio_stations.json") == 1
     assert ersetzt.count("last_queue.json") == 1
-    for name in ("play_counts.json", "metadata_cache.json", "radio_stations.json", "last_queue.json"):
+    for name in ("play_counts.json", "data/metadata_cache.json", "radio_stations.json", "data/last_queue.json"):
         json.loads((tmp_path / name).read_text(encoding="utf-8"))
     assert json.loads((tmp_path / "playlists" / "mix.json").read_text(encoding="utf-8")) == [["u", "A"]]
 

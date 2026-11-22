@@ -130,7 +130,7 @@ def test_last_queue_json_snapshot_excludes_loop_requeue(monkeypatch, tmp_path):
         vc.end_track()
         await asyncio.sleep(0)
 
-        data = json.loads(Path("last_queue.json").read_text(encoding="utf-8"))
+        data = json.loads(Path("data/last_queue.json").read_text(encoding="utf-8"))
         assert data == [[URL_B, "Song B"]]          # Song A (Loop) fehlt
         assert list(mc.queue)[0] == (URL_A, "Song A")  # liegt aber in der Queue
         cleanup_cog(mc)

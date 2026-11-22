@@ -15,3 +15,4 @@ Rückwirkend angelegt am 2026-07-12 (Datierung aus dem git log der zugehörigen 
 - [0011](0011-sprachsteuerung-ein-parser-zwei-eingaenge.md) — Sprachsteuerung: ein Parser, zwei Eingänge (kein LLM)
 - [0012](0012-now-playing-karte-components-v2.md) — Now-Playing-Karte als Components-V2-Layout (❌ oben rechts)
 - [0013](0013-schneller-youtube-client-visionos.md) — Schneller YouTube-Client `visionos` statt TV-Client (keine Sperrfrist)
+- [0014](0014-laufzeitdaten-data-und-logs.md) — Laufzeitdaten in `data/` und `logs/`, relativ zum Arbeitsverzeichnis

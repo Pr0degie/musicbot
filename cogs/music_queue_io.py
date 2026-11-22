@@ -16,9 +16,12 @@ from discord.ext import commands
 from utils.files import atomic_write_text
 from utils.i18n import t
 from utils.logger import logger
+from utils.paths import DATA_DIR
 
-PLAYLISTS_DIR = Path("playlists")
+PLAYLISTS_DIR = DATA_DIR / "playlists"
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+# Session-Queue: nach jedem Track-Ende automatisch gesichert, !loadq last lädt sie.
+LAST_QUEUE_FILE = DATA_DIR / "last_queue.json"
 
 # Serialisiert die last_queue.json-Writes der Player-Threads (_write_last_queue).
 _LAST_QUEUE_LOCK = threading.Lock()
@@ -76,10 +79,10 @@ class QueuePersistenceMixin:
         safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
         if safe_name.lower() == "last":
             # Sondername: die nach jedem Track automatisch gesicherte
-            # Session-Queue (last_queue.json im Arbeitsverzeichnis). Bewusst
+            # Session-Queue (data/last_queue.json). Bewusst
             # KEIN Auto-Restore beim Start – der Bot startet leer, das hier
             # ist der explizite Weg zurück zur letzten Session.
-            path = Path("last_queue.json")
+            path = LAST_QUEUE_FILE
             safe_name = "last"
         else:
             path = PLAYLISTS_DIR / f"{safe_name}.json"
@@ -141,7 +144,7 @@ class QueuePersistenceMixin:
             if seq < self._last_queue_written:
                 return
             try:
-                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
+                atomic_write_text(LAST_QUEUE_FILE, json.dumps(queue_data, ensure_ascii=False, indent=2))
                 self._last_queue_written = seq
                 logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
             except Exception as e:

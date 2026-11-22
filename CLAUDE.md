@@ -7,7 +7,7 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 ## Fehlersuche — zuerst das, nicht bot.log greppen
 
 1. `curl http://127.0.0.1:8765/debug` — Live-Zustand (Voice-Client lebt? `poller_dead`, Gateway-Stille, Track, Queue).
-2. `python tools/logsummary.py` — letzter Lauf als Zeitleiste; `bot.log.1` = vorheriger Lauf, `--list` alle.
+2. `python tools/logsummary.py` — letzter Lauf als Zeitleiste; `logs/bot.log.1` = vorheriger Lauf, `--list` alle.
 3. Hänger: `py-spy dump --pid <pid>`. Details → [logging.md](docs/architecture/logging.md) → *Fehlersuche*.
 
 ## Invarianten — niemals brechen
@@ -38,6 +38,8 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 - yt_dlp nicht thread-safe: jeder Download über `self.ydl` (Queue-/Autoplay-Prefetch, Download-Fallback) läuft unter `dl._download_lock()` → [playback.md](docs/architecture/playback.md).
 - yt_dlp cookielos zuerst; Extraktion nur über `dl.extract_info_async(query, kind)` → [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md);
   Instanzen nur über `_build_ydl()` (setzt den schnellen Client `visionos`) → [ADR 0013](docs/adr/0013-schneller-youtube-client-visionos.md).
+- Laufzeitdaten nur unter `utils/paths.DATA_DIR`/`LOG_DIR` (`data/`, `logs/`), relativ zum Arbeitsverzeichnis, nie zu
+  `__file__` (`tools/multi_bots.py` trennt Instanzen über das cwd); `radio_stations.json` bleibt im Root → [ADR 0014](docs/adr/0014-laufzeitdaten-data-und-logs.md).
 - Zieldatei eines Tracks nur über `dl._target_path(info)`, nie direkt `prepare_filename` (im mp3-Modus heißt die Datei `<name>.mp3`).
 
 ## Landkarte

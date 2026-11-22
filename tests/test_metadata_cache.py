@@ -94,7 +94,8 @@ def test_reduced_file_is_much_smaller_than_full(tmp_path, monkeypatch):
 def test_old_full_format_file_still_loads(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     old = {URL: {**full_info(), "_ts": time.time()}}
-    Path("metadata_cache.json").write_text(json.dumps(old, ensure_ascii=False), encoding="utf-8")
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text(json.dumps(old, ensure_ascii=False), encoding="utf-8")
 
     dl = make_bare_dl()
     dl._load_cache()
@@ -105,7 +106,8 @@ def test_old_full_format_file_still_loads(tmp_path, monkeypatch):
 
 def test_corrupt_cache_file_is_discarded_without_crash(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    Path("metadata_cache.json").write_text("{kaputt", encoding="utf-8")
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text("{kaputt", encoding="utf-8")
 
     dl = make_bare_dl()
     dl._load_cache()  # darf nicht raisen
@@ -116,7 +118,8 @@ def test_corrupt_cache_file_is_discarded_without_crash(tmp_path, monkeypatch):
 def test_non_dict_entries_are_skipped(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     data = {URL: {"title": "Ok", "ext": "webm", "_ts": time.time()}, "https://x": "kein-dict"}
-    Path("metadata_cache.json").write_text(json.dumps(data), encoding="utf-8")
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text(json.dumps(data), encoding="utf-8")
 
     dl = make_bare_dl()
     dl._load_cache()

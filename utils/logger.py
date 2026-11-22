@@ -4,6 +4,7 @@ import re
 import sys
 
 from config import LOG_MODE
+from utils.paths import LOG_DIR
 
 # ---------------------------------------------------------------------------
 # Kategorie-Erkennung: Präfix [Foo] am Anfang der Message → eigene Farbe
@@ -126,8 +127,9 @@ _console.setFormatter(_ColorFormatter())
 # MUSICBOT_LOG_FILE: nur für die Testsuite (tests/conftest.py) – sonst landen
 # Testsongs, Fake-Channels und simulierte Fehler im echten bot.log und
 # verfälschen jede spätere Fehlersuche.
-LOG_FILE = os.environ.get("MUSICBOT_LOG_FILE", "bot.log")
+LOG_FILE = os.environ.get("MUSICBOT_LOG_FILE") or str(LOG_DIR / "bot.log")
 LOG_KEEP_RUNS = 10
+os.makedirs(os.path.dirname(os.path.abspath(LOG_FILE)), exist_ok=True)
 
 
 def rotate_on_start(path: str, keep: int) -> None:

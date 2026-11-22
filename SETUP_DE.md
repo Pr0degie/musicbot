@@ -226,15 +226,15 @@ das Recht **Audit-Log anzeigen**; ohne geht er immer zurück und du nutzt `!j` b
 
 ## 7. Logs & Fehlersuche
 
-- `bot.log` enthält immer die volle Diagnose, unabhängig von `LOG_MODE`/`!debug`.
-  Es rotiert bei jedem Start: der aktuelle Lauf steht in `bot.log`, die zehn
-  vorherigen bleiben als `bot.log.1` (vorheriger) … `bot.log.10` erhalten.
+- `logs/bot.log` enthält immer die volle Diagnose, unabhängig von `LOG_MODE`/`!debug`.
+  Es rotiert bei jedem Start: der aktuelle Lauf steht in `logs/bot.log`, die zehn
+  vorherigen bleiben als `logs/bot.log.1` (vorheriger) … `logs/bot.log.10` erhalten.
   Startfehler landen ebenfalls dort, weil sich das `start.bat`-Fenster sofort
   schließt.
 - `python tools/logsummary.py` verdichtet den letzten Lauf zu einer Zeitleiste
   (Warnungen, Fehler, Voice-/Gateway-Ereignisse, Befehle, Songs). `--list` zeigt
   alle Läufe einer Datei, `-n 30` nur die letzten 30 Ereignisse,
-  `python tools/logsummary.py bot.log.1` den vorherigen Lauf.
+  `python tools/logsummary.py logs/bot.log.1` den vorherigen Lauf.
 - Solange der Bot läuft, liefert `GET /debug` an der DM-Bridge (Standard
   `http://127.0.0.1:8765/debug`) einen Zustands-Schnappschuss als JSON — es
   antwortet nur auf Anfragen von derselben Maschine.

@@ -19,7 +19,7 @@ merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Or
    `_on_track_end` läuft in fester Reihenfolge: `_log_early_death` → `_resume_growing_file` →
    `_retry_dead_stream` → `_clear_markers_after_clean_end` → `_snapshot_queue` → `_requeue_for_loop` →
    `_start_next`.
-2. `last_queue.json` written after each track (`_write_last_queue` in `cogs/music_queue_io.py`, im
+2. `data/last_queue.json` written after each track (`_write_last_queue` in `cogs/music_queue_io.py`, im
    Player-Thread) — intentionally not reloaded on startup.
 3. Queue empty → `play_next` delegiert an `_handle_queue_empty`: sets `is_playing = False`, saves
    `current_track` → `last_played`, clears `current_track`, triggers autoplay if enabled. Bot stays in voice
@@ -64,7 +64,7 @@ downloads next autoplay song while current plays.
 `webpage_url`) so `prepare_filename()` works. `autoplay_ydl` yields shallow playlist entries;
 `prefetch_autoplay()` upgrades via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries
 still in queue/`current_track`; `clear()` wipes entirely (`clear_cache()`: Einträge, Timestamps und per
-Dirty-Flag beim nächsten Flush auch die Datei). Persisted to `metadata_cache.json` — survives bot
+Dirty-Flag beim nächsten Flush auch die Datei). Persisted to `data/metadata_cache.json` — survives bot
 restarts; persistiert wird ein reduzierter Feldsatz → [ADR 0005](../adr/0005-persistenz-debouncing.md).
 
 **Player-Uhr ab dem ersten Paket:** discord.py startet die Uhr des `AudioPlayer`, bevor FFmpeg etwas liefert. Braucht
@@ -148,7 +148,7 @@ Pending-Delete-Liste, `.inprogress`-Sidecar) und die `!restart`-Mechanik → [AD
 0003](../adr/0003-windows-native-zielplattform.md).
 
 - **`DOWNLOADS_MAX_MB`** (`.env`, Default 0 = aus = heutiges Verhalten): nach jedem Download löscht
-  `dl.cleanup_downloads()` (to_thread) die ältesten Dateien (mtime) aus `downloads/`, bis das Limit passt.
+  `dl.cleanup_downloads()` (to_thread) die ältesten Dateien (mtime) aus `data/downloads/`, bis das Limit passt.
   Tabu: Songs in Queue/`current_track` (`protected_provider` aus `music.py`; Schutz über
   Cache→`prepare_filename` **und** Titel-Stem), `dl.last_resolved_file` (aktive FFmpeg-Quelle, aus dem letzten
   `resolve_track`-Ergebnis) und der frisch geladene Autoplay-Song (`extra_protected`). Fehler werden

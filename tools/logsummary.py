@@ -1,7 +1,7 @@
 """Verdichtet bot.log auf eine Zeitleiste der wichtigen Ereignisse.
 
-    python tools/logsummary.py                 # letzter Bot-Lauf in bot.log
-    python tools/logsummary.py bot.log.1       # vorheriger Lauf (Rotation beim Start)
+    python tools/logsummary.py                 # letzter Bot-Lauf in logs/bot.log
+    python tools/logsummary.py logs/bot.log.1  # vorheriger Lauf (Rotation beim Start)
     python tools/logsummary.py --list          # alle Läufe einer Datei im Überblick
     python tools/logsummary.py --session -2    # vorletzter Lauf derselben Datei
     python tools/logsummary.py -n 30           # nur die letzten 30 Ereignisse
@@ -130,7 +130,7 @@ def _fmt(ev):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("file", nargs="?", default="bot.log")
+    ap.add_argument("file", nargs="?", default="logs/bot.log")
     ap.add_argument("--session", type=int, default=-1, help="Index des Laufs (-1 = letzter)")
     ap.add_argument("--list", action="store_true", help="nur die Läufe auflisten")
     ap.add_argument("-n", type=int, default=80, help="max. Ereignisse (die letzten)")

@@ -9,3 +9,13 @@ line-length = 140
 select = ["E", "F", "W"]
 # E731 (Lambda-Zuweisung): rein stilistisch, der Bestand nutzt bewusst kurze Lambdas.
 ignore = ["E731"]
+
+[tool.ruff.lint.per-file-ignores]
+# main.py zieht vor den übrigen Imports die Laufzeitdaten um (utils/paths.py).
+"main.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# Repo-Root auf sys.path: Tests importieren utils.*, cogs.* und tests.conftest.
+pythonpath = ["."]

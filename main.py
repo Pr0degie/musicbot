@@ -1,3 +1,9 @@
+from utils.paths import migrate_legacy_layout
+
+# Vor allen weiteren Imports: utils.logger rotiert beim Import das Log, die
+# Cogs legen beim Import data/downloads und data/playlists an. Zieht einmalig
+# um, was aus der Zeit vor data/ und logs/ noch im Arbeitsverzeichnis liegt.
+_migrated, _left_behind = migrate_legacy_layout()
 
 import discord
 from cogs.basic import BasicCommands
@@ -72,6 +78,12 @@ class MusicBot(commands.Bot):
 
             spawn(check_ytdlp_update(), "yt-dlp-Update-Check")
 
+
+if _migrated:
+    logger.info(f"[INIT] Laufzeitdaten nach data/ und logs/ umgezogen: {', '.join(_migrated)}")
+if _left_behind:
+    logger.warning(f"[INIT] Liegt noch im alten Layout (Ziel existiert schon oder Datei gesperrt): "
+                   f"{', '.join(_left_behind)} – nächster Versuch beim nächsten Start")
 
 bot = MusicBot()
 # Strg+C im Terminal: erstes Signal fragt nur nach, das zweite fährt geordnet

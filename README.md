@@ -100,9 +100,9 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
 │   ├── downloader.py          # Downloader: resolve_track phases (file, progressive download or stream)
 │   ├── downloader_ydl.py      # yt_dlp instances (fast YouTube client), cookie mode, extraction
-│   ├── downloader_cache.py    # Metadata cache (metadata_cache.json)
+│   ├── downloader_cache.py    # Metadata cache (data/metadata_cache.json)
 │   ├── downloader_prefetch.py # Prefetch of the next queue/autoplay song
-│   ├── downloader_cleanup.py  # downloads/ cleanup (DOWNLOADS_MAX_MB)
+│   ├── downloader_cleanup.py  # data/downloads/ cleanup (DOWNLOADS_MAX_MB)
 │   ├── downloader_progressive.py # Progressive download (playback starts while downloading)
 │   ├── presets.py             # EQ filter chains
 │   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart
@@ -113,15 +113,18 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── music_controls.py      # Now-playing card + buttons (Back, Pause/Resume, Skip, Autoplay, Loop, Clear, Link)
 │   ├── queue_view.py          # Paginated queue view
 │   └── help_view.py           # Paginated !help
-├── utils/                     # logger (console + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
+├── utils/                     # logger (console + logs/bot.log), paths (data/, logs/), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
 ├── tools/
-│   ├── logsummary.py          # Timeline of the last run from bot.log
+│   ├── logsummary.py          # Timeline of the last run from logs/bot.log
 │   └── multi_bots.py          # Run several bot instances in parallel (docs/multi-bots.md)
 ├── locales/
 │   ├── en.json                # English strings
 │   └── de.json                # German strings
-├── downloads/                 # Audio cache
-├── playlists/                 # Saved queues (!saveq / !loadq)
+├── data/                      # Runtime data, created by the bot (not in git)
+│   ├── downloads/             # Audio cache
+│   ├── playlists/             # Saved queues (!saveq / !loadq)
+│   └── *.json                 # last_queue, metadata_cache, play_counts
+├── logs/                      # bot.log (current run) + bot.log.1 … .10 (previous runs)
 └── tests/                     # pytest suite
 ```
 

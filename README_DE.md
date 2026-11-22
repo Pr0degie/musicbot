@@ -100,9 +100,9 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
 │   ├── downloader.py          # Downloader: resolve_track-Phasen (Datei, progressiver Download oder Stream)
 │   ├── downloader_ydl.py      # yt_dlp-Instanzen (schneller YouTube-Client), Cookie-Modus, Extraktion
-│   ├── downloader_cache.py    # Metadaten-Cache (metadata_cache.json)
+│   ├── downloader_cache.py    # Metadaten-Cache (data/metadata_cache.json)
 │   ├── downloader_prefetch.py # Prefetch des nächsten Queue-/Autoplay-Songs
-│   ├── downloader_cleanup.py  # downloads/-Cleanup (DOWNLOADS_MAX_MB)
+│   ├── downloader_cleanup.py  # data/downloads/-Cleanup (DOWNLOADS_MAX_MB)
 │   ├── downloader_progressive.py # Progressiver Download (Wiedergabe startet schon während des Downloads)
 │   ├── presets.py             # EQ-Filterketten
 │   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart
@@ -113,15 +113,18 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── music_controls.py      # Now-Playing-Karte + Buttons (Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop, Leeren, Link)
 │   ├── queue_view.py          # Paginierte Queue-Ansicht
 │   └── help_view.py           # Paginierte !help-Ansicht
-├── utils/                     # logger (Konsole + bot.log), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
+├── utils/                     # logger (Konsole + logs/bot.log), paths (data/, logs/), files.safe_unlink, i18n.t, voice, text, ffmpeg, checks, …
 ├── tools/
-│   ├── logsummary.py          # Zeitleiste des letzten Laufs aus bot.log
+│   ├── logsummary.py          # Zeitleiste des letzten Laufs aus logs/bot.log
 │   └── multi_bots.py          # Mehrere Bot-Instanzen parallel (docs/multi-bots.md)
 ├── locales/
 │   ├── en.json                # Englische Texte
 │   └── de.json                # Deutsche Texte
-├── downloads/                 # Audio-Cache
-├── playlists/                 # Gespeicherte Queues (!saveq / !loadq)
+├── data/                      # Laufzeitdaten, legt der Bot selbst an (nicht in git)
+│   ├── downloads/             # Audio-Cache
+│   ├── playlists/             # Gespeicherte Queues (!saveq / !loadq)
+│   └── *.json                 # last_queue, metadata_cache, play_counts
+├── logs/                      # bot.log (aktueller Lauf) + bot.log.1 … .10 (vorherige Läufe)
 └── tests/                     # pytest-Suite
 ```
 

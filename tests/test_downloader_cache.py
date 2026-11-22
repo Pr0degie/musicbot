@@ -78,7 +78,7 @@ def test_save_cache_writes_ts_field(monkeypatch, tmp_path):
 
     dl._save_cache()
 
-    data = json.loads(Path("metadata_cache.json").read_text(encoding="utf-8"))
+    data = json.loads(Path("data/metadata_cache.json").read_text(encoding="utf-8"))
     assert data["https://x/1"]["_ts"] == ts
 
 
@@ -92,7 +92,7 @@ def test_save_cache_drops_expired_entries(monkeypatch, tmp_path):
 
     dl._save_cache()
 
-    data = json.loads(Path("metadata_cache.json").read_text(encoding="utf-8"))
+    data = json.loads(Path("data/metadata_cache.json").read_text(encoding="utf-8"))
     assert "https://x/alt" not in data
     assert "https://x/neu" in data
 
@@ -107,13 +107,14 @@ def test_save_cache_entry_without_timestamp_gets_now(monkeypatch, tmp_path):
     before = time.time()
     dl._save_cache()
 
-    data = json.loads(Path("metadata_cache.json").read_text(encoding="utf-8"))
+    data = json.loads(Path("data/metadata_cache.json").read_text(encoding="utf-8"))
     assert data["https://x/1"]["_ts"] >= before
 
 
 def test_load_cache_skips_expired_entries(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    Path("metadata_cache.json").write_text(
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text(
         json.dumps({
             "https://x/alt": {"title": "Alt", "_ts": time.time() - CACHE_TTL - 1},
             "https://x/neu": {"title": "Neu", "_ts": time.time()},
@@ -130,7 +131,8 @@ def test_load_cache_skips_expired_entries(monkeypatch, tmp_path):
 def test_load_cache_entry_without_ts_counts_as_expired(monkeypatch, tmp_path):
     """IST: Ohne _ts-Feld gilt ts=0.0 → Eintrag ist immer abgelaufen."""
     monkeypatch.chdir(tmp_path)
-    Path("metadata_cache.json").write_text(
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text(
         json.dumps({"https://x/1": {"title": "Ohne TS"}}), encoding="utf-8"
     )
     dl = bare_downloader()
@@ -142,7 +144,8 @@ def test_load_cache_entry_without_ts_counts_as_expired(monkeypatch, tmp_path):
 
 def test_load_cache_corrupt_file_does_not_crash(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    Path("metadata_cache.json").write_text("{kaputt", encoding="utf-8")
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text("{kaputt", encoding="utf-8")
     dl = bare_downloader()
 
     dl._load_cache()  # darf keine Exception werfen

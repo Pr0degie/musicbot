@@ -10,8 +10,9 @@ from pathlib import Path
 import yt_dlp
 from config import YDL_BROWSER, YDL_COOKIES_FILE
 from utils.logger import logger
+from utils.paths import DATA_DIR
 
-DOWNLOAD_DIR = Path("downloads")
+DOWNLOAD_DIR = DATA_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Marker in yt_dlp-Fehlermeldungen, die nach Authentifizierung verlangen. Nur

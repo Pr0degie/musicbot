@@ -222,7 +222,8 @@ def test_loadq_unknown_name(playlists_dir):
 
 def test_loadq_last_loads_session_queue(playlists_dir, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "last_queue.json").write_text(
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "last_queue.json").write_text(
         json.dumps([[URL_A, "Song A"], [URL_B, "Song B"]]), encoding="utf-8"
     )
 

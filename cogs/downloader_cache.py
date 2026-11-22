@@ -9,13 +9,13 @@ _pending_resolves) wird in Downloader.__init__ angelegt.
 import asyncio
 import json
 import time
-from pathlib import Path
 
 from utils.files import atomic_write_text
 from utils.logger import logger
+from utils.paths import DATA_DIR
 from cogs.downloader_progressive import streams_only
 
-METADATA_CACHE_FILE = Path("metadata_cache.json")
+METADATA_CACHE_FILE = DATA_DIR / "metadata_cache.json"
 CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
 
 # Nur diese Felder werden nach metadata_cache.json persistiert – ermittelt per

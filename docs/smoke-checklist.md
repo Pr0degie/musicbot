@@ -47,7 +47,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 ## Persistenz & Neustart
 
 - [ ] `!saveq <name>` / `!lists` / `!loadq <name>` → Roundtrip lädt die Queue unverändert
-- [ ] `!loadq last` → lädt die Queue der letzten Session (`last_queue.json`); `!saveq last` wird abgelehnt (reserviert); Start bleibt bewusst mit leerer Queue
+- [ ] `!loadq last` → lädt die Queue der letzten Session (`data/last_queue.json`); `!saveq last` wird abgelehnt (reserviert); Start bleibt bewusst mit leerer Queue
 - [ ] `!debug on`/`!debug off` → Terminal wechselt zwischen voller Diagnose und „Wesentliches + Probleme" (in `off` erscheinen Songwechsel/Queue weiter, `[Prefetch]`/`[Progressiv]`/`[Resolve]` nicht); `bot.log` enthält in beiden Modi alles; `!debug` ohne Argument zeigt den Status
 - [ ] Bot-Start mit veraltetem yt-dlp → eine WARNING-Zeile `[yt-dlp] Version … verfügbar` (auch im Quiet-Modus); kein Auto-Update
 - [ ] Bot-Start mit `.env`, der Keys aus `.env.example` fehlen → eine Zeile `[Config] n Einstellung(en) nicht in .env – laufen auf Default: …` (auch im Quiet-Modus); bei vollständiger `.env` keine
@@ -63,7 +63,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Resume bei überholtem Download: endet die wachsende Datei vorzeitig, setzt die Wiedergabe ~1 s vor der Hörposition fort (`_seek_offset`), Play-Count zählt nicht doppelt
 - [ ] Skip während eines progressiven Tracks → nächster Track spielt, der geskippte wird **nicht** wieder vorn eingereiht (`_stop_for_advance`)
 - [ ] Kein Doppel-Download: während ein progressiver Download läuft, denselben Track erneut anstoßen (Loop/`!replay`/`!eq`-Restart) → es startet kein zweiter Download; die INFO-Zeile `[Download] Bereits in Arbeit über <pfad> – kein zweiter Start` bleibt im Normalbetrieb aus (erscheint sie, wurde ein Kollisionsversuch abgewehrt — Ursache prüfen)
-- [ ] Langer Track (> 20 min) → streamt direkt (kein Download startet, `downloads/` wächst nicht)
+- [ ] Langer Track (> 20 min) → streamt direkt (kein Download startet, `data/downloads/` wächst nicht)
 
 ## Startlatenz & Cookie-Modus (ADR 0010, 0013)
 
@@ -81,7 +81,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] **Regression „Ton weg nach Channel-Verlassen“:** `VOICE_CONTROL=true` + `VOICE_OWN_LISTEN=true`, `!listen` aus, Musik läuft → zweite Person kommt in den Channel, spricht, geht wieder → Musik läuft weiter. Stirbt die Verbindung doch: binnen ~30 s `[Voice] Sprachverbindung tot (…) – baue neu auf`, im Chat „🔌 Verbindung zu Discord war kurz weg – neu verbunden, weiter bei m:ss: **Titel**“, Song setzt an der Hörposition fort
 - [ ] Netz ~2 min trennen (WLAN aus/an) während Musik läuft → nach Rückkehr `[Voice] Sprachverbindung … neu aufgebaut: <Channel>` + dieselbe Chat-Meldung, Song läuft an der Hörposition weiter (kein stummes „verbunden“)
 - [ ] `curl http://127.0.0.1:8765/debug` (nur von localhost) → JSON-Schnappschuss; bei laufender Musik `voice_clients[].poller_dead` = `null`, `connected`/`playing` = `true`, `music.track` = laufender Song
-- [ ] `python tools/logsummary.py` → Zeitleiste des letzten Laufs (Start, Songs, Warnungen, Gateway/Voice); `bot.log` beginnt mit jedem Start frisch, `python tools/logsummary.py bot.log.1` zeigt den vorherigen Lauf
+- [ ] `python tools/logsummary.py` → Zeitleiste des letzten Laufs (Start, Songs, Warnungen, Gateway/Voice); `logs/bot.log` beginnt mit jedem Start frisch, `python tools/logsummary.py logs/bot.log.1` zeigt den vorherigen Lauf
 - [ ] **Move-Schutz** (`MOVE_GUARD=true`, Bot-Rolle mit „Audit-Log anzeigen“): Musik läuft → zweiter Account zieht den Bot in einen anderen Channel → binnen ~2 s zurück, Chat „🔒 Verschieben darf mich nur der Bot-Owner …“, Musik läuft weiter. Owner zieht ihn → er bleibt, `[Move-Schutz] Owner hat mich … verschoben – bleibe`. Zweiter Account tippt `!j` aus anderem Channel → „🔒 Verschieben darf mich nur der Bot-Owner.“, Owner-`!j` klappt
 - [ ] **Rauswurf-Schutz** (`MOVE_GUARD=true`, „Audit-Log anzeigen“): Musik läuft → zweiter Account trennt den Bot (Rechtsklick → *Trennen*) → binnen ~3 s wieder im Channel, Song setzt an der Hörposition fort, Chat „🔒 Rauswerfen darf mich nur der Bot-Owner …“. Owner trennt ihn → bleibt draußen, `[Move-Schutz] Owner hat mich rausgeworfen`. Zweiter Account `!l` → „🔒 Wegschicken darf mich nur der Bot-Owner.“; Owner-`!l` und Auto-Leave gehen ohne Rückkehr
 

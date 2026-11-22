@@ -63,7 +63,8 @@ def test_start_verwirft_cache_eintraege_ohne_id(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     now = time.time()
     alt = {k: v for k, v in _info("aaaaaaaaaaa").items() if k != "id"}
-    Path("metadata_cache.json").write_text(json.dumps({
+    Path("data").mkdir(exist_ok=True)
+    Path("data/metadata_cache.json").write_text(json.dumps({
         URL_A: {**alt, "_ts": now},
         URL_B: {**_info("bbbbbbbbbbb"), "_ts": now},
     }), encoding="utf-8")

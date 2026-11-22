@@ -87,7 +87,7 @@ def _parse_max_mb(value) -> int:
     return int(v) if v.isdigit() else 0
 
 
-# Maximale Größe des downloads/-Ordners in MB. 0 (Default) = kein Cleanup,
+# Maximale Größe des data/downloads/-Ordners in MB. 0 (Default) = kein Cleanup,
 # heutiges Verhalten. Wenn gesetzt: nach jedem Download werden die ältesten
 # Dateien (mtime) gelöscht, bis das Limit eingehalten ist – niemals Dateien
 # zu Songs in Queue/current_track oder die gerade abgespielte Datei.

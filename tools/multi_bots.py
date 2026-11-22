@@ -7,9 +7,9 @@
 Anleitung (Bots im Developer Portal anlegen, Tokens eintragen) → docs/multi-bots.md.
 
 Jede Instanz läuft mit demselben Code, aber in ihrem eigenen Ordner
-multi_bots/botN/ als Arbeitsverzeichnis: bot.log, downloads/, Playlists und die
-JSON-Dateien liegen relativ dazu und kommen sich so nicht in die Quere (ein
-gemeinsamer downloads/-Ordner würde die In-Flight-Registry aushebeln, ADR 0002).
+multi_bots/botN/ als Arbeitsverzeichnis: logs/bot.log und data/ (Downloads,
+Playlists, JSON-Dateien) liegen relativ dazu und kommen sich so nicht in die
+Quere (ein gemeinsamer downloads/-Ordner würde die In-Flight-Registry aushebeln, ADR 0002).
 Einstellungen kommen aus der Haupt-.env; pro Instanz überschrieben werden nur
 DISCORD_TOKEN, DM_BRIDGE_PORT (Hauptport + N, Bridge immer nur auf localhost)
 und die Sprachsteuerung (aus – zehn Sprachmodelle würden die GPU sprengen).
@@ -154,7 +154,7 @@ def cmd_start(args) -> int:
         if i < len(tokens):
             time.sleep(START_DELAY)
 
-    print(f"\n{len(procs)} Instanz(en) laufen. Logs: multi_bots/botN/bot.log, "
+    print(f"\n{len(procs)} Instanz(en) laufen. Logs: multi_bots/botN/logs/bot.log, "
           f"Status: python tools/multi_bots.py status")
     print("Beenden: zweimal Strg+C (wirkt auf alle Instanzen).\n")
     return _wait_all(procs)

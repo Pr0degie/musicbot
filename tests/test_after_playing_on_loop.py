@@ -105,7 +105,7 @@ def test_logik_laeuft_auf_dem_loop_datei_io_im_thread(monkeypatch, tmp_path):
 
         # Reihenfolge wie bisher: Snapshot VOR der Loop-Logik – der per Loop
         # zurückgelegte Song A fehlt in der Datei, liegt aber vorn in der Queue.
-        assert json.loads(Path("last_queue.json").read_text(encoding="utf-8")) == [[URL_B, "Song B"]]
+        assert json.loads(Path("data/last_queue.json").read_text(encoding="utf-8")) == [[URL_B, "Song B"]]
         assert list(mc.queue) == [(URL_A, "Song A"), (URL_B, "Song B")]
         cleanup_cog(mc)
 
@@ -196,7 +196,7 @@ def test_blockierter_loop_haelt_den_player_thread_nicht_fest(monkeypatch, tmp_pa
         player.join(5)                    # blockiert den Loop, bis der Thread aufgibt
         assert not player.is_alive(), "Player-Thread hängt"
         assert mc.next_calls == []
-        assert not Path("last_queue.json").exists()
+        assert not Path("data/last_queue.json").exists()
 
         await asyncio.sleep(0.05)         # Loop wieder frei → Logik läuft nach
         assert len(mc.next_calls) == 1
@@ -213,6 +213,6 @@ def test_aelterer_snapshot_ueberschreibt_keinen_neueren(monkeypatch, tmp_path):
     mc._write_last_queue(2, [("u2", "Neuer Stand")])
     mc._write_last_queue(1, [("u1", "Alter Stand")])      # kommt verspätet an
 
-    assert json.loads(Path("last_queue.json").read_text(encoding="utf-8")) == [["u2", "Neuer Stand"]]
+    assert json.loads(Path("data/last_queue.json").read_text(encoding="utf-8")) == [["u2", "Neuer Stand"]]
     mc._write_last_queue(3, [])
-    assert json.loads(Path("last_queue.json").read_text(encoding="utf-8")) == []
+    assert json.loads(Path("data/last_queue.json").read_text(encoding="utf-8")) == []

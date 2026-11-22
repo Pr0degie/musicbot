@@ -31,8 +31,9 @@ trennt etwa stündlich routinemäßig).
 
 ## Rotation
 
-`utils/logger.py` → `rotate_on_start()`: Jeder Bot-Start beginnt ein frisches `bot.log`, die letzten
-`LOG_KEEP_RUNS` (10) Läufe bleiben als `bot.log.1` (vorheriger Lauf) … `bot.log.10`. Bewusst beim Start statt
+`utils/logger.py` → `rotate_on_start()`: Jeder Bot-Start beginnt ein frisches `logs/bot.log`
+(`utils/paths.LOG_DIR`, relativ zum Arbeitsverzeichnis), die letzten `LOG_KEEP_RUNS` (10) Läufe bleiben als
+`logs/bot.log.1` (vorheriger Lauf) … `logs/bot.log.10`. Bewusst beim Start statt
 `RotatingFileHandler`: unter Windows scheitert das Umbenennen, solange ein anderes Programm die Datei offen
 hat — mitten im Lauf hieße das bei jeder Zeile `--- Logging error ---`. Scheitert die Rotation (Editor offen,
 `!restart` mit noch lebendem Altprozess), wird wie früher angehängt. Die Testsuite schreibt über
@@ -49,7 +50,7 @@ Reihenfolge, die am wenigsten Log-Archäologie kostet:
    Sprachsteuerungs-Zustand. Liest nur, crasht nie.
 2. **Was ist passiert?** `python tools/logsummary.py` verdichtet den letzten Lauf auf eine Zeitleiste
    (Warnungen/Fehler mit Wiederholungszähler, Tracebacks auf die Exception-Zeile gekürzt, Gateway/Voice,
-   Eingaben, gestartete Songs). `bot.log.1` = vorheriger Lauf, `--list` zeigt alle Läufe einer Datei mit
+   Eingaben, gestartete Songs). `logs/bot.log.1` = vorheriger Lauf, `--list` zeigt alle Läufe einer Datei mit
    Kennzahlen, `--session -2` wählt den vorletzten Lauf derselben Datei, `-n` begrenzt (Default 80). Importiert `utils.logger` bewusst nicht (der Import würde rotieren).
 3. **Hängt etwas?** `py-spy dump --pid <pid>` zeigt alle Thread-Stacks des laufenden Prozesses, ohne ihn
    anzuhalten. Ein `audio-player`-Thread in `time.sleep` heißt: es wird gesendet — kommt trotzdem kein Ton, ist

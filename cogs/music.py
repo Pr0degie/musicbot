@@ -8,7 +8,6 @@ import re
 import time
 import urllib.parse
 from collections import deque
-from pathlib import Path
 
 import aiohttp
 
@@ -18,6 +17,7 @@ from utils.logger import logger
 from utils.tasks import spawn
 from utils.voice import connect_voice, stop_playback
 from utils.i18n import t
+from utils.paths import DATA_DIR
 from utils.url_check import enforce_url_policy
 from utils.checks import require_same_voice, require_admin
 from utils.ffmpeg import ffmpeg_header_opts, stderr_tail, classify_ffmpeg_error
@@ -34,7 +34,7 @@ from cogs.music_voice_guard import VoiceGuardMixin
 from cogs.music_playback import PlaybackMixin
 from cogs.music_enqueue import _YTDLP_FAILED, search_query, start_early
 
-SCORE_FILE = Path("play_counts.json")
+SCORE_FILE = DATA_DIR / "play_counts.json"
 
 
 class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,

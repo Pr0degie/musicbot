@@ -47,6 +47,8 @@ def atomic_write_text(path, text: str, encoding: str = "utf-8") -> None:
     """
     # realpath: ein Symlink als Ziel bleibt Symlink, ersetzt wird die Datei dahinter.
     target = Path(os.path.realpath(path))
+    # data/ gibt es in einem frischen Arbeitsverzeichnis noch nicht.
+    target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         with open(tmp, "w", encoding=encoding) as f:

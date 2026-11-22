@@ -99,9 +99,14 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   mit `voice_recv`-Import auf Modulebene. Dazu `utils/nl_parser.py` (Weckwort + Intents), `utils/pcm.py`
   (48k-Stereo → 16k-Mono), `utils/speech_buffer.py` (`SpeakerBuffers`), `utils/stt.py` (faster-whisper) →
   [sprachsteuerung.md](architecture/sprachsteuerung.md).
+- **`utils/paths.py`** — `DATA_DIR` (`data/`: `downloads/`, `playlists/`, `last_queue.json`, `metadata_cache.json`,
+  `play_counts.json`) und `LOG_DIR` (`logs/`), beide relativ zum Arbeitsverzeichnis (Multi-Bot-Instanzen trennen sich
+  über das cwd); `migrate_legacy_layout()` zieht beim Start einmalig um, was noch im alten Layout direkt im
+  Arbeitsverzeichnis liegt (`main.py`, vor allen anderen Imports), ohne Vorhandenes zu überschreiben.
+  `radio_stations.json` bleibt im Root (versionierte Senderliste) → [ADR 0014](adr/0014-laufzeitdaten-data-und-logs.md).
 - **`utils/logger.py`** — `logger`, Terminal-Modi (`set_console_mode`, `_ESSENTIAL_TAGS`/`_QUIET_TAGS`),
   `rotate_on_start` (bot.log-Rotation) → [logging.md](architecture/logging.md); **`tools/logsummary.py`** —
-  Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`tools/multi_bots.py`** — mehrere Instanzen parallel, je eigener Ordner `multi_bots/botN/` als cwd, Bridge-Port 8765+N → [multi-bots.md](multi-bots.md); **`utils/env_check.py`** — `missing_env_keys()`
+  Zeitleiste eines Laufs aus `logs/bot.log` (`--list`, `--session`); **`tools/multi_bots.py`** — mehrere Instanzen parallel, je eigener Ordner `multi_bots/botN/` als cwd, Bridge-Port 8765+N → [multi-bots.md](multi-bots.md); **`utils/env_check.py`** — `missing_env_keys()`
   gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
   [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`, `atomic_write_text`), **`utils/tasks.py`** (`spawn` – Hintergrund-Tasks mit gehaltener Referenz und Fehler-Log; `run_on_loop` – Übergabe aus dem Player-Thread an den Event-Loop mit `LOOP_HANDOFF_TIMEOUT`),

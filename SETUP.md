@@ -222,13 +222,13 @@ without it, it always goes back and you use `!j` / `!l` instead.
 
 ## 7. Logs & Troubleshooting
 
-- `bot.log` always contains the full diagnostics, regardless of `LOG_MODE`/`!debug`.
-  It is rotated on every start: the current run is `bot.log`, the previous ten
-  runs are kept as `bot.log.1` (previous) … `bot.log.10`. Startup errors end up
+- `logs/bot.log` always contains the full diagnostics, regardless of `LOG_MODE`/`!debug`.
+  It is rotated on every start: the current run is `logs/bot.log`, the previous ten
+  runs are kept as `logs/bot.log.1` (previous) … `logs/bot.log.10`. Startup errors end up
   there too, since the `start.bat` window closes immediately.
 - `python tools/logsummary.py` condenses the last run into a timeline (warnings,
   errors, voice/gateway events, commands, songs). `--list` shows all runs in a
-  file, `-n 30` only the last 30 events, `python tools/logsummary.py bot.log.1`
+  file, `-n 30` only the last 30 events, `python tools/logsummary.py logs/bot.log.1`
   the previous run.
 - While the bot is running, `GET /debug` on the DM-Bridge (default
   `http://127.0.0.1:8765/debug`) returns a state snapshot as JSON — it only
