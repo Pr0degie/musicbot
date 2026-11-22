@@ -1,4 +1,3 @@
-import asyncio
 
 import discord
 from cogs.basic import BasicCommands
@@ -9,6 +8,7 @@ from config import TOKEN
 from discord.ext import commands
 from utils.logger import logger
 from utils.shutdown import install_sigint_handler
+from utils.tasks import spawn
 
 
 class MusicBot(commands.Bot):
@@ -70,7 +70,7 @@ class MusicBot(commands.Bot):
             self._ytdlp_check_started = True
             from utils.ytdlp_update import check_ytdlp_update
 
-            asyncio.create_task(check_ytdlp_update())
+            spawn(check_ytdlp_update(), "yt-dlp-Update-Check")
 
 
 bot = MusicBot()

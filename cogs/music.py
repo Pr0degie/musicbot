@@ -15,6 +15,7 @@ import aiohttp
 import psutil
 from utils.files import atomic_write_text
 from utils.logger import logger
+from utils.tasks import spawn
 from utils.voice import connect_voice, stop_playback
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
@@ -203,7 +204,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         return urls, titles
 
     async def cog_load(self):
-        asyncio.create_task(self.dl.warmup())
+        spawn(self.dl.warmup(), "yt_dlp-Warmup")
         self._voice_watchdog.start()
         self._progress_loop.start()
         self._persist_flush_loop.start()

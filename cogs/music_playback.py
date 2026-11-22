@@ -33,6 +33,7 @@ import discord
 
 from utils.files import atomic_write_text
 from utils.logger import logger
+from utils.tasks import spawn
 from utils.voice import PlayerToken, stop_playback
 from utils.i18n import t
 from utils.text import link_label, normalize_title
@@ -284,7 +285,7 @@ class PlaybackMixin:
                     await ctx.send(t("error.stream_giveup", title=title))
                 except Exception:
                     pass
-                asyncio.create_task(self.play_next(ctx))
+                spawn(self.play_next(ctx), "play_next")
                 return
 
             # FFmpeg-Options, stderr-Temp-Datei und Source-Konstruktion (synchron).
@@ -429,7 +430,7 @@ class PlaybackMixin:
             if self.current_track:
                 _keep.add(self.current_track[0])
             _fmt = self.audio_format
-            asyncio.create_task(asyncio.to_thread(self.dl.rebuild, _fmt, _keep))
+            spawn(asyncio.to_thread(self.dl.rebuild, _fmt, _keep), "yt_dlp-Rebuild")
 
         # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
         # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
@@ -456,7 +457,7 @@ class PlaybackMixin:
                 await ctx.send(t(error_key, title=title))
             except Exception:
                 pass
-            asyncio.create_task(self.play_next(ctx))
+            spawn(self.play_next(ctx), "play_next")
         else:
             logger.warning(f"[play_next] {kind} – Voice client weg, kein Retry.")
             self.is_playing = False
@@ -953,7 +954,7 @@ class PlaybackMixin:
         if self.is_playing:
             # Läuft schon Musik → nur Metadaten vorwärmen; geladen wird per Prefetch,
             # wenn der Titel an der Reihe ist (Bandbreite bleibt beim aktuellen Song).
-            asyncio.create_task(self.dl._start_resolve(url))
+            spawn(self.dl._start_resolve(url), "Metadaten-Vorwärmen")
         else:
             # Dieser Treffer startet gleich → Download sofort anstoßen, damit er
             # parallel zu den folgenden Discord-Nachrichten läuft statt danach.

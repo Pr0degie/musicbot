@@ -1,10 +1,10 @@
-import asyncio
 import re
 import uuid
 from collections import deque
 import discord
 from discord.ui import ActionRow, Button, Container, LayoutView, MediaGallery, Section, TextDisplay, Thumbnail, View
 from utils.logger import logger
+from utils.tasks import spawn
 from utils.voice import stop_playback
 from utils.checks import same_voice_allowed
 from utils.i18n import t
@@ -255,7 +255,7 @@ class MusicControlView(LayoutView):
         elif not self.music_cog.is_playing and self.music_cog.autoplay_enabled and not self.music_cog.is_radio:
             # Queue leer, aber Autoplay ist an → sofort loslegen
             await interaction.response.send_message(t("status.autoplay_starting"), ephemeral=True)
-            asyncio.create_task(self.music_cog.autoplay(self.ctx))
+            spawn(self.music_cog.autoplay(self.ctx), "autoplay")
         else:
             await interaction.response.send_message(t("error.no_song_to_resume"), ephemeral=True)
 
@@ -267,7 +267,7 @@ class MusicControlView(LayoutView):
             await interaction.response.send_message(t("status.radio_stopped"), ephemeral=True)
             if self.music_cog.queue:
                 self.music_cog.is_playing = True
-                asyncio.create_task(self.music_cog.play_next(self.ctx))
+                spawn(self.music_cog.play_next(self.ctx), "play_next")
             return
         # stop() löst den after_playing-Callback aus, der den nächsten Track startet.
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
@@ -291,7 +291,7 @@ class MusicControlView(LayoutView):
 
         # Sofort loslegen, wenn Autoplay gerade eingeschaltet wurde und die Queue leer ist.
         if self.music_cog.autoplay_enabled and not self.music_cog.is_playing and not self.music_cog.queue:
-            asyncio.create_task(self.music_cog.autoplay(self.ctx))
+            spawn(self.music_cog.autoplay(self.ctx), "autoplay")
 
     async def _on_loop(self, interaction: discord.Interaction):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
