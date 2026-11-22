@@ -56,8 +56,8 @@ def full_info():
 # ---------------------------------------------------------------------------
 
 def test_reduced_roundtrip_same_prepare_filename(tmp_path, monkeypatch):
-    monkeypatch.setattr("cogs.downloader.YDL_COOKIES_FILE", "")
-    monkeypatch.setattr("cogs.downloader.YDL_BROWSER", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_COOKIES_FILE", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_BROWSER", "")
     monkeypatch.chdir(tmp_path)
 
     dl = Downloader("webm")  # echte yt_dlp-Instanzen (offline, kein Netz nötig)

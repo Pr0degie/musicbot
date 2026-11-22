@@ -95,7 +95,9 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 │   ├── music_radio.py         # RadioMixin: Internet-Radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
-│   ├── downloader.py          # yt_dlp-Instanzen (schneller YouTube-Client), Cookie-Modus, Download-Cache, Streaming
+│   ├── downloader.py          # Downloader: resolve_track-Phasen, Prefetch, Downloads-Cleanup
+│   ├── downloader_ydl.py      # yt_dlp-Instanzen (schneller YouTube-Client), Cookie-Modus, Extraktion
+│   ├── downloader_cache.py    # Metadaten-Cache (metadata_cache.json)
 │   ├── downloader_progressive.py # Progressiver Download (Wiedergabe startet schon während des Downloads)
 │   ├── presets.py             # EQ-Filterketten
 │   ├── basic.py               # !j, !l, !ping, !echo, !help, !debug, !restart

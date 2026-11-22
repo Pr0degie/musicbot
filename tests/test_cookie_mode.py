@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-import cogs.downloader as dlmod
+import cogs.downloader_ydl as dlmod
 from cogs.downloader import Downloader
 
 

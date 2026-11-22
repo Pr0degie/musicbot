@@ -9,7 +9,7 @@ import asyncio
 
 import pytest
 
-import cogs.downloader as dlmod
+import cogs.downloader_ydl as dlmod
 from cogs.downloader import FAST_PLAYER_CLIENTS, Downloader
 from tests.test_cookie_mode import FakeYdl, bare_downloader
 

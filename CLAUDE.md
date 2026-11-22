@@ -44,7 +44,8 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 Modul-Übersicht und Themen-Dateien → [`docs/architecture.md`](docs/architecture.md) (Index), Entscheidungen →
 [`docs/adr/`](docs/adr/README.md), manuelle Tests → [`docs/smoke-checklist.md`](docs/smoke-checklist.md),
 [`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md). Größte Dateien: `cogs/downloader.py`
-(yt_dlp, Cache, `resolve_track`-Phasen, Prefetch) + Mixin `downloader_progressive.py` (In-Flight-Registry,
+(`resolve_track`-Phasen, Cleanup, Prefetch) + Mixins `downloader_ydl.py` (yt_dlp-Instanzen, Cookies, Extraktion) /
+`downloader_cache.py` (Metadaten-Cache) / `downloader_progressive.py` (In-Flight-Registry,
 progressiver Download), `cogs/music.py` + Mixins `music_playback.py` / `music_voice_ui.py`
 (Voice-Lifecycle, Reparatur, Watchdog) / `music_radio.py` / `music_stats.py` / `music_queue_io.py` → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md).
 `cogs/dm_bridge.py` = HTTP-Server für den DM-Bot (`/speak`, `/command`, `/health`, `/debug`) → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md).

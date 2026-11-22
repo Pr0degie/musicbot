@@ -44,13 +44,19 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
     `!radio`), `RADIO_STATIONS_FILE`
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`
-- **`cogs/downloader.py`** — `Downloader` (`self.dl`): five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
+- **`cogs/downloader.py`** — `Downloader` (`self.dl`), zusammengesetzt aus den Mixins darunter. Selbst enthält die
+  Datei `resolve_track()`, `prefetch_next()`, `prefetch_autoplay()` und den Downloads-Cleanup. `resolve_track()`
+  läuft in vier Phasen: `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`. Re-exportiert
+  nur gelesene Konstanten (`CACHE_TTL`, `METADATA_CACHE_FILE`, `PERSISTED_CACHE_FIELDS`, `FAST_PLAYER_CLIENTS`,
+  `PROGRESSIVE_*`); was Tests patchen, steht ausschließlich im Zielmodul.
+- **`cogs/downloader_ydl.py`** — `YdlMixin`: five yt_dlp instances (`ydl`, `search_ydl`, `url_ydl`,
   `playlist_ydl`, `autoplay_ydl` — gebaut von `_build_ydl(kind)`, aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
   `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md); cookielos nur YouTube-Client `visionos`
   (`FAST_PLAYER_CLIENTS`, keine `available_at`-Sperre), bei Client-Fehlern ein Zweitversuch mit yt_dlp-Standard →
-  [ADR 0013](adr/0013-schneller-youtube-client-visionos.md)), `_url_cache`, `resolve_track()`, `prefetch_next()`,
-  `prefetch_autoplay()`. Also defines `DOWNLOAD_DIR`. `resolve_track()` läuft in vier Phasen:
-  `_resolve_metadata` → `_adopt_inflight` → `_clear_corpse` → `_acquire_file`.
+  [ADR 0013](adr/0013-schneller-youtube-client-visionos.md)), `rebuild()`/`rebuild_async()`. Also defines `DOWNLOAD_DIR`.
+- **`cogs/downloader_cache.py`** — `MetadataCacheMixin`: `_url_cache` samt Timestamps (`CACHE_TTL`),
+  `_usable_cached_info`, tolerantes Laden und gedebounctes Persistieren nach `metadata_cache.json`
+  (`PERSISTED_CACHE_FIELDS` → [ADR 0005](adr/0005-persistenz-debouncing.md)), `_fetch_info`, `_start_resolve`, `warmup`.
 - **`cogs/downloader_progressive.py`** — `ProgressiveDownloadMixin` (Basis von `Downloader`): In-Flight-Registry
   `_inflight` („pro URL maximal ein schreibender Download" → [ADR 0002](adr/0002-inflight-registry.md)),
   progressiver Download (`_start_progressive`, `_run_progressive`, `_wait_for_buffer`, `prime_first_hit`) und

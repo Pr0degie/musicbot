@@ -26,8 +26,8 @@ def _info(video_id, title="Intro"):
 
 
 def _real_dl(monkeypatch, tmp_path):
-    monkeypatch.setattr("cogs.downloader.YDL_COOKIES_FILE", "")
-    monkeypatch.setattr("cogs.downloader.YDL_BROWSER", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_COOKIES_FILE", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_BROWSER", "")
     monkeypatch.chdir(tmp_path)
     return Downloader("webm")   # echte yt_dlp-Instanzen, offline
 
@@ -58,8 +58,8 @@ def test_start_verwirft_cache_eintraege_ohne_id(monkeypatch, tmp_path):
     """metadata_cache.json aus der Zeit vor der ID im Dateinamen: ohne "id"
     ergäbe prepare_filename "<Titel> [NA].<ext>" – solche Einträge fliegen beim
     Start raus (Cache-Miss, frische Extraktion)."""
-    monkeypatch.setattr("cogs.downloader.YDL_COOKIES_FILE", "")
-    monkeypatch.setattr("cogs.downloader.YDL_BROWSER", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_COOKIES_FILE", "")
+    monkeypatch.setattr("cogs.downloader_ydl.YDL_BROWSER", "")
     monkeypatch.chdir(tmp_path)
     now = time.time()
     alt = {k: v for k, v in _info("aaaaaaaaaaa").items() if k != "id"}
