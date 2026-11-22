@@ -90,7 +90,9 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ├── config.py                  # Load environment variables
 ├── cogs/
 │   ├── music.py               # Core: queue, EQ, autoplay, !text, !format
-│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg sources, prefetch, search/resolve
+│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg sources, Now Playing card
+│   ├── music_enqueue.py       # EnqueueMixin: search/URL flow of !p, !next, !now
+│   ├── music_prefetch.py      # PrefetchMixin: kicks prefetch of upcoming songs
 │   ├── music_voice_ui.py      # Join/leave/idle, watchdog, voice repair, progress bar
 │   ├── music_radio.py         # RadioMixin: internet radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats

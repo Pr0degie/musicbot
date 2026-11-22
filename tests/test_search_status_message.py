@@ -10,7 +10,7 @@ import asyncio
 
 from conftest import FakeCtx, build_cog
 from cogs.music import _YTDLP_FAILED
-from cogs.music_playback import _BACKGROUND_TASKS
+from cogs.music_enqueue import _BACKGROUND_TASKS
 from utils.i18n import t
 
 

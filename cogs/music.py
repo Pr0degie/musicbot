@@ -31,7 +31,8 @@ from cogs.music_stats import StatsMixin
 from cogs.music_queue_io import QueuePersistenceMixin
 from cogs.music_voice_ui import VoiceLifecycleMixin, PlaybackUiMixin
 from cogs.music_voice_guard import VoiceGuardMixin
-from cogs.music_playback import PlaybackMixin, _YTDLP_FAILED, search_query, start_early
+from cogs.music_playback import PlaybackMixin
+from cogs.music_enqueue import _YTDLP_FAILED, search_query, start_early
 
 SCORE_FILE = Path("play_counts.json")
 

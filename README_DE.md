@@ -90,7 +90,9 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ├── config.py                  # Env-Variablen laden
 ├── cogs/
 │   ├── music.py               # Kern: Queue, EQ, Autoplay, !text, !format
-│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg-Quellen, Prefetch, Suche/Resolve
+│   ├── music_playback.py      # PlaybackMixin: play_next, FFmpeg-Quellen, Now-Playing-Karte
+│   ├── music_enqueue.py       # EnqueueMixin: Such-/URL-Flow von !p, !next, !now
+│   ├── music_prefetch.py      # PrefetchMixin: stößt das Vorladen der nächsten Songs an
 │   ├── music_voice_ui.py      # Join/Leave/Idle, Watchdog, Voice-Reparatur, Fortschrittsbalken
 │   ├── music_radio.py         # RadioMixin: Internet-Radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats

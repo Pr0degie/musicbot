@@ -40,21 +40,13 @@ from utils.voice import PlayerToken, start_clock_at_first_packet, stop_playback
 from utils.i18n import t
 from utils.text import link_label, normalize_title
 from utils.ffmpeg import stream_wait_seconds
-from views.music_controls import MusicControlView, SearchAutoplayView
+from views.music_controls import MusicControlView
+from cogs.music_enqueue import EnqueueMixin
+from cogs.music_prefetch import PrefetchMixin
 
 # Max. Seek-Resumes pro Track, wenn FFmpeg die wachsende Datei eines progressiven
 # Downloads überholt hat – danach Fallback auf die Stream-/Retry-Kaskade.
 PROGRESSIVE_MAX_RESUMES = 2
-
-# Sentinel für _extract_info_or_report: unterscheidet "Fehler wurde bereits
-# gemeldet" von einem echten None-Ergebnis aus yt_dlp (das die Aufrufer wie
-# bisher selbst krachen lassen).
-_YTDLP_FAILED = object()
-
-# Laufende Hintergrund-Aufräumarbeiten (Status-Nachricht löschen): asyncio hält
-# Tasks nur schwach – ohne Referenz könnte der GC sie mitten im Lauf abräumen.
-_BACKGROUND_TASKS: set = set()
-
 
 # So lange wartet der Player-Thread höchstens darauf, dass der Event-Loop die
 # Track-Ende-Logik übernimmt (normal: Millisekunden).
@@ -91,23 +83,7 @@ def _run_on_loop(loop, fn, *args):
     return done.result(timeout=_LOOP_HANDOFF_TIMEOUT)
 
 
-def search_query(eingabe: str) -> str:
-    """yt_dlp-Suchanfrage für einen Suchbegriff: 3 Treffer (1 spielt, 2 Alternativen)."""
-    return f"ytsearch3:{eingabe}"
-
-
-def start_early(coro) -> "asyncio.Task":
-    """Abfrage sofort als Task starten (läuft parallel z. B. zum Voice-Join).
-
-    Wird sie nie abgeholt (Join scheitert), schluckt der Callback das
-    Ergebnis bzw. die Exception – sonst meldet asyncio „Task exception was
-    never retrieved"."""
-    task = asyncio.create_task(coro)
-    task.add_done_callback(lambda t: t.cancelled() or t.exception())
-    return task
-
-
-class PlaybackMixin:
+class PlaybackMixin(PrefetchMixin, EnqueueMixin):
     # URL des Tracks, für den _seek_offset gesetzt wurde (!seek, Progressive-
     # Resume, Voice-Reparatur). None = ungebunden. Klassen-Default, damit auch
     # ohne __init__ erzeugte Instanzen (Tests via __new__) definiert sind.
@@ -127,62 +103,6 @@ class PlaybackMixin:
         if bound_url is not None and bound_url != url:
             return 0
         return offset
-
-    async def _prefetch_next(self, idx: int = 0):
-        """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
-        await self.dl.prefetch_next(self.queue, idx)
-
-    async def _prefetch_upcoming(self):
-        """Lädt bis zu 2 Queue-Songs sequenziell vor – yt_dlp ist nicht
-        thread-safe, daher kein paralleles gather. Sequenziell reicht: während
-        Song N spielt, werden N+1 und N+2 nacheinander heruntergeladen."""
-        # Bandbreiten-Rücksicht: dem progressiven Download des laufenden Songs
-        # eine kurze Startphase lassen, damit der erste Puffer schnell steht.
-        # Hart gekappt: das frühere globale Idle-Warten (bis 300 s) machte den
-        # Queue-Prefetch praktisch tot – der laufende Song lädt fast immer
-        # progressiv, der geparkte Task machte alle _kick_prefetch zu No-Ops.
-        await self.dl.wait_progressive_idle(timeout=15.0)
-        await self._prefetch_next(0)
-        if len(self.queue) >= 2:
-            await self._prefetch_next(1)
-
-    def _kick_prefetch(self):
-        """Startet den Hintergrund-Download der nächsten Queue-Songs, wenn
-        gerade ein Song läuft und noch kein Prefetch aktiv ist. Nötig für
-        Titel, die MITTEN im Song eingereiht werden (!p/!next): play_next
-        erstellt den Prefetch-Task nur beim Trackstart – da war die Queue
-        oft noch leer, und der neue Song würde erst beim Übergang (progressiv,
-        inkl. yt_dlp-Extraktion) geladen → hörbare Lücke."""
-        if not self.queue or not self.is_playing:
-            return
-        if self.prefetch_task and not self.prefetch_task.done():
-            # Läuft bereits – _prefetch_upcoming peekt die Queue bei jedem
-            # Schritt frisch, neue Einträge werden also noch mitgenommen.
-            return
-        self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
-
-    def _restart_prefetch(self):
-        """Nach Queue-Umbau (!shuffle/!move/!remove, Alternativ-Buttons): der
-        laufende Prefetch zielt noch auf die alte Reihenfolge. _kick_prefetch
-        allein reicht nicht (No-Op-Guard bei lebendem Task) → Task abbrechen
-        und neu kicken. Ein bereits schreibender Download-Worker wird dabei
-        nicht gekillt, sondern adoptiert und läuft zu Ende (ADR 0002)."""
-        if self.prefetch_task and not self.prefetch_task.done():
-            self.prefetch_task.cancel()
-            self.prefetch_task = None
-        self._kick_prefetch()
-
-    async def _prefetch_autoplay(self, ctx):
-        """Sucht und lädt nächsten Autoplay-Song im Hintergrund während der aktuelle läuft."""
-        ref_url = ref_title = None
-        if self.current_track:
-            ref_url, ref_title, *_ = self.current_track
-        result = await self.dl.prefetch_autoplay(ref_url, ref_title, self._recently_played, self._recently_played_titles)
-        if result and self.autoplay_enabled:
-            url, title = result
-            self.queue.append((url, title))
-            self._autoplay_queued_url = url
-            logger.info(f"[Autoplay Prefetch] In Queue eingereiht: {title}")
 
     def _stop_for_advance(self, voice_client):
         """Wiedergabe-Stopp für absichtliche Wechsel (Skip, !now, !eq, !seek,
@@ -904,216 +824,3 @@ class PlaybackMixin:
             self._record_play(url, title)
         self.text_channel = ctx.channel
         return generation, is_loop_repeat, prev_track
-
-    def _evict_autoplay_song(self) -> str | None:
-        """Entfernt den von Autoplay vorgereihten Song aus der Queue (falls vorhanden).
-
-        Bricht außerdem einen laufenden Prefetch-Task ab, damit kein weiterer
-        Autoplay-Song nachgeschoben wird bevor der manuelle !p-Song gespielt hat.
-        Gibt den Titel des entfernten Songs zurück (für Logging), sonst None.
-        """
-        # Laufenden Prefetch sofort stoppen
-        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-            self._autoplay_prefetch_task.cancel()
-            self._autoplay_prefetch_task = None
-
-        if not self._autoplay_queued_url:
-            return None
-
-        removed_title = None
-        for i, (queued_url, queued_title) in enumerate(self.queue):
-            if queued_url == self._autoplay_queued_url:
-                del self.queue[i]
-                removed_title = queued_title
-                self._autoplay_queued_url = None
-                break
-        return removed_title
-
-    async def _stop_radio_for_takeover(self, ctx):
-        """Beendet einen laufenden Radio-Stream, bevor ein Song übernimmt.
-
-        Gemeinsamer Vorspann von !p, !next und !now: Radio stoppen und auf das
-        Ende der laufenden Wiedergabe warten (max. 3 s), damit der neue Song
-        nicht mit dem Radio-Callback kollidiert.
-        """
-        if not self.is_radio:
-            return
-        self._stop_radio()
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            stop_playback(ctx.voice_client)
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
-            self._playback_done.clear()
-
-    async def _extract_info_or_report(self, ctx, query, kind, *,
-                                      status_key, timeout_key, error_key, log_msg, pending=None):
-        """Ruft yt_dlp-Infos ab und meldet Timeout/Fehler direkt im Channel.
-
-        Gemeinsamer Fetch-Teil der Such- und URL-Zweige von !p, !next und !now.
-        `kind` wählt die yt_dlp-Instanz ("search"/"url"/"playlist"), aufgelöst
-        erst im Downloader – so greift dort auch der Cookie-Fallback bei
-        Alterssperre/Bot-Check (ADR 0010). Gibt das Info-Dict zurück oder
-        _YTDLP_FAILED, wenn bereits eine Fehlermeldung gesendet wurde – auch
-        wenn yt_dlp None liefert (z. B. YouTube-Mix-Link, den yt_dlp nicht
-        auflöst); vorher lief das als TypeError in die Aufrufer.
-
-        Die Status-Nachricht ("Suche läuft..." bzw. "Verarbeite...") wird nach
-        Abschluss wieder gelöscht – bei Erfolg wie im Fehlerfall (dann steht
-        die Fehlermeldung im Channel).
-
-        Senden und Löschen liegen nicht im kritischen Pfad: die Abfrage läuft
-        parallel zum Senden, gelöscht wird im Hintergrund – sonst warteten
-        Suche und Download-Start auf zwei Discord-Roundtrips. `pending` ist
-        eine bereits gestartete Abfrage (z. B. von !p parallel zum Voice-Join).
-        """
-        status_task = asyncio.create_task(ctx.send(t(status_key)))
-        try:
-            info = await (pending if pending is not None else self.dl.extract_info_async(query, kind))
-            if info is None:
-                logger.warning(f"{log_msg}: yt_dlp lieferte keine Infos für {query[:120]}")
-                await self._report_after_status(ctx, status_task, t(error_key))
-                return _YTDLP_FAILED
-            return info
-        except asyncio.TimeoutError:
-            logger.warning(f"{log_msg}: Timeout für {query[:120]}")
-            await self._report_after_status(ctx, status_task, t(timeout_key))
-            return _YTDLP_FAILED
-        except Exception:
-            logger.exception(log_msg)
-            await self._report_after_status(ctx, status_task, t(error_key))
-            return _YTDLP_FAILED
-        finally:
-            cleanup = asyncio.create_task(self._delete_status(status_task))
-            _BACKGROUND_TASKS.add(cleanup)   # starke Referenz, sonst kann der GC ihn abräumen
-            cleanup.add_done_callback(_BACKGROUND_TASKS.discard)
-
-    @staticmethod
-    async def _report_after_status(ctx, status_task, text):
-        """Fehlermeldung erst nach der Status-Nachricht senden – sonst stünde
-        sie bei einem schnellen Fehlschlag vor „Suche läuft…" im Channel.
-        Im Fehlerpfad kostet das Warten nichts, was zählt."""
-        await asyncio.wait([status_task])
-        await ctx.send(text)
-
-    @staticmethod
-    async def _delete_status(status_task):
-        """Status-Nachricht löschen, sobald sie gesendet ist (Hintergrund-Task)."""
-        try:
-            msg = await status_task
-            await msg.delete()
-        except Exception:
-            pass   # nie gesendet, schon weg oder keine Berechtigung – egal
-
-    async def _search_and_enqueue(self, ctx, eingabe, *, log_tag, timeout_key,
-                                  insert, with_alts_key, no_alts_key,
-                                  base_content_key=None, pending=None):
-        """Gemeinsamer Suchbegriff-Zweig von !p, !next und !now.
-
-        ytsearch3 → ersten Treffer vorab auflösen und einreihen, Treffer 2
-        und 3 als Buttons anzeigen (SearchAutoplayView) falls es der Falsche
-        war. Die drei Befehle unterscheiden sich bewusst – die Unterschiede
-        stecken in den Parametern:
-
-        - !p:    insert="evict_or_back" – wenn Autoplay einen Song vorgemerkt
-                 hat, fliegt der raus (nur bei aktiviertem Autoplay) und der
-                 manuelle Wunsch landet VORN in der Queue, sonst hinten.
-                 Die Eviction wird geloggt.
-        - !next: insert="front" – keine Eviction, Treffer immer vorn;
-                 eigene Meldungs-Keys (next_added/next_with_alts) und
-                 base_content_key für die View.
-        - !now:  insert="evict_front" – Eviction immer (Rückgabe ignoriert),
-                 Treffer vorn; die laufende Wiedergabe stoppt der Aufrufer
-                 danach selbst.
-
-        Gibt True zurück wenn ein Treffer eingereiht wurde, sonst False
-        (die Fehlermeldung wurde dann bereits gesendet). `pending`: bereits
-        gestartete Suche (search_query()), siehe !p.
-        """
-        results = await self._extract_info_or_report(
-            ctx, search_query(eingabe), "search",
-            status_key="status.searching", timeout_key=timeout_key,
-            error_key="error.search_error",
-            log_msg=f"[{log_tag}] Fehler bei Suche",
-            pending=pending,
-        )
-        if results is _YTDLP_FAILED:
-            return False
-
-        entries = (results.get("entries") or [])[:3]
-        if not entries:
-            await ctx.send(t("error.no_results"))
-            return False
-
-        first = entries[0]
-        url = first.get("webpage_url") or first.get("url")
-        title = first.get("title", t("misc.unknown_title"))
-        if self.is_playing:
-            # Läuft schon Musik → nur Metadaten vorwärmen; geladen wird per Prefetch,
-            # wenn der Titel an der Reihe ist (Bandbreite bleibt beim aktuellen Song).
-            spawn(self.dl._start_resolve(url), "Metadaten-Vorwärmen")
-        else:
-            # Dieser Treffer startet gleich → Download sofort anstoßen, damit er
-            # parallel zu den folgenden Discord-Nachrichten läuft statt danach.
-            self.dl.prime_first_hit(url, title)
-
-        if insert == "evict_or_back":
-            evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
-            if evicted:
-                logger.info(f"[{log_tag}] Autoplay-Song verdrängt: {evicted}")
-                self.queue.appendleft((url, title))
-            else:
-                self.queue.append((url, title))
-        elif insert == "evict_front":
-            self._evict_autoplay_song()
-            self.queue.appendleft((url, title))
-        else:  # "front"
-            self.queue.appendleft((url, title))
-
-        # Alternativen (Treffer 2 und 3) als Buttons anzeigen
-        alternatives = entries[1:]
-        if alternatives:
-            view = SearchAutoplayView(
-                first, alternatives, self, ctx,
-                base_content=t(base_content_key, title=title) if base_content_key else None,
-            )
-            letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            alt_lines = "\n".join(
-                t("misc.option_line", letter=letters[i], title=e.get("title", t("misc.unknown_title")))
-                for i, e in enumerate(alternatives)
-            )
-            msg = await ctx.send(
-                t(with_alts_key, title=title, alts=alt_lines),
-                view=view,
-            )
-            view.message = msg
-        else:
-            await ctx.send(t(no_alts_key, title=title))
-        return True
-
-    async def _fetch_single_track_info(self, ctx, eingabe, log_tag):
-        """Gemeinsamer Direkt-URL-Zweig von !next und !now (ohne Playlists).
-
-        Löst die URL via url_ydl auf; Playlists werden abgelehnt
-        (error.next_no_playlist). Gibt (url, title) zurück oder None, wenn
-        bereits eine Fehlermeldung gesendet wurde. !p behält seinen eigenen
-        URL-Zweig: Playlist-Unterstützung, Duplikat-Warnung und andere
-        Meldungs-Keys.
-        """
-        info = await self._extract_info_or_report(
-            ctx, eingabe, "url",
-            status_key="status.processing_url", timeout_key="error.timeout",
-            error_key="error.fetch_error",
-            log_msg=f"[{log_tag}] Fehler beim Abrufen von yt_dlp-Infos",
-        )
-        if info is _YTDLP_FAILED:
-            return None
-
-        if "entries" in info:
-            await ctx.send(t("error.next_no_playlist"))
-            return None
-
-        url = info.get("webpage_url") or eingabe
-        title = info.get("title", t("misc.unknown_title"))
-        return (url, title)

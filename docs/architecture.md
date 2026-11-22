@@ -28,11 +28,16 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_playback.py`** — `PlaybackMixin`: `play_next`-Orchestrator (delegiert an
     `_handle_queue_empty`, `_build_audio_source`, `_make_after_playing`, `_snapshot_track_state`,
     `_build_np_view`, `_schedule_background_work`, `_skip_broken_track` → [playback.md](architecture/playback.md)),
-    `_stop_for_advance`, Prefetch-Kick. Der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` steckt in vier Helpern:
-  `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
-  Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als
-  Parameter — Semantik-Unterschiede der drei Befehle stehen in der Docstring), `_fetch_single_track_info`
-  (URL-Zweig von `!next`/`!now`; `!p` behält seinen eigenen wegen Playlist-Support + Duplikat-Warnung).
+    `_stop_for_advance`. Erbt die zwei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
+  - **`cogs/music_enqueue.py`** — `EnqueueMixin`: der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` in vier Helpern:
+    `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
+    Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als
+    Parameter — Semantik-Unterschiede der drei Befehle stehen in der Docstring), `_fetch_single_track_info`
+    (URL-Zweig von `!next`/`!now`; `!p` behält seinen eigenen wegen Playlist-Support + Duplikat-Warnung).
+    Dazu `search_query` und `start_early`.
+  - **`cogs/music_prefetch.py`** — `PrefetchMixin`: stößt das Vorladen an (`_prefetch_upcoming`, `_kick_prefetch`,
+    `_restart_prefetch`, `_prefetch_autoplay`) und nimmt den Autoplay-Song wieder aus der Queue
+    (`_evict_autoplay_song`). Geladen wird im Downloader.
   - **`cogs/music_voice_ui.py`** — `VoiceLifecycleMixin`: Auto-/Idle-Leave, `_voice_watchdog` (auch toter
     Voice-Poller), Voice-Reparatur nach Gateway-Abbruch (`on_socket_raw_receive`/`on_disconnect`/`on_resumed`/
     `on_ready` → `_heal_voice`/`_heal_one`, `GATEWAY_ZOMBIE_SECONDS`, danach Chat-Hinweis `status.voice_rebuilt(_track)`) →

@@ -46,6 +46,7 @@ Modul-Übersicht und Themen-Dateien → [`docs/architecture.md`](docs/architectu
 [`docs/sprachsteuerung-testen.md`](docs/sprachsteuerung-testen.md). Größte Dateien: `cogs/downloader.py`
 (`resolve_track`-Phasen) + Mixins `downloader_ydl.py` (yt_dlp-Instanzen, Cookies, Extraktion) /
 `downloader_cache.py` (Metadaten-Cache) / `downloader_prefetch.py` / `downloader_cleanup.py` /
-`downloader_progressive.py` (In-Flight-Registry, progressiver Download), `cogs/music.py` + Mixins `music_playback.py` / `music_voice_ui.py`
+`downloader_progressive.py` (In-Flight-Registry, progressiver Download), `cogs/music.py` + Mixins `music_playback.py`
+(`play_next`-Kern, erbt `music_enqueue.py` / `music_prefetch.py`) / `music_voice_ui.py`
 (Voice-Lifecycle, Reparatur, Watchdog) / `music_radio.py` / `music_stats.py` / `music_queue_io.py` → [ADR 0009](docs/adr/0009-music-cog-mixin-zerlegung.md).
 `cogs/dm_bridge.py` = HTTP-Server für den DM-Bot (`/speak`, `/command`, `/health`, `/debug`) → [ADR 0008](docs/adr/0008-dm-bridge-blocking-speak-ohne-callback.md).
