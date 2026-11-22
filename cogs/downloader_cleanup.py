@@ -39,22 +39,8 @@ class DownloadsCleanupMixin:
         geschluckt: Cleanup darf niemals einen neuen Fehlerpfad einführen –
         im Zweifel bleibt eine Datei liegen.
         """
-        # Aufgeschobene Löschungen (Windows: Datei war beim unlink in Benutzung)
-        # zuerst nachholen – unabhängig vom DOWNLOADS_MAX_MB-Flag. Tabu bleiben
-        # die aktive FFmpeg-Quelle und wachsende progressive Dateien: ein Pfad
-        # aus der Pending-Liste könnte inzwischen neu heruntergeladen worden
-        # und wieder aktiv sein.
-        _drain_protect = set()
-        for tabu in (self.last_resolved_file, *(self._progressive_files or {}).values()):
-            if tabu is not None:
-                try:
-                    _drain_protect.add(Path(tabu).resolve())
-                except OSError:
-                    pass
-        try:
-            await asyncio.to_thread(drain_pending_deletes, _drain_protect)
-        except Exception:
-            pass  # Drain darf nie einen neuen Fehlerpfad einführen
+        # Zuerst und unabhängig vom DOWNLOADS_MAX_MB-Flag.
+        await self._drain_pending()
 
         if DOWNLOADS_MAX_MB <= 0:
             return  # Flag nicht gesetzt → heutiges Verhalten, kein Cleanup
@@ -64,7 +50,38 @@ class DownloadsCleanupMixin:
             urls, titles = self.protected_provider()
         except Exception:
             return
+        protected_paths = self._protected_paths(urls, extra_protected)
+        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel> [<id>].<ext>"):
+        # greift auch, wenn der Cache-Eintrag eines Queue-Songs fehlt/abgelaufen ist.
+        protected_stems = {t for t in titles if t}
+        try:
+            await asyncio.to_thread(self._cleanup_downloads_sync, protected_paths, protected_stems)
+        except Exception as e:
+            logger.warning(f"[Cleanup] Fehlgeschlagen (ignoriert): {e}")
+
+    async def _drain_pending(self):
+        """Holt aufgeschobene Löschungen nach (Windows: Datei war beim unlink
+        in Benutzung). Tabu bleiben die aktive FFmpeg-Quelle und wachsende
+        progressive Dateien: ein Pfad aus der Pending-Liste könnte inzwischen
+        neu heruntergeladen worden und wieder aktiv sein."""
+        protect = set()
+        for tabu in (self.last_resolved_file, *(self._progressive_files or {}).values()):
+            if tabu is not None:
+                try:
+                    protect.add(Path(tabu).resolve())
+                except OSError:
+                    pass
+        try:
+            await asyncio.to_thread(drain_pending_deletes, protect)
+        except Exception:
+            pass  # Drain darf nie einen neuen Fehlerpfad einführen
+
+    def _protected_paths(self, urls, extra_protected: Path | None = None) -> set:
+        """Erste Schutzschiene des Größen-Cleanups: aufgelöste Pfade, die nicht
+        gelöscht werden dürfen."""
         protected_paths = set()
+        # Dateien der Songs in Queue/current_track, soweit ihr Cache-Eintrag
+        # einen Dateinamen hergibt.
         for u in urls:
             info = self._url_cache.get(u)
             if not info:
@@ -84,13 +101,7 @@ class DownloadsCleanupMixin:
                     protected_paths.add(self._sidecar_for(Path(tabu)).resolve())
                 except Exception:
                     pass
-        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel> [<id>].<ext>"):
-        # greift auch, wenn der Cache-Eintrag eines Queue-Songs fehlt/abgelaufen ist.
-        protected_stems = {t for t in titles if t}
-        try:
-            await asyncio.to_thread(self._cleanup_downloads_sync, protected_paths, protected_stems)
-        except Exception as e:
-            logger.warning(f"[Cleanup] Fehlgeschlagen (ignoriert): {e}")
+        return protected_paths
 
     def _cleanup_downloads_sync(self, protected_paths: set, protected_stems: set):
         """Löscht die ältesten Dateien (mtime), bis das Limit eingehalten ist.

@@ -9,9 +9,7 @@ from pathlib import Path
 
 import yt_dlp
 from config import YDL_BROWSER, YDL_COOKIES_FILE
-from utils.files import atomic_write_text
 from utils.logger import logger
-from cogs.downloader_cache import METADATA_CACHE_FILE
 
 DOWNLOAD_DIR = Path("downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,9 +89,7 @@ class YdlMixin:
         if self._cookie_mode or not self._cookies_configured():
             return False
         self._cookie_mode = True
-        self._url_cache.clear()
-        self._cache_timestamps.clear()
-        self._pending_resolves.clear()
+        self._prune_cache()
         self._init_ydl()
         logger.warning(f"[Cookies] YouTube verlangt eine angemeldete Session ({grund}) – Cookie-Modus aktiv.")
         return True
@@ -117,30 +113,30 @@ class YdlMixin:
         Timeouts werden nicht wiederholt – der Aufrufer meldet sie selbst.
         Raises asyncio.TimeoutError nach `timeout` Sekunden.
         """
-        def _extract():
-            return asyncio.to_thread(
-                getattr(self, self._YDL_KINDS[kind]).extract_info, query, download=False
+        def attempt(ydl=None):
+            # Ohne ydl: die Instanz der Art, erst jetzt aufgelöst (siehe _YDL_KINDS).
+            if ydl is None:
+                ydl = getattr(self, self._YDL_KINDS[kind])
+            return asyncio.wait_for(
+                asyncio.to_thread(ydl.extract_info, query, download=False), timeout=timeout
             )
 
         try:
-            return await asyncio.wait_for(_extract(), timeout=timeout)
+            return await attempt()
         except asyncio.TimeoutError:
             raise
         except Exception as e:
             if self._needs_cookies(e) and self.enable_cookie_mode(str(e)[:120]):
                 logger.info(f"[Cookies] Zweitversuch mit Cookies: {query[:80]}")
-            elif self._player_opts() and kind in ("main", "url", "playlist") and self._needs_client_fallback(e):
+            elif self._wants_client_fallback(e, kind):
                 # Schneller Client kann dieses Video nicht → einmal mit den
                 # yt_dlp-Standard-Clients (frische Wegwerf-Instanz, threadsicher).
                 logger.info(f"[yt-dlp] {'/'.join(FAST_PLAYER_CLIENTS)} scheiterte ({str(e)[:80]}) – "
                             f"Zweitversuch mit Standard-Clients: {query[:80]}")
-                fallback = self._build_ydl(kind, fast=False)
-                return await asyncio.wait_for(
-                    asyncio.to_thread(fallback.extract_info, query, download=False), timeout=timeout
-                )
+                return await attempt(self._build_ydl(kind, fast=False))
             else:
                 raise
-        return await asyncio.wait_for(_extract(), timeout=timeout)
+        return await attempt()
 
     def _player_opts(self, fast: bool = True) -> dict:
         """extractor_args für den schnellen YouTube-Client (FAST_PLAYER_CLIENTS).
@@ -154,11 +150,28 @@ class YdlMixin:
         msg = str(exc).lower()
         return any(marker in msg for marker in CLIENT_FALLBACK_MARKERS)
 
-    def _build_base_opts(self, fast: bool = True) -> dict:
-        _cookies = self._cookie_opts()
+    def _wants_client_fallback(self, exc: BaseException, kind: str) -> bool:
+        """Lohnt ein Zweitversuch mit den yt_dlp-Standard-Clients? Nur wenn der
+        schnelle Client aktiv ist, die Art ihn überhaupt benutzt (search und
+        autoplay sind flach) und der Fehler danach aussieht."""
+        return bool(self._player_opts()) and kind in ("main", "url", "playlist") and self._needs_client_fallback(exc)
+
+    def _quiet_opts(self) -> dict:
+        """Gemeinsamer Sockel aller yt_dlp-Instanzen."""
         return {
             "quiet": True,
             "no_warnings": True,
+            # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
+            # sodass asyncio.wait_for nicht auf den Thread warten muss.
+            "socket_timeout": 15,
+            # Node.js als JS-Runtime für den EJS-Signature-Solver aktivieren.
+            "js_runtimes": {"node": {}},
+            **self._cookie_opts(),
+        }
+
+    def _build_base_opts(self, fast: bool = True) -> dict:
+        return {
+            **self._quiet_opts(),
             # Bevorzugt Opus/webm mit mindestens 160kbps (YouTube's höchste Audio-Tier),
             # fällt auf 128kbps, dann beliebiges webm, dann Opus, dann best zurück.
             # prefer_free_formats bevorzugt Opus über AAC bei gleichwertiger Qualität.
@@ -171,12 +184,6 @@ class YdlMixin:
             # Die Video-ID gehört in den Namen: zwei verschiedene Videos mit
             # gleichem Titel teilten sich sonst eine Cache-Datei.
             "outtmpl": str(DOWNLOAD_DIR / "%(title)s [%(id)s].%(ext)s"),
-            # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
-            # sodass asyncio.wait_for nicht auf den Thread warten muss.
-            "socket_timeout": 15,
-            # Node.js als JS-Runtime für den EJS-Signature-Solver aktivieren.
-            "js_runtimes": {"node": {}},
-            **_cookies,
             **self._player_opts(fast),
         }
 
@@ -200,8 +207,6 @@ class YdlMixin:
         fast=False baut sie ohne den schnellen Client – für den einmaligen
         Rückfall in extract_info_async. search/autoplay sind flach (keine
         Player-Abfrage), dort ändert fast nichts."""
-        _cookies = self._cookie_opts()
-        _js = {"js_runtimes": {"node": {}}}
         if kind == "main":
             base_opts = self._build_base_opts(fast)
             if self.audio_format == "mp3":
@@ -214,43 +219,20 @@ class YdlMixin:
                     }
                 ]
             return yt_dlp.YoutubeDL(base_opts)
+        quiet = self._quiet_opts()
+        # Flach, nur Metadaten: Suche und Autoplay.
+        flat = {**quiet, "extract_flat": True, "skip_download": True}
         if kind == "search":
-            return yt_dlp.YoutubeDL({
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "socket_timeout": 15,
-                **_cookies,
-                **_js,
-            })
+            return yt_dlp.YoutubeDL(flat)
         if kind == "autoplay":
-            # Autoplay: nur Metadaten, max. 10 Einträge – kein vollständiger Playlist-Scan.
-            return yt_dlp.YoutubeDL({
-                "quiet": True,
-                "no_warnings": True,
-                "extract_flat": True,
-                "skip_download": True,
-                "noplaylist": False,
-                "playlistend": 10,
-                "socket_timeout": 15,
-                **_cookies,
-                **_js,
-            })
-        _url_base = {
-            "quiet": True,
-            "no_warnings": True,
-            "format": "bestaudio/best",
-            "default_search": "ytsearch",
-            "socket_timeout": 15,
-            **_cookies,
-            **_js,
-            **self._player_opts(fast),
-        }
+            # Max. 10 Einträge – kein vollständiger Playlist-Scan.
+            return yt_dlp.YoutubeDL({**flat, "noplaylist": False, "playlistend": 10})
+        # Mit Player-Abfrage: einzelne URL und Playlist.
+        by_url = {**quiet, "format": "bestaudio/best", "default_search": "ytsearch", **self._player_opts(fast)}
         if kind == "url":
-            return yt_dlp.YoutubeDL({**_url_base, "noplaylist": True, "extract_flat": False})
+            return yt_dlp.YoutubeDL({**by_url, "noplaylist": True, "extract_flat": False})
         if kind == "playlist":
-            return yt_dlp.YoutubeDL({**_url_base, "noplaylist": False, "extract_flat": "in_playlist"})
+            return yt_dlp.YoutubeDL({**by_url, "noplaylist": False, "extract_flat": "in_playlist"})
         raise ValueError(f"Unbekannter yt_dlp-Typ: {kind}")
 
     def _init_ydl(self):
@@ -270,13 +252,7 @@ class YdlMixin:
         """
         self._save_cache()
         self.audio_format = audio_format
-        if keep_urls is not None:
-            self._url_cache = {k: v for k, v in self._url_cache.items() if k in keep_urls}
-            self._cache_timestamps = {k: v for k, v in self._cache_timestamps.items() if k in keep_urls}
-        else:
-            self._url_cache.clear()
-            self._cache_timestamps.clear()
-        self._pending_resolves.clear()
+        self._prune_cache(keep_urls)
         self._init_ydl()
 
     async def rebuild_async(self, audio_format: str, keep_urls: set | None = None):
@@ -289,28 +265,14 @@ class YdlMixin:
         Muss auf dem Event-Loop aufgerufen werden.
         """
         # --- Event-Loop: Snapshot für die Datei, dann Zustand umstellen ---
-        try:
-            payload = self._serialize_cache()
-        except Exception as e:
-            payload = None
-            logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+        payload = self._snapshot_cache()
         self.audio_format = audio_format
-        if keep_urls is not None:
-            self._url_cache = {k: v for k, v in self._url_cache.items() if k in keep_urls}
-            self._cache_timestamps = {k: v for k, v in self._cache_timestamps.items() if k in keep_urls}
-        else:
-            self._url_cache.clear()
-            self._cache_timestamps.clear()
-        self._pending_resolves.clear()
+        self._prune_cache(keep_urls)
         replaced = self.ydl
 
         # --- Worker-Thread: schreiben und bauen, ohne self zu verändern ---
         def _write_and_build():
-            if payload is not None:
-                try:
-                    atomic_write_text(METADATA_CACHE_FILE, payload)
-                except Exception as e:
-                    logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+            self._write_cache(payload)
             return {attr: self._build_ydl(kind) for kind, attr in self._YDL_KINDS.items()}
 
         built = await asyncio.to_thread(_write_and_build)

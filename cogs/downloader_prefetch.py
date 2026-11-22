@@ -6,7 +6,6 @@ In-Flight-Registry (ADR 0002); die Queue-Downloads laufen sequenziell unter
 dem Lock in _prefetch_one, weil yt_dlp nicht thread-safe ist.
 """
 import asyncio
-import time
 from pathlib import Path
 
 from utils.files import safe_unlink
@@ -161,11 +160,7 @@ class PrefetchMixin:
                     timeout=120.0,
                 )
                 if full_info:
-                    if "entries" in full_info:
-                        full_info = full_info["entries"][0]
-                    self._url_cache[url] = full_info
-                    self._cache_timestamps[url] = time.time()
-                    self._cache_dirty = True
+                    full_info = self._store_info(url, full_info)
                 logger.info(f"[Autoplay Prefetch] Fertig: {title}")
                 # Der frisch geladene Song hängt noch nicht in der Queue (macht der
                 # Caller) → seine Datei explizit vor dem Cleanup schützen.

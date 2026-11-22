@@ -56,6 +56,17 @@ class MetadataCacheMixin:
         self._url_cache.pop(url, None)
         self._cache_timestamps.pop(url, None)
 
+    def _prune_cache(self, keep_urls: set | None = None):
+        """Dünnt den Cache auf keep_urls aus (None = komplett leeren) und
+        vergisst die wartenden Resolves. Nur auf dem Event-Loop aufrufen."""
+        if keep_urls is not None:
+            self._url_cache = {k: v for k, v in self._url_cache.items() if k in keep_urls}
+            self._cache_timestamps = {k: v for k, v in self._cache_timestamps.items() if k in keep_urls}
+        else:
+            self._url_cache.clear()
+            self._cache_timestamps.clear()
+        self._pending_resolves.clear()
+
     def _usable_cached_info(self, url: str):
         """Cache-Eintrag für url, sofern er noch verwendbar ist – sonst None
         (der Aufrufer behandelt das als Cache-Miss und extrahiert frisch).
@@ -136,12 +147,29 @@ class MetadataCacheMixin:
                 data[url]["_ts"] = ts
         return json.dumps(data, ensure_ascii=False, default=str)
 
-    def _save_cache(self):
-        """Schreibt aktuellen Metadaten-Cache synchron auf Disk (reduziert)."""
+    def _snapshot_cache(self) -> str | None:
+        """_serialize_cache, das nie wirft: None, wenn der Snapshot scheitert
+        (dann wird nichts geschrieben). Wie _serialize_cache auf dem Event-Loop."""
         try:
-            atomic_write_text(METADATA_CACHE_FILE, self._serialize_cache())
+            return self._serialize_cache()
         except Exception as e:
             logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+            return None
+
+    @staticmethod
+    def _write_cache(payload: str | None):
+        """Schreibt einen Snapshot aus _snapshot_cache auf Disk. Fasst self
+        nicht an und darf deshalb im Worker-Thread laufen."""
+        if payload is None:
+            return
+        try:
+            atomic_write_text(METADATA_CACHE_FILE, payload)
+        except Exception as e:
+            logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+
+    def _save_cache(self):
+        """Schreibt aktuellen Metadaten-Cache synchron auf Disk (reduziert)."""
+        self._write_cache(self._snapshot_cache())
 
     def flush_cache_now(self):
         """Synchroner Flush für Shutdown-Pfade (cog_unload, !restart)."""
@@ -165,17 +193,21 @@ class MetadataCacheMixin:
             self._cache_dirty = True
             logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
 
-    async def _fetch_info(self, url: str) -> dict:
-        """extract_info im Worker-Thread; entpackt Playlist-Wrapper, cached das
-        volle Info-Dict in-memory und markiert den Cache als dirty (persistiert
-        wird reduziert und gedebounct)."""
-        info = await self.extract_info_async(url, "main")
+    def _store_info(self, url: str, info: dict) -> dict:
+        """Legt ein frisch extrahiertes Info-Dict im Cache ab: entpackt den
+        Playlist-Wrapper, cached das volle Dict in-memory und markiert den
+        Cache als dirty (persistiert wird reduziert und gedebounct). Gibt das
+        abgelegte Dict zurück."""
         if "entries" in info:
             info = info["entries"][0]
         self._url_cache[url] = info
         self._cache_timestamps[url] = time.time()
         self._cache_dirty = True
         return info
+
+    async def _fetch_info(self, url: str) -> dict:
+        """extract_info im Worker-Thread, Ergebnis landet über _store_info im Cache."""
+        return self._store_info(url, await self.extract_info_async(url, "main"))
 
     async def _start_resolve(self, url: str):
         """Startet extract_info als Hintergrund-Task damit resolve_track() einen Cache-Hit findet."""
@@ -203,11 +235,7 @@ class MetadataCacheMixin:
             logger.info("[Warmup] Starte yt_dlp JS-Player-Vorwärmung im Hintergrund ...")
             info = await self.extract_info_async(warmup_url, "main", timeout=25.0)
             if info:
-                if "entries" in info:
-                    info = info["entries"][0]
-                self._url_cache[warmup_url] = info
-                self._cache_timestamps[warmup_url] = time.time()
-                self._cache_dirty = True
+                self._store_info(warmup_url, info)
             logger.info("[Warmup] yt_dlp JS-Player-Cache bereit.")
         except Exception as e:
             logger.debug(f"[Warmup] Fehlgeschlagen (ignoriert): {e}")
