@@ -185,6 +185,51 @@ class Downloader(ProgressiveDownloadMixin):
         self._pending_resolves.clear()
         self._init_ydl()
 
+    async def rebuild_async(self, audio_format: str, keep_urls: set | None = None):
+        """Wie rebuild(), aber für den laufenden Betrieb (Wartung alle 50 Songs).
+
+        Nur das Bauen der yt_dlp-Instanzen und der Datei-Write laufen im
+        Worker-Thread. Jede Zustandsänderung – Format, _url_cache,
+        _cache_timestamps, _pending_resolves und der Tausch der Instanzen –
+        passiert auf dem Event-Loop, der diese Strukturen gleichzeitig benutzt.
+        Muss auf dem Event-Loop aufgerufen werden.
+        """
+        # --- Event-Loop: Snapshot für die Datei, dann Zustand umstellen ---
+        try:
+            payload = self._serialize_cache()
+        except Exception as e:
+            payload = None
+            logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+        self.audio_format = audio_format
+        if keep_urls is not None:
+            self._url_cache = {k: v for k, v in self._url_cache.items() if k in keep_urls}
+            self._cache_timestamps = {k: v for k, v in self._cache_timestamps.items() if k in keep_urls}
+        else:
+            self._url_cache.clear()
+            self._cache_timestamps.clear()
+        self._pending_resolves.clear()
+        replaced = self.ydl
+
+        # --- Worker-Thread: schreiben und bauen, ohne self zu verändern ---
+        def _write_and_build():
+            if payload is not None:
+                try:
+                    atomic_write_text(METADATA_CACHE_FILE, payload)
+                except Exception as e:
+                    logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
+            return {attr: self._build_ydl(kind) for kind, attr in self._YDL_KINDS.items()}
+
+        built = await asyncio.to_thread(_write_and_build)
+
+        # --- Event-Loop: Instanzen tauschen ---
+        if self.ydl is not replaced:
+            # Während des Bauens hat ein anderer Pfad die Instanzen bereits neu
+            # aufgebaut (!format, !reloadcookies, Cookie-Fallback) – dessen
+            # Stand ist der neuere, die hier gebauten wären veraltet.
+            return
+        for attr, instance in built.items():
+            setattr(self, attr, instance)
+
     def clear_cache(self):
         self._url_cache.clear()
 

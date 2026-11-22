@@ -422,7 +422,8 @@ class PlaybackMixin:
         Orchestrator (ADR 0007/0009)."""
         # Alle 50 Songs yt_dlp-Instanzen neu erstellen, damit interne Caches
         # (JS-Signatur-Parser, Format-Metadaten, HTTP-Pool) nicht unbegrenzt wachsen.
-        # Im Hintergrund-Thread, damit der Event-Loop nicht blockiert wird.
+        # Gebaut wird im Hintergrund-Thread, damit der Event-Loop nicht blockiert;
+        # Cache-Bereinigung und Instanz-Tausch macht rebuild_async auf dem Loop.
         self._songs_played += 1
         if self._songs_played % 50 == 0:
             logger.info(f"[Maintenance] {self._songs_played} Songs gespielt – yt_dlp-Instanzen werden neu erstellt.")
@@ -430,7 +431,7 @@ class PlaybackMixin:
             if self.current_track:
                 _keep.add(self.current_track[0])
             _fmt = self.audio_format
-            spawn(asyncio.to_thread(self.dl.rebuild, _fmt, _keep), "yt_dlp-Rebuild")
+            spawn(self.dl.rebuild_async(_fmt, _keep), "yt_dlp-Rebuild")
 
         # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
         # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
