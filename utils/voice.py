@@ -24,6 +24,22 @@ def stop_playback(voice_client) -> None:
     (getattr(voice_client, "stop_playing", None) or voice_client.stop)()
 
 
+class PlayerToken:
+    """Gehört zu genau einem gestarteten Player (Song oder Radio).
+
+    discord.py ersetzt in play() einen PAUSIERTEN Player, ohne ihn zu stoppen
+    (is_playing() ist dann False) – Thread und FFmpeg-Prozess blieben für immer
+    hängen. play_next stoppt so einen Player deshalb selbst und setzt vorher
+    `discarded`: der after-Callback des verworfenen Players (läuft später im
+    Player-Thread) darf dann nichts mehr am Wiedergabe-Zustand anfassen – der
+    gehört bereits dem neuen Track.
+    """
+    __slots__ = ("discarded",)
+
+    def __init__(self):
+        self.discarded = False
+
+
 _safe_recv_cls = None
 
 

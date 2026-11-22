@@ -32,7 +32,7 @@ import time
 import discord
 
 from utils.logger import logger
-from utils.voice import stop_playback
+from utils.voice import PlayerToken, stop_playback
 from utils.i18n import t
 from utils.text import link_label, normalize_title
 from utils.ffmpeg import stream_wait_seconds
@@ -73,6 +73,9 @@ class PlaybackMixin:
     # Resume, Voice-Reparatur). None = ungebunden. Klassen-Default, damit auch
     # ohne __init__ erzeugte Instanzen (Tests via __new__) definiert sind.
     _seek_offset_url = None
+    # Token des zuletzt gestarteten Players (Song oder Radio) – siehe
+    # utils.voice.PlayerToken und _discard_paused_player.
+    _player_token = None
 
     def _take_seek_offset(self, url: str) -> int:
         """Konsumiert den anstehenden Seek-Offset für den gerade aus der Queue
@@ -152,6 +155,22 @@ class PlaybackMixin:
         aktiver Sprachsteuerung würde ein rohes stop() auch den Audio-Empfang
         beenden."""
         self._suppress_resume = True
+        stop_playback(voice_client)
+
+    def _discard_paused_player(self, voice_client):
+        """Stoppt einen pausierten Player, unmittelbar bevor play_next einen
+        neuen startet (!x, dann !p/!replay/!loadq/Buttons). Ohne diesen Stopp
+        ersetzt discord.py den pausierten Player nur – Thread und FFmpeg-Prozess
+        leaken.
+
+        Der Player wird vorher als verworfen markiert: sein after-Callback
+        reiht den alten Track nicht wieder ein, löst keinen zweiten play_next
+        aus und meldet kein Wiedergabe-Ende. Bewusst nicht über
+        _stop_for_advance – das One-Shot-Flag _suppress_resume würde sonst
+        vom falschen Callback konsumiert oder in den neuen Track leaken."""
+        token = self._player_token
+        if token is not None:
+            token.discarded = True
         stop_playback(voice_client)
 
     async def _resolve_track(self, url: str, title: str, force_download: bool = False, seek_offset: int = 0):
@@ -273,8 +292,10 @@ class PlaybackMixin:
             )
             # after_playing-Callback bauen: die vormaligen Closure-Variablen sind
             # jetzt Factory-Parameter, die interne Reihenfolge bleibt unverändert.
+            token = PlayerToken()
             after_playing = self._make_after_playing(
-                ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title
+                ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title,
+                token,
             )
 
             if not ctx.voice_client or not ctx.voice_client.is_connected():
@@ -300,7 +321,12 @@ class PlaybackMixin:
             generation, is_loop_repeat, prev_track = self._snapshot_track_state(ctx, url, title, duration)
             self._current_seek_offset = seek_offset
 
+            # Pausierter Player (!x, dann neuer Start): discord.py würde ihn in
+            # play() nur ersetzen, nicht stoppen. Synchron, direkt vor play().
+            if ctx.voice_client.is_paused():
+                self._discard_paused_player(ctx.voice_client)
             ctx.voice_client.play(source, after=after_playing)
+            self._player_token = token   # erst nach geglücktem play(): gehört zum laufenden Player
             logger.info(f"[Wiedergabe] Starte: {title}")
 
             if is_loop_repeat:
@@ -545,7 +571,8 @@ class PlaybackMixin:
             )
         return source, stderr_buf
 
-    def _make_after_playing(self, ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title):
+    def _make_after_playing(self, ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title,
+                            token=None):
         """Factory für den after_playing-Callback (ADR 0009).
 
         Der Callback-Body ist verbatim aus play_next übernommen; die vormaligen
@@ -553,7 +580,8 @@ class PlaybackMixin:
         prog_task, filename, duration, url, title, ctx) sind jetzt Factory-
         Parameter. Die
         interne Reihenfolge – Progressive-Resume-Block VOR dem Retry-/Resume-
-        Marker-Reset – bleibt unangetastet.
+        Marker-Reset – bleibt unangetastet. token: PlayerToken dieses Players
+        (siehe _discard_paused_player).
         """
         def after_playing(error):
             """Callback, der nach jedem Track von FFmpeg aufgerufen wird.
@@ -561,6 +589,14 @@ class PlaybackMixin:
             Läuft in einem separaten Thread – daher run_coroutine_threadsafe
             statt await. Direkt awaiten würde hier crashen.
             """
+            if token is not None and token.discarded:
+                # Dieser (pausierte) Player wurde von play_next durch einen neuen
+                # Track ersetzt: der Wiedergabe-Zustand gehört längst dem neuen
+                # Track. Nur den eigenen stderr-Puffer schließen – kein
+                # _playback_done, kein Requeue, kein play_next.
+                self._stderr_tail(stderr_buf)
+                logger.info(f"[Wiedergabe] Pausierter Song durch neuen Start ersetzt: {title}")
+                return
             self.bot.loop.call_soon_threadsafe(self._playback_done.set)
             # One-Shot: Flag immer konsumieren, damit ein absichtlicher Stopp
             # nicht in den after_playing-Lauf eines späteren Tracks leakt.
