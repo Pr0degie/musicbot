@@ -64,8 +64,11 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
 - **`cogs/downloader_progressive.py`** — `ProgressiveDownloadMixin` (Basis von `Downloader`): In-Flight-Registry
   `_inflight` („pro URL maximal ein schreibender Download" → [ADR 0002](adr/0002-inflight-registry.md)),
   progressiver Download (`_start_progressive`, `_run_progressive`, `_wait_for_buffer`, `prime_first_hit`) und
-  die Konstanten `STREAM_THRESHOLD_SECONDS`/`PROGRESSIVE_*` (von `downloader.py` re-exportiert). Zustand in
-  `Downloader.__init__`; `_purge_stale_progressive` liegt in `downloader_cleanup.py` (braucht `DOWNLOAD_DIR`).
+  die Konstanten `STREAM_THRESHOLD_SECONDS`/`PROGRESSIVE_*` (von `downloader.py` re-exportiert). Der Zustand
+  (`_inflight`, `_progressive`, `_progressive_files`, `_incomplete_files`, `_progressive_blocked`) ist hier deklariert
+  und wird von `_init_progressive_state()` angelegt (Aufruf in `Downloader.__init__`). Dazu die gemeinsamen Helfer
+  `_settle` (fremden Task abwarten) und `_remove_corpse` (Leiche wegräumen). `_purge_stale_progressive` liegt in
+  `downloader_cleanup.py` (braucht `DOWNLOAD_DIR`).
 - **`cogs/dm_bridge.py`** — `DMBridge`: aiohttp server (`DM_BRIDGE_HOST`/`DM_BRIDGE_PORT`/`DM_BRIDGE_SECRET`
   in `config.py`) so a separate DM-Bot (AI dungeon master) can make this bot speak. Default `127.0.0.1` +
   empty secret = classic localhost path mode; set host to a LAN/Tailscale IP + a shared `DM_BRIDGE_SECRET` for

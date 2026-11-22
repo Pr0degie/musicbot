@@ -11,7 +11,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from utils.files import safe_unlink
 from utils.logger import logger
 # Konstanten leben beim progressiven Download; hier re-exportiert für
 # bestehende Importe (music.py, Tests).
@@ -60,22 +59,12 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
     bezüglich Queue/Playback – das bleibt in MusicCommands.
     """
 
-    # Klassen-Defaults, damit auch ohne __init__ erzeugte Instanzen (Tests via
+    # Klassen-Default, damit auch ohne __init__ erzeugte Instanzen (Tests via
     # __new__) einen definierten Zustand haben.
     # Zuletzt von resolve_track gelieferte lokale Datei = die Datei, die FFmpeg
     # gerade abspielt (None wenn die aktive Quelle ein HTTP-Stream ist). Für den
     # Downloads-Cleanup tabu – auch wenn current_track schon weitergewandert ist.
     last_resolved_file = None
-    # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
-    # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
-    _progressive = None          # dict[url → asyncio.Task]: laufende progressive Downloads
-    _progressive_files = None    # dict[url → Path]: Zieldateien (Schutz vor cleanup_downloads)
-    _incomplete_files = None     # set[Path]: resolved Pfade unvollständiger Dateien
-    _progressive_blocked = None  # dict[url → monotonic]: TTL-Blockliste nach Fehlschlag
-    # In-Flight-Registry – Invariante: pro URL maximal ein schreibender Download.
-    # Jeder Pfad, der Bytes für eine URL auf die Platte schreibt (Queue-Prefetch,
-    # Autoplay-Prefetch, progressiv, Download-Fallback), registriert sich hier.
-    _inflight = None             # dict[url → (asyncio.Task, quelle)]
 
     def __init__(self, audio_format: str = "webm"):
         self.audio_format = audio_format
@@ -87,11 +76,7 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         self._url_cache: dict = {}
         self._cache_timestamps: dict[str, float] = {}
         self._pending_resolves: dict[str, asyncio.Task] = {}
-        self._progressive: dict[str, asyncio.Task] = {}
-        self._progressive_files: dict[str, Path] = {}
-        self._incomplete_files: set[Path] = set()
-        self._progressive_blocked: dict[str, float] = {}
-        self._inflight: dict[str, tuple] = {}
+        self._init_progressive_state()
         self._purge_stale_progressive()
         self._load_cache()
         self._drop_cache_entries_without_id()
@@ -328,33 +313,3 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
                 f"– Fallback auf CDN-Stream: {r.title}"
             )
         return None
-
-    # ------------------------------------------------------------------
-    # Helfer, die auch der Prefetch benutzt
-    # ------------------------------------------------------------------
-
-    def _remove_corpse(self, filename: Path) -> bool:
-        """Räumt die Leiche eines gescheiterten progressiven Downloads weg:
-        Datei existiert, ist aber unvollständig. Nur aufrufen, wenn die
-        Registry keinen lebenden Writer für die URL kennt. True = keine Leiche
-        (mehr) im Weg, False = Datei blockiert (FFmpeg liest noch)."""
-        if not (filename.exists() and self.is_incomplete(filename)):
-            return True
-        resolved = filename.resolve()
-        if not safe_unlink(filename):
-            return False
-        safe_unlink(self._sidecar_for(filename))
-        self._incomplete_files.discard(resolved)
-        return True
-
-    async def _settle(self, task, timeout: float | None = None):
-        """Wartet auf das Ende eines fremden Tasks, ohne ihn mitzureißen
-        (shield) und ohne dass sein Fehler durchschlägt. Mit timeout wird
-        höchstens so lange gewartet; der Task läuft danach weiter."""
-        try:
-            if timeout is None:
-                await asyncio.shield(task)
-            else:
-                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-        except Exception:
-            pass

@@ -4,8 +4,10 @@ Der Teil mit den heikelsten Invarianten (ADR 0001, ADR 0002): pro URL
 maximal ein schreibender Download, lebendig vs. Leiche entscheidet allein die
 Registry, eine wachsende Datei wird nie unlinkt oder neu gestartet. Der
 Zustand (_inflight, _progressive, _progressive_blocked, _incomplete_files …)
-wird in Downloader.__init__ angelegt; _purge_stale_progressive liegt beim
-Downloads-Cleanup (downloader_cleanup), weil es DOWNLOAD_DIR braucht.
+ist hier deklariert (Klassen-Defaults None) und wird von
+_init_progressive_state() angelegt, das Downloader.__init__ aufruft.
+_purge_stale_progressive liegt beim Downloads-Cleanup (downloader_cleanup),
+weil es DOWNLOAD_DIR braucht.
 """
 import asyncio
 import copy
@@ -30,6 +32,26 @@ PROGRESSIVE_SIDECAR_SUFFIX = ".inprogress"  # Crash-Marker neben der wachsenden 
 
 
 class ProgressiveDownloadMixin:
+    # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
+    # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
+    _progressive = None          # dict[url → asyncio.Task]: laufende progressive Downloads
+    _progressive_files = None    # dict[url → Path]: Zieldateien (Schutz vor cleanup_downloads)
+    _incomplete_files = None     # set[Path]: resolved Pfade unvollständiger Dateien
+    _progressive_blocked = None  # dict[url → monotonic]: TTL-Blockliste nach Fehlschlag
+    # In-Flight-Registry – Invariante: pro URL maximal ein schreibender Download.
+    # Jeder Pfad, der Bytes für eine URL auf die Platte schreibt (Queue-Prefetch,
+    # Autoplay-Prefetch, progressiv, Download-Fallback), registriert sich hier.
+    _inflight = None             # dict[url → (asyncio.Task, quelle)]
+
+    def _init_progressive_state(self):
+        """Legt den Zustand von Registry und progressivem Download an.
+        Aufgerufen von Downloader.__init__."""
+        self._progressive: dict[str, asyncio.Task] = {}
+        self._progressive_files: dict[str, Path] = {}
+        self._incomplete_files: set[Path] = set()
+        self._progressive_blocked: dict[str, float] = {}
+        self._inflight: dict[str, tuple] = {}
+
     # ------------------------------------------------------------------
     # In-Flight-Registry: pro URL maximal ein schreibender Download
     # ------------------------------------------------------------------
@@ -73,6 +95,18 @@ class ProgressiveDownloadMixin:
         if entry is not None and (task is None or entry[0] is task):
             self._inflight.pop(url, None)
 
+    async def _settle(self, task, timeout: float | None = None):
+        """Wartet auf das Ende eines fremden Tasks, ohne ihn mitzureißen
+        (shield) und ohne dass sein Fehler durchschlägt. Mit timeout wird
+        höchstens so lange gewartet; der Task läuft danach weiter."""
+        try:
+            if timeout is None:
+                await asyncio.shield(task)
+            else:
+                await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Progressiver Download (wachsende Datei spielt, Download läuft weiter)
     # ------------------------------------------------------------------
@@ -90,6 +124,20 @@ class ProgressiveDownloadMixin:
             return Path(path).resolve() in self._incomplete_files
         except OSError:
             return False
+
+    def _remove_corpse(self, filename: Path) -> bool:
+        """Räumt die Leiche eines gescheiterten progressiven Downloads weg:
+        Datei existiert, ist aber unvollständig. Nur aufrufen, wenn die
+        Registry keinen lebenden Writer für die URL kennt. True = keine Leiche
+        (mehr) im Weg, False = Datei blockiert (FFmpeg liest noch)."""
+        if not (filename.exists() and self.is_incomplete(filename)):
+            return True
+        resolved = filename.resolve()
+        if not safe_unlink(filename):
+            return False
+        safe_unlink(self._sidecar_for(filename))
+        self._incomplete_files.discard(resolved)
+        return True
 
     def progressive_task_for(self, url: str):
         """Laufender progressiver Download-Task für diese URL, sonst None."""
