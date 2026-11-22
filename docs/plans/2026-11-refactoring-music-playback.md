@@ -11,6 +11,15 @@
 >
 > **Reihenfolge der zwei Refactoring-Pläne:** zuerst
 > [`2026-11-refactoring-downloader.md`](2026-11-refactoring-downloader.md), danach dieser Plan.
+>
+> **Stand 22.11.2026:** Etappen 1–6 sind umgesetzt (`e73f3df`, `856e90e`, `e6f5fca`, `126b511`, `8f8a432`,
+> `99cfa34`), volle Suite und `ruff` grün. Ergebnis: `music_playback.py` 537 Zeilen, `music_enqueue.py` 241,
+> `music_track_end.py` 275, `music_prefetch.py` 98. Abweichungen vom Plan: `_run_on_loop` und
+> `_LOOP_HANDOFF_TIMEOUT` heißen in `utils/tasks.py` `run_on_loop` und `LOOP_HANDOFF_TIMEOUT`; für Etappe 6
+> kam ein Test dazu (`tests/test_radio_station_switch.py`, Stream-Ende aus einem fremden Thread); die
+> `!loadq`-Stelle aus 5a bleibt inline, weil sie vorher den ersten Titel primt. Offen: die manuelle
+> Smoke-Checkliste (besonders der Radio-Abschnitt wegen Etappe 6), Etappe 7 (Einzelfreigabe) und die Bugs
+> aus dem Anhang.
 
 ## Ziel
 

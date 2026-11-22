@@ -41,7 +41,7 @@ yt_dlp-eigener HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen; Meldung
 heruntergeladen) oder stirbt auch die Datei sofort → Aufgeben mit `error.stream_giveup`. Alle
 Retry-/Resume-Marker (`_stream_retry_url`, `_force_download_url`, `_progressive_resume_url`/`-count`) leben
 bis zum normalen Track-Ende bzw. Trackwechsel; der Marker-Reset läuft **nach** dem Progressive-Resume-Block
-(sonst griffe dessen Kappe nie). Diese Kaskade ist heute nur noch Fallback — Primärpfad für ungecachte kurze
+(in `_on_track_end`: `_resume_growing_file` vor `_clear_markers_after_clean_end`; sonst griffe dessen Kappe nie). Diese Kaskade ist heute nur noch Fallback — Primärpfad für ungecachte kurze
 Tracks ist der progressive Download → [ADR 0001](../adr/0001-progressiver-download-statt-cdn-stream.md). Der
 Stream-Pfad reicht `info["http_headers"]` via `-headers` an FFmpeg durch.
 

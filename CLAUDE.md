@@ -23,7 +23,7 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
   Zuhören `SafeVoiceRecvClient`, fixt den voice_recv-Crash beim Channel-Verlassen) → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
 - Gesprochene Befehle nur durch `VoiceListen.handle_text()`; synthetische Message statt `ctx.invoke`, `ctx.author`
   echtes `Member`; DM-Bot im Channel → kein eigenes Sprachmodell → [ADR 0011](docs/adr/0011-sprachsteuerung-ein-parser-zwei-eingaenge.md).
-- `after_playing`: Marker-Reset **nach** dem Progressive-Resume-Block → [playback.md](docs/architecture/playback.md).
+- Track-Ende (`_on_track_end`): Marker-Reset **nach** dem Progressive-Resume-Schritt → [playback.md](docs/architecture/playback.md).
 - Track-Zustand komplett vor `vc.play()`, nach jedem Post-Play-await `_track_generation` prüfen → [ADR 0007](docs/adr/0007-track-zustand-vor-play-generationszaehler.md).
 - Wachsende Dateien transkodieren, nie `codec=copy` → [ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md).
 - Now-Playing-Karte nur beim aktuellen Song; Altes via `_retire_np_message` zur Textzeile, nie leer editieren. Karte ist
