@@ -1,4 +1,5 @@
-"""QueuePersistenceMixin: Queues speichern/laden (!saveq, !loadq, !lists).
+"""QueuePersistenceMixin: Queues speichern/laden (!saveq, !loadq, !lists)
+und der automatische last_queue.json-Write nach jedem Track.
 
 Per Mehrfachvererbung in MusicCommands eingebunden. Greift auf Instanz-State
 (self.queue, self.current_track, self.is_playing) und die Kern-Methode
@@ -7,15 +8,20 @@ self.play_next zu, die in cogs/music.py definiert sind.
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 from discord.ext import commands
 
 from utils.files import atomic_write_text
 from utils.i18n import t
+from utils.logger import logger
 
 PLAYLISTS_DIR = Path("playlists")
 PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Serialisiert die last_queue.json-Writes der Player-Threads (_write_last_queue).
+_LAST_QUEUE_LOCK = threading.Lock()
 
 
 def _write_playlist(path: Path, tracks: list) -> None:
@@ -34,6 +40,11 @@ def _is_valid_playlist(tracks) -> bool:
 
 
 class QueuePersistenceMixin:
+    # Folgenummern für last_queue.json (Klassen-Defaults für Tests via __new__):
+    # vergeben auf dem Loop beim Snapshot, geprüft beim Schreiben im Thread.
+    _last_queue_seq = 0
+    _last_queue_written = 0
+
     @commands.command(name="saveq", usage="!saveq <name>")
     async def saveq(self, ctx, *, name: str):
         """Speichert die aktuelle Queue unter einem Namen. Verwendung: !saveq <name>"""
@@ -117,3 +128,21 @@ class QueuePersistenceMixin:
             except Exception:
                 lines.append(f"• **{p.stem}**")
         await ctx.send(t("status.saved_queues", lines="\n".join(lines)))
+
+    def _write_last_queue(self, seq, queue_data):
+        """Schreibt den Queue-Snapshot eines Track-Endes nach last_queue.json.
+
+        Blockierendes Datei-I/O – läuft im Player-Thread (aus after_playing),
+        nicht auf dem Event-Loop. Der Write passiert nach dem Anstoßen
+        des nächsten Tracks; stirbt der sofort, könnten sich zwei Writes
+        überholen. Lock + Folgenummer sorgen dafür, dass nie ein älterer
+        Snapshot einen neueren überschreibt."""
+        with _LAST_QUEUE_LOCK:
+            if seq < self._last_queue_written:
+                return
+            try:
+                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
+                self._last_queue_written = seq
+                logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
+            except Exception as e:
+                logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")

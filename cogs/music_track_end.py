@@ -3,17 +3,14 @@
 Der after-Callback, den discord.py im Player-Thread aufruft, reicht die
 Track-Ende-Logik an den Event-Loop weiter (_run_on_loop, ADR 0009). Im
 Thread bleibt nur Datei-I/O: der FFmpeg-stderr-Puffer davor und der
-last_queue.json-Write danach (ADR 0005).
+last_queue.json-Write danach (_write_last_queue in music_queue_io.py, ADR 0005).
 """
 
 import asyncio
 import concurrent.futures
-import json
-import threading
 import time
 from dataclasses import dataclass
 
-from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.i18n import t
 
@@ -24,9 +21,6 @@ PROGRESSIVE_MAX_RESUMES = 2
 # So lange wartet der Player-Thread höchstens darauf, dass der Event-Loop die
 # Track-Ende-Logik übernimmt (normal: Millisekunden).
 _LOOP_HANDOFF_TIMEOUT = 10.0
-
-# Serialisiert die last_queue.json-Writes der Player-Threads (_write_last_queue).
-_LAST_QUEUE_LOCK = threading.Lock()
 
 
 def _run_on_loop(loop, fn, *args):
@@ -309,26 +303,3 @@ class TrackEndMixin:
                 )
 
         fut.add_done_callback(log_exception)
-
-    # Folgenummern für last_queue.json (Klassen-Defaults für Tests via __new__):
-    # vergeben auf dem Loop beim Snapshot, geprüft beim Schreiben im Thread.
-    _last_queue_seq = 0
-    _last_queue_written = 0
-
-    def _write_last_queue(self, seq, queue_data):
-        """Schreibt den Queue-Snapshot eines Track-Endes nach last_queue.json.
-
-        Blockierendes Datei-I/O – läuft im Player-Thread (aus after_playing),
-        nicht auf dem Event-Loop. Der Write passiert nach dem Anstoßen
-        des nächsten Tracks; stirbt der sofort, könnten sich zwei Writes
-        überholen. Lock + Folgenummer sorgen dafür, dass nie ein älterer
-        Snapshot einen neueren überschreibt."""
-        with _LAST_QUEUE_LOCK:
-            if seq < self._last_queue_written:
-                return
-            try:
-                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
-                self._last_queue_written = seq
-                logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
-            except Exception as e:
-                logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")

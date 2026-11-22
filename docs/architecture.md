@@ -28,10 +28,12 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_playback.py`** — `PlaybackMixin`: `play_next`-Orchestrator (delegiert an
     `_handle_queue_empty`, `_build_audio_source`, `_make_after_playing`, `_snapshot_track_state`,
     `_build_np_view`, `_schedule_background_work`, `_skip_broken_track` → [playback.md](architecture/playback.md)),
-    `_stop_for_advance`. Erbt die drei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
+    `_stop_for_advance`. Zwei Helfer für alle Mixins der Cog: `_start_or_prefetch` (nach dem Einreihen starten
+    oder vorladen) und `_wait_playback_done` (auf das Ende des vorherigen Players warten, `False` bei Timeout).
+    Erbt die drei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
   - **`cogs/music_track_end.py`** — `TrackEndMixin`: `_make_after_playing(run)` (Thread-Callback, der die
     Track-Ende-Logik per `_run_on_loop` auf den Event-Loop reicht), `_on_track_end` (die Logik in benannten
-    Schritten), das Wertobjekt `TrackRun` und `_write_last_queue`.
+    Schritten) und das Wertobjekt `TrackRun`.
   - **`cogs/music_enqueue.py`** — `EnqueueMixin`: der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` in vier Helpern:
     `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
     Sentinel `_YTDLP_FAILED`), `_search_and_enqueue` (ytsearch3-Zweig; Insert-Politik/Eviction/i18n-Keys als
@@ -51,7 +53,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_radio.py`** — `RadioMixin`: internet-radio streaming (`_play_radio_stream`, reconnect,
     `!radio`), `RADIO_STATIONS_FILE`
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
-  - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`
+  - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`;
+    außerdem `_write_last_queue` (der `last_queue.json`-Write nach jedem Track, läuft im Player-Thread)
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`), zusammengesetzt aus den fünf Mixins darunter. Selbst enthält
   die Datei nur noch `resolve_track()` mit seinen vier Phasen: `_resolve_metadata` → `_adopt_inflight` →
   `_clear_corpse` → `_acquire_file`. Re-exportiert nur gelesene Konstanten (`CACHE_TTL`, `METADATA_CACHE_FILE`,
@@ -121,7 +124,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
 - **`views/music_controls.py`** — `MusicControlView`: die Now-Playing-Karte als Components-V2-Layout
   ([ADR 0012](adr/0012-now-playing-karte-components-v2.md)) mit ❌ oben rechts (= `!clear`) und der Zeile
   Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop, 🔗 neben den Details (Song-Link zum Kopieren); Buttons spiegeln den Zustand
-  (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `UndoClearView`: Rückgängig-Button unter der
+  (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `np_heading(title, info)` baut die Titelzeile
+  (Künstler/Titel gedreht, Uploader, Link ohne Emojis). `UndoClearView`: Rückgängig-Button unter der
   Geleert-Meldung (30 s). Only current song
   keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel` via `retired_card()`).
   Fortsetzen: (1) paused →

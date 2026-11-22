@@ -17,6 +17,7 @@ from pathlib import Path
 import discord
 import pytest
 
+import cogs.music_queue_io as queue_io_mod
 import cogs.music_track_end as playback_mod
 from conftest import FakeCtx, FakeDownloader, FakeVoiceClient, build_cog, cleanup_cog, make_fake_source
 
@@ -82,7 +83,7 @@ def test_logik_laeuft_auf_dem_loop_datei_io_im_thread(monkeypatch, tmp_path):
             idents["logik"] = threading.get_ident()
             return None
 
-        echtes_schreiben = playback_mod.atomic_write_text
+        echtes_schreiben = queue_io_mod.atomic_write_text
 
         def spy_write(path, text):
             idents["write"] = threading.get_ident()
@@ -90,7 +91,7 @@ def test_logik_laeuft_auf_dem_loop_datei_io_im_thread(monkeypatch, tmp_path):
 
         mc._stderr_tail = spy_stderr
         mc._classify_ffmpeg_error = spy_classify
-        monkeypatch.setattr(playback_mod, "atomic_write_text", spy_write)
+        monkeypatch.setattr(queue_io_mod, "atomic_write_text", spy_write)
 
         await asyncio.to_thread(vc.end_track)      # Player-Thread ruft after_playing
         await asyncio.sleep(0.05)

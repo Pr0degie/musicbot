@@ -293,10 +293,7 @@ class VoiceLifecycleMixin:
         if frozen.was_active:
             # after_playing einmal durchlaufen lassen – sein play_next
             # prallt am Reparatur-Flag ab.
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
+            await self._wait_playback_done()
             await asyncio.sleep(0.2)
 
     async def _reconnect_voice(self, channel, old_vc=None):

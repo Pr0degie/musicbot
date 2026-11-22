@@ -30,9 +30,9 @@ from utils.logger import logger
 from utils.tasks import spawn
 from utils.voice import PlayerToken, start_clock_at_first_packet, stop_playback
 from utils.i18n import t
-from utils.text import link_label, normalize_title
+from utils.text import normalize_title
 from utils.ffmpeg import stream_wait_seconds
-from views.music_controls import MusicControlView
+from views.music_controls import MusicControlView, np_heading
 from cogs.music_enqueue import EnqueueMixin
 from cogs.music_prefetch import PrefetchMixin, _cancel
 from cogs.music_track_end import TrackEndMixin, TrackRun
@@ -46,6 +46,15 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
     # Token des zuletzt gestarteten Players (Song oder Radio) – siehe
     # utils.voice.PlayerToken und _discard_paused_player.
     _player_token = None
+
+    async def _start_or_prefetch(self, ctx):
+        """Nach dem Einreihen (!p, !next): Läuft nichts, die Wiedergabe
+        starten. Läuft schon Musik, die neuen Titel sofort vorladen."""
+        if not self.is_playing:
+            self.is_playing = True
+            await self.play_next(ctx)
+        else:
+            self._kick_prefetch()
 
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
@@ -68,9 +77,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # Kurzes Warten: nach einem Reconnect kann FFmpeg noch im Cleanup sein (exit-code 1)
         # obwohl after_playing bereits ausgelöst wurde – is_playing() wäre dann fälschlicherweise True.
         if ctx.voice_client and ctx.voice_client.is_playing():
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
+            if not await self._wait_playback_done():
                 if ctx.voice_client.is_playing():
                     logger.warning("[play_next] Voice client noch am spielen – konkurrenten Aufruf ignoriert.")
                     return
@@ -222,6 +229,16 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         if self._voice_healing:
             return "Voice-Reparatur läuft – Auto-Advance unterdrückt."
         return None
+
+    async def _wait_playback_done(self, timeout: float = 3.0) -> bool:
+        """Wartet, bis der vorherige Player sein Ende gemeldet hat. True, wenn
+        er fertig ist; False bei Timeout. Wie der Aufrufer auf False reagiert
+        und ob er das Event danach löscht, entscheidet er selbst."""
+        try:
+            await asyncio.wait_for(self._playback_done.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        return True
 
     async def _handle_queue_empty(self, ctx):
         """Leere-Queue-Fall aus play_next: Cleanup, _ended_np-Übergabe, Idle-Timer,
@@ -428,21 +445,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         """Now-Playing-Karte (Components V2) eines frisch gestarteten Tracks
         (synchron, ohne Nebenwirkung)."""
         duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
-        if " - " in title:
-            _artist, _song = title.split(" - ", 1)
-            card_title = f"{_song.strip()} – {_artist.strip()}"
-        elif info.get("uploader"):
-            card_title = f"{title} – {info.get('uploader')}"
-        else:
-            card_title = title
         page = info.get("webpage_url")
-        # Link-Text ohne Emojis: sonst zeigt Discord [Titel](<url>) als Rohtext
-        # statt als Link (utils/text.link_label). Nur-Emoji-Titel → ohne Link.
-        label = link_label(card_title)
-        if page and label:
-            heading = f"### 🎵 [{label}](<{page}>)"
-        else:
-            heading = f"### 🎵 {discord.utils.escape_markdown(card_title)}"
         details = (
             f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
             f" · **{t('embed.format')}** {self.audio_format}"
@@ -450,7 +453,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         uploader = info.get("uploader")
         return MusicControlView(
             self, ctx, song=(url, title),
-            heading=heading,
+            heading=np_heading(title, info),
             body=self._progress_bar(0, duration),   # Fortschrittsbalken sofort bei 0:00 anzeigen
             details=details,
             footer=discord.utils.escape_markdown(uploader) if uploader else None,

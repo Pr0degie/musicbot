@@ -118,9 +118,7 @@ class RadioMixin:
 
         # Sicherheitsnetz: falls FFmpeg noch nicht terminiert ist, kurz warten.
         if ctx.voice_client.is_playing():
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
+            if not await self._wait_playback_done():
                 await ctx.send(t("error.stream_busy"))
                 self._stop_radio()
                 return False
@@ -347,10 +345,7 @@ class RadioMixin:
                 # Musik weicht dem Radio → absichtlicher Stopp: kein Seek-Resume
                 # einer noch wachsenden Datei in after_playing.
                 self._stop_for_advance(ctx.voice_client)
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
+            await self._wait_playback_done()
             self._playback_done.clear()
 
         self._radio_reconnect_count = 0

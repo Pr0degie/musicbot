@@ -52,10 +52,7 @@ class EnqueueMixin:
         self._stop_radio()
         if ctx.voice_client and ctx.voice_client.is_playing():
             stop_playback(ctx.voice_client)
-            try:
-                await asyncio.wait_for(self._playback_done.wait(), timeout=3.0)
-            except asyncio.TimeoutError:
-                pass
+            await self._wait_playback_done()
             self._playback_done.clear()
 
     async def _extract_info_or_report(self, ctx, query, kind, *,

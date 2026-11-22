@@ -8,6 +8,7 @@ from utils.tasks import spawn
 from utils.voice import stop_playback
 from utils.checks import same_voice_allowed
 from utils.i18n import t
+from utils.text import link_label
 
 # Prozessweiter Marker in jeder Button-custom_id: unterscheidet Buttons dieses
 # Bot-Laufs von denen früherer Läufe. Nach einem Neustart tragen alte
@@ -36,6 +37,27 @@ def compact_card_image(thumbnail, song_url=None):
         if m:
             return f"https://i.ytimg.com/vi/{m.group(1)}/mqdefault.jpg"
     return None
+
+
+def np_heading(title, info) -> str:
+    """Titelzeile der Now-Playing-Karte eines Songs (Markdown).
+
+    "Künstler - Titel" wird zu "Titel – Künstler" gedreht, sonst hängt der
+    Uploader hinten an. Mit Seiten-URL wird der Titel ein Link."""
+    if " - " in title:
+        _artist, _song = title.split(" - ", 1)
+        card_title = f"{_song.strip()} – {_artist.strip()}"
+    elif info.get("uploader"):
+        card_title = f"{title} – {info.get('uploader')}"
+    else:
+        card_title = title
+    page = info.get("webpage_url")
+    # Link-Text ohne Emojis: sonst zeigt Discord [Titel](<url>) als Rohtext
+    # statt als Link (utils/text.link_label). Nur-Emoji-Titel → ohne Link.
+    label = link_label(card_title)
+    if page and label:
+        return f"### 🎵 [{label}](<{page}>)"
+    return f"### 🎵 {discord.utils.escape_markdown(card_title)}"
 
 
 class MusicControlView(LayoutView):

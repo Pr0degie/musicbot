@@ -426,11 +426,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             )
             if not queued:
                 return
-            if not self.is_playing:
-                self.is_playing = True
-                await self.play_next(ctx)
-            else:
-                self._kick_prefetch()   # läuft schon Musik → neuen Titel sofort vorladen
+            await self._start_or_prefetch(ctx)
             return
 
         # --- Ab hier: direkte URL oder Playlist ---
@@ -481,11 +477,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                 self.dl.prime_first_hit(url, title)
             await ctx.send(t("status.added", title=title))
 
-        if not self.is_playing:
-            self.is_playing = True
-            await self.play_next(ctx)
-        else:
-            self._kick_prefetch()   # läuft schon Musik → neue Titel sofort vorladen
+        await self._start_or_prefetch(ctx)
 
     @commands.command(name="stop")
     @require_same_voice()
@@ -522,11 +514,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                 return
             self.queue.appendleft((url, title))
             await ctx.send(t("status.next_added", title=title))
-            if not self.is_playing:
-                self.is_playing = True
-                await self.play_next(ctx)
-            else:
-                self._kick_prefetch()
+            await self._start_or_prefetch(ctx)
             return
 
         # Suchbegriff → ersten Treffer an erste Stelle, Alternativen als Buttons
@@ -538,11 +526,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             )
             if not queued:
                 return
-            if not self.is_playing:
-                self.is_playing = True
-                await self.play_next(ctx)
-            else:
-                self._kick_prefetch()
+            await self._start_or_prefetch(ctx)
             return
 
         # Direkte URL → yt_dlp-Lookup
@@ -552,11 +536,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         url, title = result
         self.queue.appendleft((url, title))
         await ctx.send(t("status.next_added", title=title))
-        if not self.is_playing:
-            self.is_playing = True
-            await self.play_next(ctx)
-        else:
-            self._kick_prefetch()
+        await self._start_or_prefetch(ctx)
 
     @commands.command(name="s")
     @require_same_voice()
