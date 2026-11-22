@@ -410,3 +410,45 @@ def test_autoplay_prefetch_timeout_keeps_writer_registered(tmp_path, monkeypatch
         assert downloads == [(URL, True)]
 
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# i) Der fremde Download wird gecancelt, während resolve_track auf ihn wartet:
+#    das zählt wie sein Scheitern – der Cancel darf nicht auf den Wartenden
+#    überspringen (play_next finge ihn nicht, die Wiedergabe bliebe stehen)
+# ---------------------------------------------------------------------------
+
+def test_gecancelter_fremder_download_reisst_resolve_track_nicht_mit(tmp_path):
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(ext=None), target)   # ohne ext: kein progressiver Start
+
+    async def run():
+        fremd = asyncio.create_task(asyncio.sleep(30))
+        dl._register_inflight(URL, "Autoplay-Prefetch", "Kurz", task=fremd)
+        resolving = asyncio.create_task(dl.resolve_track(URL, "Kurz"))
+        await asyncio.sleep(0.02)            # resolve_track wartet jetzt auf den fremden Task
+        fremd.cancel()
+        return await resolving
+
+    _, filename, _, _ = asyncio.run(run())
+
+    assert filename == "https://cdn.example/stream"   # Datei fehlt → normaler Stream-Pfad
+
+
+def test_cancel_des_wartenden_bleibt_ein_cancel_und_trifft_den_download_nicht(tmp_path):
+    target = tmp_path / "song.webm"
+    dl = make_dl(short_info(ext=None), target)
+
+    async def run():
+        fremd = asyncio.create_task(asyncio.sleep(30))
+        dl._register_inflight(URL, "Autoplay-Prefetch", "Kurz", task=fremd)
+        resolving = asyncio.create_task(dl.resolve_track(URL, "Kurz"))
+        await asyncio.sleep(0.02)
+        resolving.cancel()                   # der Wartende selbst wird abgebrochen
+        results = await asyncio.gather(resolving, return_exceptions=True)
+        assert isinstance(results[0], asyncio.CancelledError)
+        assert not fremd.done(), "shield: der fremde Download läuft weiter"
+        fremd.cancel()
+        await asyncio.gather(fremd, return_exceptions=True)
+
+    asyncio.run(run())

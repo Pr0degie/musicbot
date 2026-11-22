@@ -41,6 +41,14 @@ def streams_only(info: dict) -> bool:
     return bool(info.get("is_live")) or (info.get("duration") or 0) > STREAM_THRESHOLD_SECONDS
 
 
+def own_cancel_pending() -> bool:
+    """Wurde der aufrufende Task selbst gecancelt? Unterscheidet den eigenen
+    Abbruch vom Cancel eines Tasks, auf den man wartet. Task.cancelling()
+    gibt es ab Python 3.11; davor ist die Antwort immer False."""
+    cancelling = getattr(asyncio.current_task(), "cancelling", None)
+    return bool(cancelling and cancelling())
+
+
 class ProgressiveDownloadMixin:
     # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
     # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
@@ -114,6 +122,12 @@ class ProgressiveDownloadMixin:
                 await asyncio.shield(task)
             else:
                 await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except asyncio.CancelledError:
+            # shield reicht auch den Cancel des fremden Tasks durch. Der zählt
+            # wie sein Scheitern. Gilt der Cancel dagegen uns selbst, geht er
+            # weiter – sonst ließe sich der Wartende nicht mehr abbrechen.
+            if not task.cancelled() or own_cancel_pending():
+                raise
         except Exception:
             pass
 
