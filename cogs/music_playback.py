@@ -1,27 +1,23 @@
-"""Playback-Pipeline für MusicCommands.
+"""Wiedergabe-Kern für MusicCommands.
 
-PlaybackMixin — das Herzstück der Wiedergabe, per Mehrfachvererbung in
-MusicCommands eingebunden: der progressive Download-/FFmpeg-Playback-Kern
-(play_next samt nested after_playing-Callback), das Prefetch-Subsystem
-(_prefetch_next/_prefetch_upcoming/_kick_prefetch/_prefetch_autoplay), der
-gemeinsame Such-/URL-Resolve-Flow von !p/!next/!now (_extract_info_or_report/
-_search_and_enqueue/_fetch_single_track_info) sowie die Advance-/Resolve-Helfer
-_stop_for_advance/_resolve_track und der Autoplay-Evictor _evict_autoplay_song.
+PlaybackMixin enthält play_next und seine Untermethoden: Gates, Resolve,
+FFmpeg-Source, Track-Zustand, Now-Playing-Karte, Hintergrundarbeit und den
+Fehlerpfad. Dazu die zwei Stopp-Pfade _stop_for_advance und
+_discard_paused_player. Über die Basisklassen kommen das Track-Ende
+(music_track_end.py), das Anstoßen des Prefetch (music_prefetch.py) und der
+Such-/Einreih-Flow von !p/!next/!now (music_enqueue.py) dazu.
 
-Alle Methoden greifen auf denselben Instanz-State zu, der in cogs/music.py
-angelegt und verwaltet wird (u. a. self.queue, self.current_track,
-self._track_generation, self._playback_done, self.is_playing, self.is_radio,
-self._seek_offset, self._suppress_resume, self._progressive_resume_count,
-self.now_playing_msg/now_playing_view, self.prefetch_task,
-self._autoplay_prefetch_task, self._autoplay_queued_url) sowie auf den
-Downloader-Cog (self.dl) inklusive dessen In-Flight-Registry und auf die in
-cogs/music.py verbliebenen Klassen-Aliase self._ffmpeg_header_opts/
-_stderr_tail/_classify_ffmpeg_error/_progress_bar.
+Alle Methoden arbeiten auf dem Instanz-State, den cogs/music.py anlegt
+(u. a. self.queue, self.current_track, self._track_generation,
+self._playback_done, self.is_playing, self.is_radio, self._seek_offset,
+self._suppress_resume, self.now_playing_msg/now_playing_view), auf dem
+Downloader (self.dl) und auf den Klassen-Aliasen aus cogs/music.py
+(self._ffmpeg_header_opts, _stderr_tail, _classify_ffmpeg_error,
+_progress_bar).
 
-Die ADR-0007-Sequenzierung (Track-Zustand vor vc.play(), Generationscheck nach
-jedem Post-Play-await, _stop_for_advance als einziger Stopp-Pfad für Musik,
-Retry-Reset NACH dem Progressive-Resume-Block in after_playing) ist hier
-unverändert erhalten – nichts an der Reihenfolge wurde umgestellt.
+Die Reihenfolge ist hier Invariante (ADR 0007): der komplette Track-Zustand
+wird synchron vor vc.play() gesetzt, nach jedem await danach prüft play_next
+den Generationszähler, und Musik wird nur über _stop_for_advance gestoppt.
 """
 
 import asyncio
@@ -38,7 +34,7 @@ from utils.text import link_label, normalize_title
 from utils.ffmpeg import stream_wait_seconds
 from views.music_controls import MusicControlView
 from cogs.music_enqueue import EnqueueMixin
-from cogs.music_prefetch import PrefetchMixin
+from cogs.music_prefetch import PrefetchMixin, _cancel
 from cogs.music_track_end import TrackEndMixin, TrackRun
 
 
@@ -51,90 +47,18 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
     # utils.voice.PlayerToken und _discard_paused_player.
     _player_token = None
 
-    def _take_seek_offset(self, url: str) -> int:
-        """Konsumiert den anstehenden Seek-Offset für den gerade aus der Queue
-        genommenen Track. Der Offset gilt nur für den Track, für den er gesetzt
-        wurde: er wird hier in jedem Fall gelöscht (auch wenn der Resolve danach
-        scheitert oder der Track übersprungen wird) und nur zurückgegeben, wenn
-        er zu dieser URL gehört."""
-        offset, self._seek_offset = self._seek_offset, 0
-        bound_url, self._seek_offset_url = self._seek_offset_url, None
-        if bound_url is not None and bound_url != url:
-            return 0
-        return offset
-
-    def _stop_for_advance(self, voice_client):
-        """Wiedergabe-Stopp für absichtliche Wechsel (Skip, !now, !eq, !seek,
-        !stop, !clear, Auto-Leave). Setzt das One-Shot-Flag _suppress_resume,
-        damit after_playing den Stopp nicht als vorzeitiges Dateiende einer
-        wachsenden Datei missdeutet und den Track wieder vorn einreiht.
-
-        Stoppt über utils.voice.stop_playback, nicht über vc.stop(): bei
-        aktiver Sprachsteuerung würde ein rohes stop() auch den Audio-Empfang
-        beenden."""
-        self._suppress_resume = True
-        stop_playback(voice_client)
-
-    def _discard_paused_player(self, voice_client):
-        """Stoppt einen pausierten Player, unmittelbar bevor play_next oder
-        _play_radio_stream einen neuen startet (!x, dann
-        !p/!replay/!loadq/!radio/Buttons). Ohne diesen Stopp
-        ersetzt discord.py den pausierten Player nur – Thread und FFmpeg-Prozess
-        leaken.
-
-        Der Player wird vorher als verworfen markiert: sein after-Callback
-        reiht den alten Track nicht wieder ein, löst keinen zweiten play_next
-        aus und meldet kein Wiedergabe-Ende. Bewusst nicht über
-        _stop_for_advance – das One-Shot-Flag _suppress_resume würde sonst
-        vom falschen Callback konsumiert oder in den neuen Track leaken."""
-        token = self._player_token
-        if token is not None:
-            token.discarded = True
-        stop_playback(voice_client)
-
-    async def _resolve_track(self, url: str, title: str, force_download: bool = False, seek_offset: int = 0):
-        """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
-
-        Returns: (info, filename, title, duration)
-        """
-        # seek_offset ist das anstehende -ss dieses Tracks (play_next hat es
-        # beim Entnehmen aus der Queue konsumiert). Der progressive Pfad
-        # puffert entsprechend mehr, damit die Bytes bis zum Seek-Ziel in der
-        # wachsenden Datei existieren.
-        return await self.dl.resolve_track(
-            url, title,
-            force_download=force_download, min_buffer_seconds=seek_offset,
-        )
-
     async def play_next(self, ctx):
         """Spielt den nächsten Song in der Queue. Wird rekursiv nach jedem Track aufgerufen."""
-        if self.is_radio:
-            logger.info("[play_next] Radio aktiv – play_next übersprungen.")
-            # Radio hat die Musik gestoppt → ausstehende Post-Play-Zuweisungen des
-            # unterbrochenen Tracks entwerten (gleicher Race-Typ wie unten im Cleanup).
-            self._track_generation += 1
-            return
-        # DM-Bridge spricht gerade → den Voice-Client NICHT mit dem nächsten Track besetzen.
-        # Sonst kollidiert unser vc.play() mit dem der Bridge ("Already playing audio."): ein
-        # Track-Ende (natürlich oder durch das vc.stop() der Bridge) würde hier sofort den
-        # nächsten Song starten. Das Flag setzt/löscht dm_bridge.py um die /speak-Wiedergabe.
-        if getattr(self.bot, "dm_speaking", False):
-            logger.info("[play_next] DM spricht – Auto-Advance unterdrückt.")
-            # Auch hier: Die Bridge hat die Musik gestoppt – hängende awaits des
-            # unterbrochenen Durchlaufs dürfen keinen Zustand mehr schreiben.
-            self._track_generation += 1
-            return
-        # Voice-Reparatur baut gerade die Verbindung neu auf (music_voice_ui.py) –
-        # das after_playing des alten Clients darf nicht den nächsten Song
-        # starten; die Reparatur ruft play_next danach selbst auf.
-        if self._voice_healing:
-            logger.info("[play_next] Voice-Reparatur läuft – Auto-Advance unterdrückt.")
+        reason = self._advance_block_reason()
+        if reason:
+            logger.info(f"[play_next] {reason}")
+            # Hängende Post-Play-awaits des unterbrochenen Durchlaufs dürfen
+            # keinen Zustand mehr schreiben (gleicher Race-Typ wie im
+            # Leere-Queue-Cleanup).
             self._track_generation += 1
             return
         if not self.queue:
-            # Kompletter Leere-Queue-Fall (Cleanup, _ended_np, Idle-Timer,
-            # Autoplay-Handoff) → _handle_queue_empty. Die dortigen await-Grenzen
-            # liegen an exakt denselben Stellen wie zuvor inline (ADR 0009).
+            # Cleanup, _ended_np, Idle-Timer, Autoplay-Handoff.
             await self._handle_queue_empty(ctx)
             return
 
@@ -172,9 +96,11 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 url, title, force_download=force_download, seek_offset=seek_offset
             )
 
+            is_stream = isinstance(filename, str)  # Stream-URL statt lokaler Datei (z. B. Track > 20 min)
+
             # Stream-URL erst ab available_at abrufbar, sonst 403 (utils/ffmpeg.py).
             # Vor dem _skip_resolving-Check, damit ein Skip im Wartefenster greift.
-            wait = stream_wait_seconds(info) if isinstance(filename, str) and not force_download else 0
+            wait = stream_wait_seconds(info) if is_stream and not force_download else 0
             if wait > 0:
                 logger.info(f"[Stream] Warte {wait:.1f}s bis YouTube die URL freigibt: {title}")
                 await asyncio.sleep(wait)
@@ -185,7 +111,6 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 return
 
             eq_filter = self.eq_presets.get(self.equalizer, "")
-            is_stream = isinstance(filename, str)  # True wenn > 20 min → direkter HTTP-Stream
             # Wachsende Datei eines progressiven Downloads? Snapshot zum Start-
             # zeitpunkt – der Download kann während der Wiedergabe fertig werden.
             is_growing = (not is_stream) and self.dl.is_incomplete(filename)
@@ -235,9 +160,8 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 self._stderr_tail(stderr_buf)   # after_playing läuft nie → Puffer schließen
                 return
 
-            # Kompletten Track-Zustand synchron VOR vc.play() setzen (ADR 0007);
-            # gibt Generationszähler + Loop-Repeat-Flag + vorherigen Track zurück.
-            generation, is_loop_repeat, prev_track = self._snapshot_track_state(ctx, url, title, duration)
+            # Kompletten Track-Zustand synchron VOR vc.play() setzen (ADR 0007).
+            generation, is_loop_repeat = self._snapshot_track_state(ctx, url, title, duration)
             self._current_seek_offset = seek_offset
 
             # Pausierter Player (!x, dann neuer Start): discord.py würde ihn in
@@ -249,31 +173,13 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             logger.info(f"[Wiedergabe] Starte: {title}")
 
             if is_loop_repeat:
-                _bar = self._progress_bar(0, duration)
-                if _bar and _bar != self._np_last_desc:
-                    self.now_playing_view.set_body(_bar)
-                    self.now_playing_view.sync_state(up_next=self._up_next_title())
-                    self._np_last_desc = _bar
-                    try:
-                        await self.now_playing_msg.edit(view=self.now_playing_view)
-                    except Exception:
-                        pass
+                await self._reset_card_for_loop_repeat(duration)
             else:
-                # Alte Now-Playing-Nachricht(en) auf reinen Text reduzieren – nur der
-                # aktuelle Song behält Karte und Buttons. Nach Queue-Ende liegt die
-                # Nachricht in _ended_np (der Cleanup hat now_playing_msg gekappt);
-                # beide Slots können gleichzeitig belegt sein – dann müssen auch beide
-                # zurückgebaut werden, sonst bliebe eine Karte für immer stehen.
-                old_msg, old_title = self.now_playing_msg, self._np_title
-                ended_np, self._ended_np = self._ended_np, None
-                if old_msg or ended_np:
-                    await self._retire_np_message(old_msg, old_title)
-                    if ended_np:
-                        await self._retire_np_message(*ended_np)
-                    if generation != self._track_generation:
-                        # Track ist während des awaits gestorben, der Cleanup lief schon –
-                        # keinen Zustand des toten Durchlaufs mehr anfassen.
-                        return
+                await self._retire_previous_cards()
+                if generation != self._track_generation:
+                    # Track ist während des awaits gestorben, der Cleanup lief schon –
+                    # keinen Zustand des toten Durchlaufs mehr anfassen.
+                    return
                 view = self._build_np_view(ctx, info, url, title, duration)
                 new_msg = await ctx.send(view=view)
                 if generation != self._track_generation:
@@ -298,6 +204,225 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             logger.exception("[Fehler bei play_next]")
             await self._skip_broken_track(ctx, url, title, stderr_buf, "error.track_error", "Exception")
             return
+
+    def _advance_block_reason(self) -> str | None:
+        """Grund, warum play_next gerade keinen Track starten darf, sonst None."""
+        if self.is_radio:
+            # Radio hat die Musik gestoppt.
+            return "Radio aktiv – play_next übersprungen."
+        # DM-Bridge spricht gerade → den Voice-Client NICHT mit dem nächsten Track besetzen.
+        # Sonst kollidiert unser vc.play() mit dem der Bridge ("Already playing audio."): ein
+        # Track-Ende (natürlich oder durch das vc.stop() der Bridge) würde hier sofort den
+        # nächsten Song starten. Das Flag setzt/löscht dm_bridge.py um die /speak-Wiedergabe.
+        if getattr(self.bot, "dm_speaking", False):
+            return "DM spricht – Auto-Advance unterdrückt."
+        # Voice-Reparatur baut gerade die Verbindung neu auf (music_voice_ui.py) –
+        # das after_playing des alten Clients darf nicht den nächsten Song
+        # starten; die Reparatur ruft play_next danach selbst auf.
+        if self._voice_healing:
+            return "Voice-Reparatur läuft – Auto-Advance unterdrückt."
+        return None
+
+    async def _handle_queue_empty(self, ctx):
+        """Leere-Queue-Fall aus play_next: Cleanup, _ended_np-Übergabe, Idle-Timer,
+        Autoplay-Handoff (inkl. Prefetch-Wait).
+
+        Enthält await-Grenzen (_finalize_progress_bar, Prefetch-Wait,
+        play_next/autoplay); play_next awaitet die Methode direkt und kehrt
+        danach zurück (ADR 0009).
+        """
+        logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
+        self.is_playing = False
+        # Cleanup entwertet alle noch hängenden Post-Play-awaits des gerade
+        # gestorbenen Tracks – sonst überschreiben sie die Aufräumarbeit unten.
+        self._track_generation += 1
+        # current_track als last_played sichern bevor es gecleant wird,
+        # damit autoplay() noch weiß was zuletzt lief.
+        if self.current_track:
+            self.last_played = self.current_track
+            # Song lief natürlich zu Ende (kein !stop/!clear) → Fortschritt ans Ende setzen,
+            # damit Balken und Dauer nicht unvollständig einfrieren.
+            if not self._stopped_by_user:
+                await self._finalize_progress_bar()
+        self.current_track = None
+        # Referenzen kappen, damit _progress_loop/_finalize_progress_bar die tote
+        # Nachricht nie wieder anfassen. Die Nachricht selbst wird gemerkt, damit
+        # der nächste Track ihre Buttons entfernen kann (nur der aktuelle Song
+        # behält Buttons) – bis dahin bleiben Resume/Autoplay darauf klickbar.
+        if self.now_playing_msg is not None:
+            self._ended_np = (self.now_playing_msg, self._np_title)
+        self.now_playing_msg = None
+        self.now_playing_view = None
+        self._np_title = None
+        self.track_start_time = None
+        # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
+        # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
+        # die stille Verbindung mit Code 1006 wegwirft. Startet ein neuer
+        # Song (auch via Autoplay), räumt _cancel_idle_timer den Timer ab.
+        if ctx.voice_client:
+            self._start_idle_timer(ctx.voice_client)
+        # Autoplay rettet die Stille – aber nur wenn gewünscht und nicht
+        # gerade vom User gestoppt (!stop/!clear). Sonst würde der after_playing-
+        # Callback nach einem !clear sofort den nächsten Song starten.
+        if self.autoplay_enabled and not self._stopped_by_user:
+            # Wenn der Prefetch-Task noch läuft, kurz warten – er hat den Song
+            # bereits heruntergeladen und hängt ihn gleich in die Queue.
+            if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
+                logger.info("[Autoplay] Warte auf laufenden Prefetch-Task...")
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._autoplay_prefetch_task), timeout=60.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    logger.warning("[Autoplay] Prefetch-Task nicht rechtzeitig fertig – Fallback")
+            # Queue prüfen: Prefetch hat ggf. schon etwas eingereiht
+            if self.queue:
+                self.is_playing = True
+                await self.play_next(ctx)
+            else:
+                await self.autoplay(ctx)
+
+    def _take_seek_offset(self, url: str) -> int:
+        """Konsumiert den anstehenden Seek-Offset für den gerade aus der Queue
+        genommenen Track. Der Offset gilt nur für den Track, für den er gesetzt
+        wurde: er wird hier in jedem Fall gelöscht (auch wenn der Resolve danach
+        scheitert oder der Track übersprungen wird) und nur zurückgegeben, wenn
+        er zu dieser URL gehört."""
+        offset, self._seek_offset = self._seek_offset, 0
+        bound_url, self._seek_offset_url = self._seek_offset_url, None
+        if bound_url is not None and bound_url != url:
+            return 0
+        return offset
+
+    async def _resolve_track(self, url: str, title: str, force_download: bool = False, seek_offset: int = 0):
+        """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
+
+        Returns: (info, filename, title, duration)
+        """
+        # seek_offset ist das anstehende -ss dieses Tracks (play_next hat es
+        # beim Entnehmen aus der Queue konsumiert). Der progressive Pfad
+        # puffert entsprechend mehr, damit die Bytes bis zum Seek-Ziel in der
+        # wachsenden Datei existieren.
+        return await self.dl.resolve_track(
+            url, title,
+            force_download=force_download, min_buffer_seconds=seek_offset,
+        )
+
+    def _build_audio_source(self, info, filename, seek_offset, eq_filter, is_stream, is_growing):
+        """Baut FFmpeg-Options, legt die stderr-Temp-Datei an und konstruiert die
+        Audio-Source. Synchron; gibt (source, stderr_buf) zurück.
+
+        is_stream/is_growing sind der Stand vom Startzeitpunkt; play_next
+        ermittelt sie, weil es sie auch für die Giveup-Prüfung und das
+        Track-Ende braucht.
+        """
+        parts = []
+        if is_stream:
+            parts.append("-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5")
+            headers = self._ffmpeg_header_opts(info)
+            if headers:
+                parts.append(headers)
+        if seek_offset:
+            parts.append(f"-ss {seek_offset}")
+
+        # FFmpeg-stderr in eine Temp-Datei umleiten: Stirbt der Prozess sofort,
+        # sind die letzten Zeilen der einzige Beweis für die Ursache (403 vom
+        # CDN? kaputter Filter?). Gelesen und geschlossen wird in after_playing.
+        stderr_buf = tempfile.TemporaryFile()
+
+        kwargs = {"before_options": " ".join(parts) or None, "stderr": stderr_buf}
+        if eq_filter:
+            # Filter aktiv → dekodieren, EQ anwenden, mit 192kbps zu Opus enkodieren.
+            # -vn unterdrückt den Video-Stream.
+            kwargs.update(bitrate=192, options=f"-vn {eq_filter}")
+        elif is_stream or is_growing:
+            # HTTP-Stream: codec=copy funktioniert nicht zuverlässig bei Netz-URLs → transkodieren.
+            # Wachsende webm: nie codec=copy – der Muxer schreibt Cues/Duration
+            # erst am Dateiende, Transkodieren liest tolerant linear. Lokale
+            # Datei → keine -reconnect/-headers-Optionen nötig.
+            kwargs["bitrate"] = 192
+        else:
+            # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
+            kwargs["codec"] = "copy"
+        source = discord.FFmpegOpusAudio(str(filename), **kwargs)
+        # Uhr des Players erst beim ersten Paket: sonst schiebt er FFmpegs
+        # Anlaufzeit als Ton ohne Pause nach (Anfang klingt kurz zu schnell).
+        return start_clock_at_first_packet(source), stderr_buf
+
+    def _snapshot_track_state(self, ctx, url, title, duration):
+        """Setzt den kompletten Track-Zustand synchron VOR vc.play() (ADR 0007).
+
+        **Muss synchron bleiben** – kein await zwischen den Zuweisungen. Gibt
+        (generation, is_loop_repeat) zurück; play_next braucht sie für die
+        Generationschecks nach jedem await und für den Karten-Übergang.
+        """
+        self._playback_done.clear()
+        self._cancel_idle_timer()   # Audio läuft wieder → Idle-Timer weg
+        self._last_ctx = ctx        # Kontext für den Reconnect-Watchdog merken
+        self._stuck_ticks = 0
+        self._stopped_by_user = False
+
+        # Loop-"Song": Derselbe Song läuft erneut → keine neue "Jetzt läuft"-Nachricht
+        # posten. Die bestehende Nachricht (samt Buttons) bleibt stehen, wir setzen nur
+        # den Fortschrittsbalken auf 0:00 zurück – der Song hat sich ja nicht geändert.
+        prev_track = self.current_track
+        is_loop_repeat = (
+            self.loop_mode == "song"
+            and self.now_playing_msg is not None
+            and self.now_playing_view is not None
+            and prev_track is not None
+            and prev_track[0] == url
+        )
+
+        # Kompletten Track-Zustand VOR play() setzen – synchron, ohne await dazwischen.
+        # after_playing kann bei einem sofort sterbenden FFmpeg-Prozess feuern, bevor
+        # die awaits unten fertig sind; der Leere-Queue-Cleanup liefe dann zuerst und
+        # späte Zuweisungen hier würden ihn überschreiben (toter current_track →
+        # _progress_loop editiert die Nachricht endlos → Discord-429).
+        self._track_generation += 1
+        generation = self._track_generation
+        self.is_playing = True
+        self.last_played = prev_track  # vorherigen Song merken, bevor er überschrieben wird
+        self.current_track = (url, title, duration)
+        self.track_start_time = time.monotonic()
+        self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
+        self._np_paused_at = None
+        self._np_last_desc = None
+        self._recently_played.append(url)
+        self._recently_played_titles.append(normalize_title(title))
+        # Weiterer Anlauf desselben Tracks (Stream-Retry, Download-Fallback
+        # oder progressives Seek-Resume) → Sperren behalten, nicht doppelt zählen.
+        if url not in (self._stream_retry_url, self._progressive_resume_url):
+            self._clear_retry_markers()     # anderer Track → Retry-Sperren aufheben
+            self._record_play(url, title)
+        self.text_channel = ctx.channel
+        return generation, is_loop_repeat
+
+    async def _reset_card_for_loop_repeat(self, duration):
+        """Loop-"Song": derselbe Song läuft erneut. Die bestehende Karte samt
+        Buttons bleibt stehen, nur der Fortschrittsbalken springt auf 0:00."""
+        bar = self._progress_bar(0, duration)
+        if not bar:
+            return
+        self.now_playing_view.set_body(bar)
+        self.now_playing_view.sync_state(up_next=self._up_next_title())
+        self._np_last_desc = bar
+        try:
+            await self.now_playing_msg.edit(view=self.now_playing_view)
+        except Exception:
+            pass
+
+    async def _retire_previous_cards(self):
+        """Reduziert die Karte(n) früherer Songs auf reinen Text – nur der
+        aktuelle Song behält Karte und Buttons. Nach Queue-Ende liegt die
+        Nachricht in _ended_np (der Cleanup hat now_playing_msg gekappt);
+        beide Slots können gleichzeitig belegt sein – dann müssen auch beide
+        zurückgebaut werden, sonst bliebe eine Karte für immer stehen.
+        Ohne alte Karte läuft die Methode ohne await durch."""
+        old_msg, old_title = self.now_playing_msg, self._np_title
+        ended_np, self._ended_np = self._ended_np, None
+        if old_msg or ended_np:
+            await self._retire_np_message(old_msg, old_title)
+            if ended_np:
+                await self._retire_np_message(*ended_np)
 
     def _build_np_view(self, ctx, info, url, title, duration):
         """Now-Playing-Karte (Components V2) eines frisch gestarteten Tracks
@@ -353,15 +478,13 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
 
         # Nächsten Song direkt im Hintergrund vorladen, damit er ohne Wartezeit startet.
         # Alten Prefetch-Task erst abbrechen – sonst laufen mehrere parallel.
-        if self.prefetch_task and not self.prefetch_task.done():
-            self.prefetch_task.cancel()
+        _cancel(self.prefetch_task)
         if self.queue:
             self.prefetch_task = asyncio.create_task(self._prefetch_upcoming())
 
         # Autoplay: nächsten verwandten Song suchen+laden während der aktuelle läuft.
         if self.autoplay_enabled and not self.queue:
-            if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-                self._autoplay_prefetch_task.cancel()
+            _cancel(self._autoplay_prefetch_task)
             self._autoplay_prefetch_task = asyncio.create_task(self._prefetch_autoplay(ctx))
 
     async def _skip_broken_track(self, ctx, url, title, stderr_buf, error_key, kind):
@@ -381,167 +504,31 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             logger.warning(f"[play_next] {kind} – Voice client weg, kein Retry.")
             self.is_playing = False
 
-    async def _handle_queue_empty(self, ctx):
-        """Leere-Queue-Fall aus play_next: Cleanup, _ended_np-Übergabe, Idle-Timer,
-        Autoplay-Handoff (inkl. Prefetch-Wait).
+    def _stop_for_advance(self, voice_client):
+        """Wiedergabe-Stopp für absichtliche Wechsel (Skip, !now, !eq, !seek,
+        !stop, !clear, Auto-Leave). Setzt das One-Shot-Flag _suppress_resume,
+        damit after_playing den Stopp nicht als vorzeitiges Dateiende einer
+        wachsenden Datei missdeutet und den Track wieder vorn einreiht.
 
-        Verbatim aus play_next herausgezogen (ADR 0009). Enthält Post-Play-await-
-        Grenzen (_finalize_progress_bar, Prefetch-Wait, play_next/autoplay) an
-        exakt denselben Stellen wie zuvor inline – der Aufrufer awaitet diese
-        Methode direkt und returnt danach.
-        """
-        logger.info("[Queue] Leere Warteschlange. Wiedergabe gestoppt.")
-        self.is_playing = False
-        # Cleanup entwertet alle noch hängenden Post-Play-awaits des gerade
-        # gestorbenen Tracks – sonst überschreiben sie die Aufräumarbeit unten.
-        self._track_generation += 1
-        # current_track als last_played sichern bevor es gecleant wird,
-        # damit autoplay() noch weiß was zuletzt lief.
-        if self.current_track:
-            self.last_played = self.current_track
-            # Song lief natürlich zu Ende (kein !stop/!clear) → Fortschritt ans Ende setzen,
-            # damit Balken und Dauer nicht unvollständig einfrieren.
-            if not self._stopped_by_user:
-                await self._finalize_progress_bar()
-        self.current_track = None
-        # Referenzen kappen, damit _progress_loop/_finalize_progress_bar die tote
-        # Nachricht nie wieder anfassen. Die Nachricht selbst wird gemerkt, damit
-        # der nächste Track ihre Buttons entfernen kann (nur der aktuelle Song
-        # behält Buttons) – bis dahin bleiben Resume/Autoplay darauf klickbar.
-        if self.now_playing_msg is not None:
-            self._ended_np = (self.now_playing_msg, self._np_title)
-        self.now_playing_msg = None
-        self.now_playing_view = None
-        self._np_title = None
-        self.track_start_time = None
-        # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
-        # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
-        # die stille Verbindung mit Code 1006 wegwirft. Startet ein neuer
-        # Song (auch via Autoplay), räumt _cancel_idle_timer den Timer ab.
-        if ctx.voice_client:
-            self._start_idle_timer(ctx.voice_client)
-        # Autoplay rettet die Stille – aber nur wenn gewünscht und nicht
-        # gerade vom User gestoppt (!stop/!clear). Sonst würde der after_playing-
-        # Callback nach einem !clear sofort den nächsten Song starten.
-        if self.autoplay_enabled and not self._stopped_by_user:
-            # Wenn der Prefetch-Task noch läuft, kurz warten – er hat den Song
-            # bereits heruntergeladen und hängt ihn gleich in die Queue.
-            if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-                logger.info("[Autoplay] Warte auf laufenden Prefetch-Task...")
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._autoplay_prefetch_task), timeout=60.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    logger.warning("[Autoplay] Prefetch-Task nicht rechtzeitig fertig – Fallback")
-            # Queue prüfen: Prefetch hat ggf. schon etwas eingereiht
-            if self.queue:
-                self.is_playing = True
-                await self.play_next(ctx)
-            else:
-                await self.autoplay(ctx)
+        Stoppt über utils.voice.stop_playback, nicht über vc.stop(): bei
+        aktiver Sprachsteuerung würde ein rohes stop() auch den Audio-Empfang
+        beenden."""
+        self._suppress_resume = True
+        stop_playback(voice_client)
 
-    def _build_audio_source(self, info, filename, seek_offset, eq_filter, is_stream, is_growing):
-        """Baut FFmpeg-Options, legt die stderr-Temp-Datei an und konstruiert die
-        Audio-Source. Synchron; gibt (source, stderr_buf) zurück.
+    def _discard_paused_player(self, voice_client):
+        """Stoppt einen pausierten Player, unmittelbar bevor play_next oder
+        _play_radio_stream einen neuen startet (!x, dann
+        !p/!replay/!loadq/!radio/Buttons). Ohne diesen Stopp
+        ersetzt discord.py den pausierten Player nur – Thread und FFmpeg-Prozess
+        leaken.
 
-        Verbatim aus play_next herausgezogen (ADR 0009). is_stream/is_growing sind
-        der Wachsende-Datei-Snapshot vom Startzeitpunkt und werden vom Orchestrator
-        gereicht (er braucht sie auch für die Giveup-Prüfung und after_playing).
-        """
-        if is_stream:
-            _parts = ["-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"]
-            _headers = self._ffmpeg_header_opts(info)
-            if _headers:
-                _parts.append(_headers)
-            if seek_offset:
-                _parts.append(f"-ss {seek_offset}")
-            before_opts = " ".join(_parts)
-        else:
-            before_opts = f"-ss {seek_offset}" if seek_offset else None
-
-        # FFmpeg-stderr in eine Temp-Datei umleiten: Stirbt der Prozess sofort,
-        # sind die letzten Zeilen der einzige Beweis für die Ursache (403 vom
-        # CDN? kaputter Filter?). Gelesen und geschlossen wird in after_playing.
-        stderr_buf = tempfile.TemporaryFile()
-
-        if eq_filter:
-            # Filter aktiv → dekodieren, EQ anwenden, mit 192kbps zu Opus enkodieren.
-            # -vn unterdrückt den Video-Stream.
-            source = discord.FFmpegOpusAudio(
-                str(filename),
-                bitrate=192,
-                before_options=before_opts,
-                options=f"-vn {eq_filter}",
-                stderr=stderr_buf,
-            )
-        elif is_stream:
-            # HTTP-Stream: codec=copy funktioniert nicht zuverlässig bei Netz-URLs → transkodieren.
-            source = discord.FFmpegOpusAudio(
-                str(filename), bitrate=192, before_options=before_opts, stderr=stderr_buf
-            )
-        elif is_growing:
-            # Wachsende webm: nie codec=copy – der Muxer schreibt Cues/Duration
-            # erst am Dateiende, Transkodieren liest tolerant linear. Lokale
-            # Datei → keine -reconnect/-headers-Optionen nötig.
-            source = discord.FFmpegOpusAudio(
-                str(filename), bitrate=192, before_options=before_opts, stderr=stderr_buf
-            )
-        else:
-            # Kein Filter (flat) → Opus-Stream 1:1 durchreichen, kein Qualitätsverlust.
-            source = discord.FFmpegOpusAudio(
-                str(filename), codec="copy", before_options=before_opts, stderr=stderr_buf
-            )
-        # Uhr des Players erst beim ersten Paket: sonst schiebt er FFmpegs
-        # Anlaufzeit als Ton ohne Pause nach (Anfang klingt kurz zu schnell).
-        return start_clock_at_first_packet(source), stderr_buf
-
-    def _snapshot_track_state(self, ctx, url, title, duration):
-        """Setzt den kompletten Track-Zustand synchron VOR vc.play() (ADR 0007).
-
-        Verbatim aus play_next herausgezogen (ADR 0009). **Muss synchron bleiben**
-        – kein await zwischen den Zuweisungen. Gibt (generation, is_loop_repeat,
-        prev_track) zurück; der Orchestrator braucht sie für die Post-Play-
-        Generationschecks und den Now-Playing-Nachrichtenbau.
-        """
-        self._playback_done.clear()
-        self._cancel_idle_timer()   # Audio läuft wieder → Idle-Timer weg
-        self._last_ctx = ctx        # Kontext für den Reconnect-Watchdog merken
-        self._stuck_ticks = 0
-        self._stopped_by_user = False
-
-        # Loop-"Song": Derselbe Song läuft erneut → keine neue "Jetzt läuft"-Nachricht
-        # posten. Die bestehende Nachricht (samt Buttons) bleibt stehen, wir setzen nur
-        # den Fortschrittsbalken auf 0:00 zurück – der Song hat sich ja nicht geändert.
-        prev_track = self.current_track
-        is_loop_repeat = (
-            self.loop_mode == "song"
-            and self.now_playing_msg is not None
-            and self.now_playing_view is not None
-            and prev_track is not None
-            and prev_track[0] == url
-        )
-
-        # Kompletten Track-Zustand VOR play() setzen – synchron, ohne await dazwischen.
-        # after_playing kann bei einem sofort sterbenden FFmpeg-Prozess feuern, bevor
-        # die awaits unten fertig sind; der Leere-Queue-Cleanup liefe dann zuerst und
-        # späte Zuweisungen hier würden ihn überschreiben (toter current_track →
-        # _progress_loop editiert die Nachricht endlos → Discord-429).
-        self._track_generation += 1
-        generation = self._track_generation
-        self.is_playing = True
-        self.last_played = prev_track  # vorherigen Song merken, bevor er überschrieben wird
-        self.current_track = (url, title, duration)
-        self.track_start_time = time.monotonic()
-        self._np_paused_total = 0.0   # Pausen-State für den neuen Song zurücksetzen
-        self._np_paused_at = None
-        self._np_last_desc = None
-        self._recently_played.append(url)
-        self._recently_played_titles.append(normalize_title(title))
-        if url in (self._stream_retry_url, self._progressive_resume_url):
-            # Weiterer Anlauf desselben Tracks (Stream-Retry, Download-
-            # Fallback oder progressives Seek-Resume) → nicht doppelt zählen.
-            pass
-        else:
-            self._clear_retry_markers()     # anderer Track → Retry-Sperren aufheben
-            self._record_play(url, title)
-        self.text_channel = ctx.channel
-        return generation, is_loop_repeat, prev_track
+        Der Player wird vorher als verworfen markiert: sein after-Callback
+        reiht den alten Track nicht wieder ein, löst keinen zweiten play_next
+        aus und meldet kein Wiedergabe-Ende. Bewusst nicht über
+        _stop_for_advance – das One-Shot-Flag _suppress_resume würde sonst
+        vom falschen Callback konsumiert oder in den neuen Track leaken."""
+        token = self._player_token
+        if token is not None:
+            token.discarded = True
+        stop_playback(voice_client)

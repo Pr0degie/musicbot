@@ -10,6 +10,14 @@ import asyncio
 from utils.logger import logger
 
 
+def _cancel(task) -> bool:
+    """Bricht einen Task ab, falls er noch läuft. True = abgebrochen."""
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
 class PrefetchMixin:
     async def _prefetch_next(self, idx: int = 0):
         """Lädt Song an Position idx der Queue still im Hintergrund herunter."""
@@ -50,8 +58,7 @@ class PrefetchMixin:
         allein reicht nicht (No-Op-Guard bei lebendem Task) → Task abbrechen
         und neu kicken. Ein bereits schreibender Download-Worker wird dabei
         nicht gekillt, sondern adoptiert und läuft zu Ende (ADR 0002)."""
-        if self.prefetch_task and not self.prefetch_task.done():
-            self.prefetch_task.cancel()
+        if _cancel(self.prefetch_task):
             self.prefetch_task = None
         self._kick_prefetch()
 
@@ -75,8 +82,7 @@ class PrefetchMixin:
         Gibt den Titel des entfernten Songs zurück (für Logging), sonst None.
         """
         # Laufenden Prefetch sofort stoppen
-        if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
-            self._autoplay_prefetch_task.cancel()
+        if _cancel(self._autoplay_prefetch_task):
             self._autoplay_prefetch_task = None
 
         if not self._autoplay_queued_url:

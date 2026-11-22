@@ -160,6 +160,16 @@ class EnqueueMixin:
         first = entries[0]
         url = first.get("webpage_url") or first.get("url")
         title = first.get("title", t("misc.unknown_title"))
+        self._warm_or_prime(url, title)
+        self._insert_hit(url, title, insert, log_tag)
+        await self._announce_hit(
+            ctx, first, entries[1:], title,
+            with_alts_key=with_alts_key, no_alts_key=no_alts_key, base_content_key=base_content_key,
+        )
+        return True
+
+    def _warm_or_prime(self, url, title):
+        """Schritt 1 von _search_and_enqueue: den Treffer vorbereiten."""
         if self.is_playing:
             # Läuft schon Musik → nur Metadaten vorwärmen; geladen wird per Prefetch,
             # wenn der Titel an der Reihe ist (Bandbreite bleibt beim aktuellen Song).
@@ -169,6 +179,9 @@ class EnqueueMixin:
             # parallel zu den folgenden Discord-Nachrichten läuft statt danach.
             self.dl.prime_first_hit(url, title)
 
+    def _insert_hit(self, url, title, insert, log_tag):
+        """Schritt 2 von _search_and_enqueue: den Treffer nach `insert`
+        einreihen (Bedeutung der drei Modi siehe dort)."""
         if insert == "evict_or_back":
             evicted = self._evict_autoplay_song() if self.autoplay_enabled else None
             if evicted:
@@ -182,8 +195,10 @@ class EnqueueMixin:
         else:  # "front"
             self.queue.appendleft((url, title))
 
-        # Alternativen (Treffer 2 und 3) als Buttons anzeigen
-        alternatives = entries[1:]
+    async def _announce_hit(self, ctx, first, alternatives, title, *,
+                            with_alts_key, no_alts_key, base_content_key):
+        """Schritt 3 von _search_and_enqueue: den eingereihten Treffer melden,
+        Alternativen (Treffer 2 und 3) als Buttons anbieten."""
         if alternatives:
             view = SearchAutoplayView(
                 first, alternatives, self, ctx,
@@ -201,7 +216,6 @@ class EnqueueMixin:
             view.message = msg
         else:
             await ctx.send(t(no_alts_key, title=title))
-        return True
 
     async def _fetch_single_track_info(self, ctx, eingabe, log_tag):
         """Gemeinsamer Direkt-URL-Zweig von !next und !now (ohne Playlists).

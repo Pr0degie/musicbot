@@ -319,7 +319,7 @@ class TrackEndMixin:
         """Schreibt den Queue-Snapshot eines Track-Endes nach last_queue.json.
 
         Blockierendes Datei-I/O – läuft im Player-Thread (aus after_playing),
-        nicht auf dem Event-Loop. Der Write passiert jetzt nach dem Anstoßen
+        nicht auf dem Event-Loop. Der Write passiert nach dem Anstoßen
         des nächsten Tracks; stirbt der sofort, könnten sich zwei Writes
         überholen. Lock + Folgenummer sorgen dafür, dass nie ein älterer
         Snapshot einen neueren überschreibt."""
