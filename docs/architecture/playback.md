@@ -38,7 +38,9 @@ Stream-Track <1 s + Input-Fehler (z. B. 403 vom CDN) → genau **ein** Retry mit
 letzter Anlauf als lokaler Download (`_force_download_url` → `resolve_track(force_download=True)`;
 yt_dlp-eigener HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen; Meldung
 `error.stream_download_fallback`). Liefert der Fallback keine Datei (>20-min-Tracks werden nie
-heruntergeladen) oder stirbt auch die Datei sofort → Aufgeben mit `error.stream_giveup`. Alle
+heruntergeladen) oder stirbt auch die Datei sofort → Aufgeben mit `error.stream_giveup`. Ein gewollter Abbruch
+(Skip, `!eq`, `!seek`, `!stop`, `!clear`) löst nichts davon aus, auch wenn FFmpeg beim Beenden eine
+Fehlerzeile hinterlässt. Alle
 Retry-/Resume-Marker (`_stream_retry_url`, `_force_download_url`, `_progressive_resume_url`/`-count`) leben
 bis zum normalen Track-Ende bzw. Trackwechsel; der Marker-Reset läuft **nach** dem Progressive-Resume-Block
 (in `_on_track_end`: `_resume_growing_file` vor `_clear_markers_after_clean_end`; sonst griffe dessen Kappe nie). Diese Kaskade ist heute nur noch Fallback — Primärpfad für ungecachte kurze

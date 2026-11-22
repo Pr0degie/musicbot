@@ -100,10 +100,12 @@ class TrackEndMixin:
         # stderr_tail hat der Thread-Callback bereits ausgelesen (schließt
         # den Puffer); geloggt wird nur im Fehlerfall.
         verdict = self._classify_ffmpeg_error(stderr_tail)
-        self._log_early_death(error, elapsed, verdict, stderr_tail, suppress_resume)
+        # Gewollter Abbruch: Skip/!eq/!seek (_stop_for_advance) oder !stop/!clear.
+        user_abort = suppress_resume or self._stopped_by_user
+        self._log_early_death(error, elapsed, verdict, stderr_tail, user_abort)
 
         retry = self._resume_growing_file(run, error, elapsed, verdict, suppress_resume)
-        retry = self._retry_dead_stream(run, error, elapsed, verdict, retry)
+        retry = self._retry_dead_stream(run, error, elapsed, verdict, retry, user_abort)
         self._clear_markers_after_clean_end(run, error, elapsed, retry)
 
         # Snapshot vor der Loop-Logik; geschrieben wird außerhalb des Event-Loops.
@@ -112,12 +114,11 @@ class TrackEndMixin:
         self._start_next(run.ctx)
         return queue_seq, queue_data
 
-    def _log_early_death(self, error, elapsed, verdict, stderr_tail, suppress_resume):
+    def _log_early_death(self, error, elapsed, verdict, stderr_tail, user_abort):
         """Loggt FFmpegs stderr und die Einstufung, wenn der Track mit Fehler
         oder nach unter 2 s endete."""
         # Gewollte Abbrüche (Skip/!stop/!x in den ersten 2 s) sind kein Fehler –
         # keine gelbe stderr-Warnung für etwas, das der Nutzer selbst ausgelöst hat.
-        user_abort = suppress_resume or self._stopped_by_user
         if error or (elapsed < 2.0 and not user_abort):
             if stderr_tail:
                 logger.warning(f"[FFmpeg] stderr (letzte Zeilen):\n{stderr_tail}")
@@ -178,7 +179,7 @@ class TrackEndMixin:
             logger.warning(f"[Progressiv] Resume aufgegeben (Download tot/Kappe) – Fallback auf Stream: {title}")
         return True
 
-    def _retry_dead_stream(self, run, error, elapsed, verdict, retry) -> bool:
+    def _retry_dead_stream(self, run, error, elapsed, verdict, retry, user_abort=False) -> bool:
         """Selbstheilung: Stream starb sofort an einem Input-Fehler (typisch:
         sporadisches 403 vom CDN) → genau EIN Neuversuch mit frisch
         extrahierter URL, danach EIN letzter Anlauf als lokaler Download.
@@ -187,7 +188,14 @@ class TrackEndMixin:
 
         Der elif-Zweig (Download-Fallback gab auf) hängt nur an der ersten
         Bedingung: er läuft auch, wenn `retry` schon wahr hereinkommt.
+
+        Bei einem gewollten Abbruch (user_abort) passiert nichts davon: ein
+        Skip in den ersten Sekunden ist kein gestorbener Stream, auch wenn
+        FFmpeg beim Beenden eine Fehlerzeile hinterlässt, und kein
+        gescheiterter Download-Fallback.
         """
+        if user_abort:
+            return retry
         ctx, url, title = run.ctx, run.url, run.title
         if not retry and run.is_stream and elapsed < 1.0 and verdict == "input":
             if self._stream_retry_url != url:
