@@ -48,7 +48,12 @@ class MetadataCacheMixin:
     _cache_dirty = False
 
     def clear_cache(self):
+        """Leert den Metadaten-Cache komplett (!clear). Markiert ihn als
+        geändert: der nächste Flush schreibt den leeren Stand auch in die
+        Datei, sonst kämen die Einträge nach einem Neustart zurück."""
         self._url_cache.clear()
+        self._cache_timestamps.clear()
+        self._cache_dirty = True
 
     def invalidate(self, url: str):
         """Wirft den Cache-Eintrag einer URL weg (z.B. nach einem 403 vom CDN),

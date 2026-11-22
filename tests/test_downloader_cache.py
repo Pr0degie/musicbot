@@ -223,3 +223,23 @@ def test_invalidate_removes_only_the_given_entry():
     assert "https://x/1" not in dl._cache_timestamps
     assert "https://x/2" in dl._url_cache
     assert dl._cache_timestamps == {"https://x/2": now}
+
+
+# ---------------------------------------------------------------------------
+# clear_cache (!clear): leert auch die Datei, nicht nur das Dict
+# ---------------------------------------------------------------------------
+
+def test_clear_cache_leert_auch_timestamps_und_die_datei(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    dl = bare_downloader()
+    dl._url_cache["https://x/1"] = {"title": "Eins", "duration": 100}
+    dl._cache_timestamps["https://x/1"] = time.time()
+    dl._save_cache()                       # Stand des letzten Flushs: ein Eintrag
+
+    dl.clear_cache()
+    dl.flush_cache_now()                   # Shutdown-Flush bzw. 30-s-Loop
+
+    assert dl._url_cache == {} and dl._cache_timestamps == {}
+    dl2 = bare_downloader()
+    dl2._load_cache()                      # nächster Bot-Start
+    assert dl2._url_cache == {}, "nach !clear dürfen die Einträge nicht aus der Datei zurückkommen"

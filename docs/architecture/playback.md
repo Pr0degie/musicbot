@@ -61,7 +61,8 @@ downloads next autoplay song while current plays.
 `_url_cache` on `self.dl`: URL → yt_dlp info-dict. All three callers cache the **full** info-dict (with `ext`,
 `webpage_url`) so `prepare_filename()` works. `autoplay_ydl` yields shallow playlist entries;
 `prefetch_autoplay()` upgrades via `ydl.extract_info(url, download=True)`. `update_ydl()` keeps only entries
-still in queue/`current_track`; `clear()` wipes entirely. Persisted to `metadata_cache.json` — survives bot
+still in queue/`current_track`; `clear()` wipes entirely (`clear_cache()`: Einträge, Timestamps und per
+Dirty-Flag beim nächsten Flush auch die Datei). Persisted to `metadata_cache.json` — survives bot
 restarts; persistiert wird ein reduzierter Feldsatz → [ADR 0005](../adr/0005-persistenz-debouncing.md).
 
 **Player-Uhr ab dem ersten Paket:** discord.py startet die Uhr des `AudioPlayer`, bevor FFmpeg etwas liefert. Braucht
