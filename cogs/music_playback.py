@@ -25,8 +25,10 @@ unverändert erhalten – nichts an der Reihenfolge wurde umgestellt.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import tempfile
+import threading
 import time
 
 import discord
@@ -52,6 +54,41 @@ _YTDLP_FAILED = object()
 # Laufende Hintergrund-Aufräumarbeiten (Status-Nachricht löschen): asyncio hält
 # Tasks nur schwach – ohne Referenz könnte der GC sie mitten im Lauf abräumen.
 _BACKGROUND_TASKS: set = set()
+
+
+# So lange wartet der Player-Thread höchstens darauf, dass der Event-Loop die
+# Track-Ende-Logik übernimmt (normal: Millisekunden).
+_LOOP_HANDOFF_TIMEOUT = 10.0
+
+# Serialisiert die last_queue.json-Writes der Player-Threads (_write_last_queue).
+_LAST_QUEUE_LOCK = threading.Lock()
+
+
+def _run_on_loop(loop, fn, *args):
+    """Führt fn(*args) auf dem Event-Loop `loop` aus und gibt das Ergebnis zurück.
+
+    Aus einem fremden Thread (Player-Thread von discord.py): an den Loop
+    übergeben und auf das Ergebnis warten – eine Exception aus fn kommt beim
+    Aufrufer an, wie wenn er fn selbst ausgeführt hätte. Nach
+    _LOOP_HANDOFF_TIMEOUT Sekunden concurrent.futures.TimeoutError.
+    Wer schon auf dem Loop ist, ruft fn direkt auf (Warten wäre ein Deadlock).
+    """
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        return fn(*args)
+    done = concurrent.futures.Future()
+
+    def run():
+        try:
+            done.set_result(fn(*args))
+        except BaseException as exc:
+            done.set_exception(exc)
+
+    loop.call_soon_threadsafe(run)
+    return done.result(timeout=_LOOP_HANDOFF_TIMEOUT)
 
 
 def search_query(eingabe: str) -> str:
@@ -586,29 +623,29 @@ class PlaybackMixin:
         Marker-Reset – bleibt unangetastet. token: PlayerToken dieses Players
         (siehe _discard_paused_player).
         """
-        def after_playing(error):
-            """Callback, der nach jedem Track von FFmpeg aufgerufen wird.
+        def on_track_end(error, ended_at, stderr_tail):
+            """Die Track-Ende-Logik. Läuft auf dem Event-Loop (after_playing
+            unten reicht sie aus dem Player-Thread dorthin weiter): Queue,
+            _seek_offset und die Retry-Marker werden nur noch dort verändert,
+            wo auch !remove/!move/!shuffle die Queue umbauen.
 
-            Läuft in einem separaten Thread – daher run_coroutine_threadsafe
-            statt await. Direkt awaiten würde hier crashen.
+            Reihenfolge wie zuvor im Thread-Callback (ADR 0007/0009). Die
+            run_coroutine_threadsafe-Aufrufe sind bewusst geblieben – sie
+            funktionieren auch vom Loop aus und verhalten sich exakt wie bisher.
+            Gibt (Folgenummer, Queue-Snapshot) für den last_queue.json-Write
+            zurück, den der Aufrufer außerhalb des Loops erledigt.
             """
-            if token is not None and token.discarded:
-                # Dieser (pausierte) Player wurde von play_next durch einen neuen
-                # Track ersetzt: der Wiedergabe-Zustand gehört längst dem neuen
-                # Track. Nur den eigenen stderr-Puffer schließen – kein
-                # _playback_done, kein Requeue, kein play_next.
-                self._stderr_tail(stderr_buf)
-                logger.info(f"[Wiedergabe] Pausierter Song durch neuen Start ersetzt: {title}")
-                return
-            self.bot.loop.call_soon_threadsafe(self._playback_done.set)
+            self._playback_done.set()
             # One-Shot: Flag immer konsumieren, damit ein absichtlicher Stopp
             # nicht in den after_playing-Lauf eines späteren Tracks leakt.
             suppress_resume, self._suppress_resume = self._suppress_resume, False
             if error:
                 logger.warning(f"[Fehler beim Abspielen] {error}")
-            elapsed = time.monotonic() - self.track_start_time if self.track_start_time else 999
-            # stderr immer auslesen (schließt den Puffer), loggen nur im Fehlerfall.
-            stderr_tail = self._stderr_tail(stderr_buf)
+            # ended_at: Zeitpunkt des Callbacks im Player-Thread – die Laufzeit
+            # hängt damit nicht davon ab, wie schnell der Loop übernimmt.
+            elapsed = ended_at - self.track_start_time if self.track_start_time else 999
+            # stderr_tail hat der Thread-Callback bereits ausgelesen (schließt
+            # den Puffer); geloggt wird nur im Fehlerfall.
             verdict = self._classify_ffmpeg_error(stderr_tail)
             # Gewollte Abbrüche (Skip/!stop/!x in den ersten 2 s) sind kein Fehler –
             # keine gelbe stderr-Warnung für etwas, das der Nutzer selbst ausgelöst hat.
@@ -715,12 +752,11 @@ class PlaybackMixin:
 
             # Queue-Stand nach jedem Track in Datei sichern – nicht als
             # Restore-Point gedacht, nur als Protokoll der letzten Session.
+            # Hier nur der Snapshot (an derselben Stelle wie bisher, vor der
+            # Loop-Logik); geschrieben wird außerhalb des Event-Loops.
             queue_data = list(self.queue)
-            try:
-                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
-                logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
-            except Exception as e:
-                logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")
+            self._last_queue_seq += 1
+            queue_seq = self._last_queue_seq
 
             # Loop-Logik: Song zurück in die Queue legen bevor play_next aufgerufen wird.
             # Queue speichert 2-Tuples (url, title), current_track ist ein 3-Tuple.
@@ -750,8 +786,65 @@ class PlaybackMixin:
                 fut.add_done_callback(log_exception)
             else:
                 logger.info("[KEINE VERBINDUNG] Keine Verbindung. Warte auf !j ...")
+            return queue_seq, queue_data
+
+        def after_playing(error):
+            """Callback, den discord.py nach jedem Track aufruft – im
+            Player-Thread. Er reicht nur noch weiter: die gesamte Logik
+            (on_track_end) läuft auf dem Event-Loop.
+
+            Im Thread bleibt ausschließlich Datei-I/O, das nicht auf den Loop
+            gehört (ADR 0005): der FFmpeg-stderr-Puffer davor, der
+            last_queue.json-Write danach.
+            """
+            if token is not None and token.discarded:
+                # Dieser (pausierte) Player wurde von play_next durch einen neuen
+                # Track ersetzt: der Wiedergabe-Zustand gehört längst dem neuen
+                # Track. Nur den eigenen stderr-Puffer schließen – kein
+                # _playback_done, kein Requeue, kein play_next.
+                self._stderr_tail(stderr_buf)
+                logger.info(f"[Wiedergabe] Pausierter Song durch neuen Start ersetzt: {title}")
+                return
+            ended_at = time.monotonic()
+            # stderr immer auslesen (schließt den Puffer).
+            stderr_tail = self._stderr_tail(stderr_buf)
+            try:
+                queue_seq, queue_data = _run_on_loop(self.bot.loop, on_track_end, error, ended_at, stderr_tail)
+            except concurrent.futures.TimeoutError:
+                # Der Loop hat nicht übernommen (blockiert oder beim Beenden
+                # gestoppt). Die Logik läuft nach, sobald er wieder dran ist –
+                # hier nur den Player-Thread nicht länger festhalten.
+                logger.warning(
+                    f"[after_playing] Event-Loop hat das Track-Ende nicht innerhalb von "
+                    f"{_LOOP_HANDOFF_TIMEOUT:.0f}s übernommen: {title}"
+                )
+                return
+            self._write_last_queue(queue_seq, queue_data)
 
         return after_playing
+
+    # Folgenummern für last_queue.json (Klassen-Defaults für Tests via __new__):
+    # vergeben auf dem Loop beim Snapshot, geprüft beim Schreiben im Thread.
+    _last_queue_seq = 0
+    _last_queue_written = 0
+
+    def _write_last_queue(self, seq, queue_data):
+        """Schreibt den Queue-Snapshot eines Track-Endes nach last_queue.json.
+
+        Blockierendes Datei-I/O – läuft im Player-Thread (aus after_playing),
+        nicht auf dem Event-Loop. Der Write passiert jetzt nach dem Anstoßen
+        des nächsten Tracks; stirbt der sofort, könnten sich zwei Writes
+        überholen. Lock + Folgenummer sorgen dafür, dass nie ein älterer
+        Snapshot einen neueren überschreibt."""
+        with _LAST_QUEUE_LOCK:
+            if seq < self._last_queue_written:
+                return
+            try:
+                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
+                self._last_queue_written = seq
+                logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
+            except Exception as e:
+                logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")
 
     def _snapshot_track_state(self, ctx, url, title, duration):
         """Setzt den kompletten Track-Zustand synchron VOR vc.play() (ADR 0007).
