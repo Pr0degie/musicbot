@@ -1,7 +1,7 @@
 """Track-Ende der Wiedergabe – Mixin für PlaybackMixin.
 
 Der after-Callback, den discord.py im Player-Thread aufruft, reicht die
-Track-Ende-Logik an den Event-Loop weiter (_run_on_loop, ADR 0009). Im
+Track-Ende-Logik an den Event-Loop weiter (utils.tasks.run_on_loop, ADR 0009). Im
 Thread bleibt nur Datei-I/O: der FFmpeg-stderr-Puffer davor und der
 last_queue.json-Write danach (_write_last_queue in music_queue_io.py, ADR 0005).
 """
@@ -11,43 +11,13 @@ import concurrent.futures
 import time
 from dataclasses import dataclass
 
+from utils import tasks
 from utils.logger import logger
 from utils.i18n import t
 
 # Max. Seek-Resumes pro Track, wenn FFmpeg die wachsende Datei eines progressiven
 # Downloads überholt hat – danach Fallback auf die Stream-/Retry-Kaskade.
 PROGRESSIVE_MAX_RESUMES = 2
-
-# So lange wartet der Player-Thread höchstens darauf, dass der Event-Loop die
-# Track-Ende-Logik übernimmt (normal: Millisekunden).
-_LOOP_HANDOFF_TIMEOUT = 10.0
-
-
-def _run_on_loop(loop, fn, *args):
-    """Führt fn(*args) auf dem Event-Loop `loop` aus und gibt das Ergebnis zurück.
-
-    Aus einem fremden Thread (Player-Thread von discord.py): an den Loop
-    übergeben und auf das Ergebnis warten – eine Exception aus fn kommt beim
-    Aufrufer an, wie wenn er fn selbst ausgeführt hätte. Nach
-    _LOOP_HANDOFF_TIMEOUT Sekunden concurrent.futures.TimeoutError.
-    Wer schon auf dem Loop ist, ruft fn direkt auf (Warten wäre ein Deadlock).
-    """
-    try:
-        running = asyncio.get_running_loop()
-    except RuntimeError:
-        running = None
-    if running is loop:
-        return fn(*args)
-    done = concurrent.futures.Future()
-
-    def run():
-        try:
-            done.set_result(fn(*args))
-        except BaseException as exc:
-            done.set_exception(exc)
-
-    loop.call_soon_threadsafe(run)
-    return done.result(timeout=_LOOP_HANDOFF_TIMEOUT)
 
 
 @dataclass(frozen=True)
@@ -92,7 +62,7 @@ class TrackEndMixin:
             # stderr immer auslesen (schließt den Puffer).
             stderr_tail = self._stderr_tail(run.stderr_buf)
             try:
-                queue_seq, queue_data = _run_on_loop(
+                queue_seq, queue_data = tasks.run_on_loop(
                     self.bot.loop, self._on_track_end, run, error, ended_at, stderr_tail)
             except concurrent.futures.TimeoutError:
                 # Der Loop hat nicht übernommen (blockiert oder beim Beenden
@@ -100,7 +70,7 @@ class TrackEndMixin:
                 # hier nur den Player-Thread nicht länger festhalten.
                 logger.warning(
                     f"[after_playing] Event-Loop hat das Track-Ende nicht innerhalb von "
-                    f"{_LOOP_HANDOFF_TIMEOUT:.0f}s übernommen: {run.title}"
+                    f"{tasks.LOOP_HANDOFF_TIMEOUT:.0f}s übernommen: {run.title}"
                 )
                 return
             self._write_last_queue(queue_seq, queue_data)

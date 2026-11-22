@@ -32,7 +32,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
     oder vorladen) und `_wait_playback_done` (auf das Ende des vorherigen Players warten, `False` bei Timeout).
     Erbt die drei Mixins darunter; `MusicCommands` bindet nur `PlaybackMixin` ein.
   - **`cogs/music_track_end.py`** — `TrackEndMixin`: `_make_after_playing(run)` (Thread-Callback, der die
-    Track-Ende-Logik per `_run_on_loop` auf den Event-Loop reicht), `_on_track_end` (die Logik in benannten
+    Track-Ende-Logik per `utils.tasks.run_on_loop` auf den Event-Loop reicht), `_on_track_end` (die Logik in benannten
     Schritten) und das Wertobjekt `TrackRun`.
   - **`cogs/music_enqueue.py`** — `EnqueueMixin`: der gemeinsame Such-/URL-Flow von `!p`/`!next`/`!now` in vier Helpern:
     `_stop_radio_for_takeover` (Radio-Vorspann), `_extract_info_or_report` (yt_dlp-Fetch + Fehlermeldung,
@@ -101,7 +101,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   Zeitleiste eines Laufs aus `bot.log` (`--list`, `--session`); **`tools/multi_bots.py`** — mehrere Instanzen parallel, je eigener Ordner `multi_bots/botN/` als cwd, Bridge-Port 8765+N → [multi-bots.md](multi-bots.md); **`utils/env_check.py`** — `missing_env_keys()`
   gegen `.env.example`, Startzeile `[Config]` in `setup_hook`.
 - **`utils/checks.py`** (`require_same_voice`/`require_admin`), **`utils/url_check.py`** (`check_url`) →
-  [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`, `atomic_write_text`), **`utils/tasks.py`** (`spawn` – Hintergrund-Tasks mit gehaltener Referenz und Fehler-Log),
+  [security.md](architecture/security.md); **`utils/files.py`** (`safe_unlink`, `drain_pending_deletes`, `atomic_write_text`), **`utils/tasks.py`** (`spawn` – Hintergrund-Tasks mit gehaltener Referenz und Fehler-Log; `run_on_loop` – Übergabe aus dem Player-Thread an den Event-Loop mit `LOOP_HANDOFF_TIMEOUT`),
   **`utils/text.py`** (`normalize_title`/`parse_time`/`progress_bar`/`link_label` — Kartentitel als Link ohne Emojis, [ADR 0012](adr/0012-now-playing-karte-components-v2.md)), **`utils/i18n.py`** (`t()`).
 - **`utils/ffmpeg.py`** — zustandslos: `ffmpeg_header_opts`/`stderr_tail`/`classify_ffmpeg_error`/`stream_wait_seconds`
   (Wartezeit bis `available_at` einer YouTube-Stream-URL, sonst 403); `music.py`

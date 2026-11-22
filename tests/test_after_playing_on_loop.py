@@ -18,7 +18,7 @@ import discord
 import pytest
 
 import cogs.music_queue_io as queue_io_mod
-import cogs.music_track_end as playback_mod
+import utils.tasks as tasks_mod
 from conftest import FakeCtx, FakeDownloader, FakeVoiceClient, build_cog, cleanup_cog, make_fake_source
 
 URL_A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
@@ -184,7 +184,7 @@ def test_blockierter_loop_haelt_den_player_thread_nicht_fest(monkeypatch, tmp_pa
     """Übernimmt der Loop nicht rechtzeitig, gibt der Thread-Callback auf (kein
     Write) – die Logik läuft nach, sobald der Loop wieder dran ist."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(playback_mod, "_LOOP_HANDOFF_TIMEOUT", 0.05)
+    monkeypatch.setattr(tasks_mod, "LOOP_HANDOFF_TIMEOUT", 0.05)
 
     async def run():
         mc, vc, ctx = await _start(monkeypatch)

@@ -7,6 +7,7 @@ Kern-Methoden (self._ensure_voice) zu, die in cogs/music.py definiert sind.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
+from utils import tasks
 from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.voice import PlayerToken, start_clock_at_first_packet, stop_playback
@@ -155,30 +157,26 @@ class RadioMixin:
         self._radio_session = token
 
         def after_radio(error):
+            """Callback, den discord.py nach dem Stream-Ende aufruft – im
+            Player-Thread. Er reicht nur weiter: die Logik (_on_radio_end)
+            läuft auf dem Event-Loop, wie beim Song-Pfad (after_playing)."""
             if token.discarded:
                 # Pausierter Radio-Player wurde durch einen Song (play_next) oder
                 # einen anderen Sender ersetzt (_discard_paused_player) – dessen
                 # Zustand nicht anfassen.
                 return
-            self.bot.loop.call_soon_threadsafe(self._playback_done.set)
-            if error:
-                logger.warning(f"[Radio] Stream-Fehler: {error}")
-            else:
-                logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
-            if not self.is_radio or self._radio_session is not token:
-                # Radio beendet oder dieser Sender abgelöst (Senderwechsel): der
-                # Stopp war gewollt, kein Reconnect.
-                return
-            if self._radio_should_reconnect(time.monotonic() - started):
-                logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/{RADIO_MAX_RECONNECTS} für {name}")
-                asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx, token), self.bot.loop)
-            else:
-                logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
-                self.is_radio = False
-                self.is_playing = False
-                asyncio.run_coroutine_threadsafe(
-                    ctx.send(t("radio.stream_interrupted"), delete_after=30),
-                    self.bot.loop,
+            # Laufzeit im Thread messen: sie hängt damit nicht davon ab, wie
+            # schnell der Loop übernimmt.
+            ran_seconds = time.monotonic() - started
+            try:
+                tasks.run_on_loop(self.bot.loop, self._on_radio_end, ctx, token, name, error, ran_seconds)
+            except concurrent.futures.TimeoutError:
+                # Der Loop hat nicht übernommen (blockiert oder beim Beenden
+                # gestoppt). Die Logik läuft nach, sobald er wieder dran ist –
+                # hier nur den Player-Thread nicht länger festhalten.
+                logger.warning(
+                    f"[Radio] Event-Loop hat das Stream-Ende nicht innerhalb von "
+                    f"{tasks.LOOP_HANDOFF_TIMEOUT:.0f}s übernommen: {name}"
                 )
 
         # Vorherige Karte (Song oder alter Sender) auf Text zurückbauen – nur die
@@ -208,6 +206,35 @@ class RadioMixin:
         self.text_channel = ctx.channel
         logger.info(f"[Radio] Stream gestartet: {name} ({url})")
         return True
+
+    def _on_radio_end(self, ctx, token, name, error, ran_seconds):
+        """Die Stream-Ende-Logik eines Senders. Läuft auf dem Event-Loop
+        (after_radio reicht sie aus dem Player-Thread dorthin weiter):
+        is_radio, is_playing und der Reconnect-Zähler werden nur dort
+        verändert, wo auch die Befehle sie ändern.
+
+        token: PlayerToken des Senders, dessen Stream endete. ran_seconds: wie
+        lange er lief (für die Reconnect-Kappe)."""
+        self._playback_done.set()
+        if error:
+            logger.warning(f"[Radio] Stream-Fehler: {error}")
+        else:
+            logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
+        if not self.is_radio or self._radio_session is not token:
+            # Radio beendet oder dieser Sender abgelöst (Senderwechsel): der
+            # Stopp war gewollt, kein Reconnect.
+            return
+        if self._radio_should_reconnect(ran_seconds):
+            logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/{RADIO_MAX_RECONNECTS} für {name}")
+            asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx, token), self.bot.loop)
+        else:
+            logger.warning(f"[Radio] Max. Reconnect-Versuche für {name} erreicht.")
+            self.is_radio = False
+            self.is_playing = False
+            asyncio.run_coroutine_threadsafe(
+                ctx.send(t("radio.stream_interrupted"), delete_after=30),
+                self.bot.loop,
+            )
 
     async def _reconnect_radio(self, ctx, session=None) -> None:
         """Versucht einen abgebrochenen Radio-Stream neu zu verbinden.

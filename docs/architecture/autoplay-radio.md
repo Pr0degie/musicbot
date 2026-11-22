@@ -46,11 +46,15 @@ Radio code lives in `cogs/music_radio.py` (`RadioMixin`). `RADIO_STATIONS_FILE` 
 `{name, url}`).
 State: `is_radio`, `radio_station_name`, `radio_stream_url`, `_radio_reconnect_count`, `_radio_session`.
 `_play_radio_stream()` plays via FFmpeg directly (no yt_dlp); `after_radio` reconnects up to 3× on error or
-unexpected stream end (`_radio_should_reconnect`, `RADIO_MAX_RECONNECTS`). Der Zähler wird erst nach
+unexpected stream end (`_radio_should_reconnect`, `RADIO_MAX_RECONNECTS`). `after_radio` selbst ist nur der dünne
+Callback im Player-Thread: Er prüft das Token, misst die Laufzeit und reicht an `_on_radio_end` weiter, das per
+`utils.tasks.run_on_loop` auf dem Event-Loop läuft. `is_radio`, `is_playing` und der Reconnect-Zähler werden
+damit nicht mehr aus einem Fremd-Thread verändert (wie beim Song-Pfad, [ADR 0009](../adr/0009-music-cog-mixin-zerlegung.md)).
+Der Zähler wird erst nach
 `RADIO_STABLE_SECONDS` (60 s) stabilem Lauf zurückgesetzt, nicht beim Start – sonst verbände ein sofort
 abbrechender Sender endlos neu (der Reconnect startet selbst über `_play_radio_stream`).
 Reconnecten darf nur der Sender, der gerade laufen soll: `_radio_session` hält dessen `PlayerToken`, `_stop_radio()`
-setzt es auf `None`. Der `after_radio`-Callback eines gestoppten Players läuft im Player-Thread oft erst, wenn der
+setzt es auf `None`. Das Stream-Ende eines gestoppten Players kommt aus dem Player-Thread oft erst an, wenn der
 nächste Sender `is_radio` schon wieder gesetzt hat – `is_radio` allein hielte den Senderwechsel für einen Abbruch
 (Reconnect über den neuen Sender, „Voice-Client noch belegt", Radio-Zustand weg bei laufendem Stream). Auch der
 wartende `_reconnect_radio` prüft die Session nach seiner 2-s-Pause.

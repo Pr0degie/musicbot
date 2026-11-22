@@ -8,6 +8,7 @@ belegt" und setzte den Radio-Zustand zurück, obwohl der Sender weiterlief.
 """
 
 import asyncio
+import threading
 
 import discord
 
@@ -135,6 +136,44 @@ def test_wartender_reconnect_startet_nicht_ueber_einen_neuen_sender(monkeypatch,
         assert len(vc.play_calls) == 2
         assert mc.is_radio is True and mc.is_playing is True
         assert mc.radio_station_name == "Zwei"
+        cleanup_cog(mc)
+
+    asyncio.run(run())
+
+
+def test_stream_ende_aus_dem_player_thread_laeuft_auf_dem_loop(monkeypatch, tmp_path):
+    """Der after-Callback kommt aus dem Player-Thread von discord.py. Die
+    Stream-Ende-Logik (Reconnect-Zähler, is_radio/is_playing) läuft trotzdem
+    auf dem Event-Loop – wie das Track-Ende eines Songs."""
+    _setup(monkeypatch, tmp_path)
+
+    async def run():
+        loop_thread = threading.get_ident()
+        vc = SwitchVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = build_cog()
+        logik = []
+        reconnects = []
+        echt = mc._radio_should_reconnect
+
+        def spy_should_reconnect(ran_seconds):
+            logik.append(threading.get_ident())
+            return echt(ran_seconds)
+
+        async def reconnect(*args, **kwargs):
+            reconnects.append(threading.get_ident())
+
+        mc._radio_should_reconnect = spy_should_reconnect
+        mc._reconnect_radio = reconnect
+        await MusicCommands.radio_play.callback(mc, ctx, eingabe="1")
+
+        await asyncio.to_thread(vc.end_track)      # Player-Thread ruft after_radio
+        await asyncio.sleep(0.05)
+
+        assert logik == [loop_thread], "Stream-Ende-Logik gehört auf den Event-Loop"
+        assert reconnects == [loop_thread], "Reconnect wurde genau einmal angestoßen"
+        assert mc._radio_reconnect_count == 1
+        assert mc._playback_done.is_set()
         cleanup_cog(mc)
 
     asyncio.run(run())

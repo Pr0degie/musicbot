@@ -8,8 +8,8 @@
 Untermethoden → [ADR 0009](../adr/0009-music-cog-mixin-zerlegung.md): `_handle_queue_empty` (Leere-Queue-Fall
 + Autoplay-Handoff), `_build_audio_source` (FFmpeg-Options + stderr-Temp + Source, synchron),
 `_snapshot_track_state` (Track-Zustand vor `vc.play()`, synchron), `_make_after_playing(run)` (baut den
-`after_playing`-Callback zum Wertobjekt `TrackRun`; liegt mit `_on_track_end` und `_run_on_loop` in
-`TrackEndMixin`, `cogs/music_track_end.py`), `_build_np_view` (Now-Playing-Karte als Components-V2-Layout, synchron), `_schedule_background_work`
+`after_playing`-Callback zum Wertobjekt `TrackRun`; liegt mit `_on_track_end` in `TrackEndMixin`,
+`cogs/music_track_end.py`; die Übergabe an den Loop macht `utils.tasks.run_on_loop`), `_build_np_view` (Now-Playing-Karte als Components-V2-Layout, synchron), `_schedule_background_work`
 (Wartung alle 50 Songs, Prefetch, Autoplay-Prefetch, synchron) und `_skip_broken_track` (Fehlerpfad:
 merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Orchestrator.
 
