@@ -87,7 +87,7 @@ class DownloadsCleanupMixin:
             if not info:
                 continue
             try:
-                protected_paths.add(Path(self.ydl.prepare_filename(info)).resolve())
+                protected_paths.add(self._target_path(info).resolve())
             except Exception:
                 continue
         # Wachsende Dateien laufender progressiver Downloads (samt Sidecars):

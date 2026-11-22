@@ -84,7 +84,7 @@ class MetadataCacheMixin:
             return info
         if (info.get("duration") or 0) <= STREAM_THRESHOLD_SECONDS:
             try:
-                filename = Path(self.ydl.prepare_filename(info))
+                filename = self._target_path(info)
                 if filename.exists() and not self.is_incomplete(filename):
                     return info
             except Exception:

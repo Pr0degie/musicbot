@@ -139,7 +139,7 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         if r.duration > STREAM_THRESHOLD_SECONDS:
             return r
         try:
-            r.filename = Path(self.ydl.prepare_filename(info))
+            r.filename = self._target_path(info)
             # Sofort als tabu markieren (nicht erst beim Return): der Song ist
             # bereits aus der Queue gepoppt und damit nicht mehr über den
             # protected_provider geschützt – ein parallel fertig werdender
@@ -154,7 +154,7 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
             r = _Resolution(url, await self._fetch_info(url))
             if r.duration > STREAM_THRESHOLD_SECONDS:
                 return r
-            r.filename = Path(self.ydl.prepare_filename(r.info))
+            r.filename = self._target_path(r.info)
             self.last_resolved_file = r.filename
         return r
 

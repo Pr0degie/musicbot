@@ -206,7 +206,7 @@ class ProgressiveDownloadMixin:
         if self.progressive_task_for(url) or self.inflight_download(url):
             return          # es schreibt schon jemand für diese URL
         try:
-            filename = Path(self.ydl.prepare_filename(info))
+            filename = self._target_path(info)
         except Exception:
             return          # kaputter Cache-Eintrag → resolve_track räumt das auf
         if filename.exists():

@@ -68,7 +68,9 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   `playlist_ydl`, `autoplay_ydl` — gebaut von `_build_ydl(kind)`, aufgelöst per `kind` in `extract_info_async`, Cookie-Fallback via
   `enable_cookie_mode` → [ADR 0010](adr/0010-cookielos-zuerst-cookie-fallback.md); cookielos nur YouTube-Client `visionos`
   (`FAST_PLAYER_CLIENTS`, keine `available_at`-Sperre), bei Client-Fehlern ein Zweitversuch mit yt_dlp-Standard →
-  [ADR 0013](adr/0013-schneller-youtube-client-visionos.md)), `rebuild()`/`rebuild_async()`. Also defines `DOWNLOAD_DIR`.
+  [ADR 0013](adr/0013-schneller-youtube-client-visionos.md)), `rebuild()`/`rebuild_async()`. Also defines `DOWNLOAD_DIR`. `_target_path(info)` ist die einzige Stelle, die
+  `prepare_filename` auswertet: im mp3-Modus liegt die Datei nach dem Postprocessor als `<name>.mp3` vor, nicht
+  unter der Quell-Endung.
 - **`cogs/downloader_cache.py`** — `MetadataCacheMixin`: `_url_cache` samt Timestamps (`CACHE_TTL`),
   `_usable_cached_info`, tolerantes Laden und gedebounctes Persistieren nach `metadata_cache.json`
   (`PERSISTED_CACHE_FIELDS` → [ADR 0005](adr/0005-persistenz-debouncing.md)), `_fetch_info`, `_start_resolve`, `warmup`.

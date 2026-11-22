@@ -6,7 +6,6 @@ In-Flight-Registry (ADR 0002); die Queue-Downloads laufen sequenziell unter
 dem Lock in _prefetch_one, weil yt_dlp nicht thread-safe ist.
 """
 import asyncio
-from pathlib import Path
 
 from utils.logger import logger
 from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
@@ -103,7 +102,7 @@ class PrefetchMixin:
             logger.info(f"[Prefetch] Übersprungen – {info.get('title', title)} wird gestreamt")
             return info, None
         try:
-            return info, Path(self.ydl.prepare_filename(info))
+            return info, self._target_path(info)
         except Exception:
             # Kaputter/reduzierter Cache-Eintrag → verwerfen, frisch
             # extrahieren (Cache-Miss-Pfad). Schlägt auch das fehl, fängt
@@ -112,7 +111,7 @@ class PrefetchMixin:
             info = await self._fetch_info(url)
             if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
                 return info, None
-            return info, Path(self.ydl.prepare_filename(info))
+            return info, self._target_path(info)
 
     async def prefetch_autoplay(self, ref_url, ref_title, recently_played, recently_played_titles=()):
         """Sucht + lädt nächsten Autoplay-Song im Hintergrund.
@@ -194,7 +193,7 @@ class PrefetchMixin:
         just_downloaded = None
         if full_info:
             try:
-                just_downloaded = Path(self.ydl.prepare_filename(full_info))
+                just_downloaded = self._target_path(full_info)
             except Exception:
                 pass
         await self.cleanup_downloads(extra_protected=just_downloaded)

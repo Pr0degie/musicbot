@@ -55,6 +55,20 @@ CLIENT_FALLBACK_MARKERS = (
 
 
 class YdlMixin:
+    # Klassen-Default für ohne __init__ erzeugte Instanzen (Tests via __new__).
+    audio_format = "webm"
+
+    def _target_path(self, info: dict) -> Path:
+        """Lokale Datei, unter der dieser Track nach dem Download liegt.
+
+        Einzige Stelle, die prepare_filename auswertet. prepare_filename nennt
+        die Endung der Quelle (z. B. .webm); im mp3-Modus ersetzt der
+        FFmpeg-Postprocessor die geladene Datei aber durch <name>.mp3."""
+        path = Path(self.ydl.prepare_filename(info))
+        if self.audio_format == "mp3":
+            path = path.with_suffix(".mp3")
+        return path
+
     @staticmethod
     def _cookies_configured() -> bool:
         """Ist überhaupt eine Cookie-Quelle eingerichtet?"""

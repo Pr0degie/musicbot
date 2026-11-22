@@ -38,6 +38,7 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 - yt_dlp nicht thread-safe: Prefetch sequenziell, gesichert durch das Lock in `_prefetch_one` → [playback.md](docs/architecture/playback.md).
 - yt_dlp cookielos zuerst; Extraktion nur über `dl.extract_info_async(query, kind)` → [ADR 0010](docs/adr/0010-cookielos-zuerst-cookie-fallback.md);
   Instanzen nur über `_build_ydl()` (setzt den schnellen Client `visionos`) → [ADR 0013](docs/adr/0013-schneller-youtube-client-visionos.md).
+- Zieldatei eines Tracks nur über `dl._target_path(info)`, nie direkt `prepare_filename` (im mp3-Modus heißt die Datei `<name>.mp3`).
 
 ## Landkarte
 
