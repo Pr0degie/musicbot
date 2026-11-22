@@ -9,7 +9,7 @@ import asyncio
 
 from utils.logger import logger
 from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
-from cogs.downloader_progressive import STREAM_THRESHOLD_SECONDS
+from cogs.downloader_progressive import streams_only
 
 # So lange wartet prefetch_autoplay auf den Download des gewählten Songs.
 # Danach gibt nur der Aufrufer auf – der Download selbst läuft weiter.
@@ -95,14 +95,14 @@ class PrefetchMixin:
 
     async def _prefetch_target(self, url: str, title: str):
         """Metadaten und Zieldatei für _prefetch_one: (info, filename).
-        filename ist None für Tracks über STREAM_THRESHOLD_SECONDS, die
-        gestreamt statt geladen werden. Fehler fängt _prefetch_one."""
+        filename ist None für Tracks, die gestreamt statt geladen werden
+        (streams_only). Fehler fängt _prefetch_one."""
         info = self._usable_cached_info(url)   # abgelaufen (CACHE_TTL) = Cache-Miss
         if info is not None:
             logger.info(f"[Prefetch] Metadaten aus Cache: {title}")
         else:
             info = await self._fetch_info(url)
-        if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
+        if streams_only(info):
             logger.info(f"[Prefetch] Übersprungen – {info.get('title', title)} wird gestreamt")
             return info, None
         try:
@@ -113,7 +113,7 @@ class PrefetchMixin:
             # der except in _prefetch_one – Prefetch-Fehler sind nie fatal.
             self.invalidate(url)
             info = await self._fetch_info(url)
-            if info.get("duration", 0) > STREAM_THRESHOLD_SECONDS:
+            if streams_only(info):
                 return info, None
             return info, self._target_path(info)
 

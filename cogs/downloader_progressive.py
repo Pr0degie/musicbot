@@ -31,6 +31,16 @@ PROGRESSIVE_BLOCK_TTL = 600.0             # gescheiterte URL solange nicht erneu
 PROGRESSIVE_SIDECAR_SUFFIX = ".inprogress"  # Crash-Marker neben der wachsenden Datei
 
 
+def streams_only(info: dict) -> bool:
+    """Wird dieser Track nur gestreamt und nie heruntergeladen?
+
+    Gilt für Tracks über STREAM_THRESHOLD_SECONDS und für Livestreams: die
+    haben kein Ende, ein Download liefe endlos. yt_dlp liefert für sie
+    duration=None (Schlüssel vorhanden) – deshalb nie info.get("duration", 0)
+    mit der Schwelle vergleichen."""
+    return bool(info.get("is_live")) or (info.get("duration") or 0) > STREAM_THRESHOLD_SECONDS
+
+
 class ProgressiveDownloadMixin:
     # Progressive Downloads (Klassen-Defaults None, damit Tests via __new__ ohne
     # Voll-Setup funktionieren – alle Lese-Methoden sind None-tolerant).
@@ -199,8 +209,8 @@ class ProgressiveDownloadMixin:
     def _maybe_start_progressive(self, url: str, info: dict, title: str) -> None:
         """Startet den progressiven Download, wenn alle Bedingungen stimmen –
         sonst passiert nichts und resolve_track entscheidet später neu."""
-        if (info.get("duration") or 0) > STREAM_THRESHOLD_SECONDS:
-            return          # langer Track → Stream, kein Download
+        if streams_only(info):
+            return          # langer Track oder Livestream → Stream, kein Download
         if not self._may_start_progressive(url, info):
             return
         if self.progressive_task_for(url) or self.inflight_download(url):

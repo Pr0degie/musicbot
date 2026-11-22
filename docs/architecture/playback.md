@@ -82,6 +82,9 @@ anderen discord.py-Version, bleibt alles wie bisher (`tests/test_player_clock.py
 bug**:
 
 - Duration > 20 min → always stream, never download.
+- Livestream (`is_live`; yt_dlp liefert dafür `duration=None`) → always stream, never download: ein Download
+  liefe endlos. Beide Fälle entscheidet `streams_only(info)` in `cogs/downloader_progressive.py`, für
+  `resolve_track`, Prefetch und `prime_first_hit` gleichermaßen.
 - File not locally cached **und der progressive Pfad greift nicht** (Gates → [ADR
   0001](../adr/0001-progressiver-download-statt-cdn-stream.md)) → stream; `prefetch_next()` downloads queue
   songs in background.

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from utils.files import atomic_write_text
 from utils.logger import logger
-from cogs.downloader_progressive import STREAM_THRESHOLD_SECONDS
+from cogs.downloader_progressive import streams_only
 
 METADATA_CACHE_FILE = Path("metadata_cache.json")
 CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
@@ -29,13 +29,14 @@ CACHE_TTL = 7200  # 2 Stunden – CDN-URLs von YouTube laufen danach ab
 #   title        Anzeige + prepare_filename
 #   ext          prepare_filename
 #   duration     Stream-Schwelle, Embed, Fortschrittsbalken
+#   is_live      Livestream → nur streamen, nie herunterladen (streams_only)
 #   url          direkte CDN-Stream-URL (Stream-Pfad)
 #   webpage_url  Embed-Link, Download-Ziel in prefetch_next
 #   thumbnail    Embed-Thumbnail
 #   uploader     Embed-Titel/-Footer
 #   http_headers FFmpeg -headers im Stream-Pfad (music._ffmpeg_header_opts)
 PERSISTED_CACHE_FIELDS = (
-    "id", "title", "ext", "duration", "url", "webpage_url",
+    "id", "title", "ext", "duration", "is_live", "url", "webpage_url",
     "thumbnail", "uploader", "http_headers",
 )
 
@@ -87,7 +88,7 @@ class MetadataCacheMixin:
         ts = self._cache_timestamps.get(url)
         if ts is None or time.time() - ts < CACHE_TTL:
             return info
-        if (info.get("duration") or 0) <= STREAM_THRESHOLD_SECONDS:
+        if not streams_only(info):
             try:
                 filename = self._target_path(info)
                 if filename.exists() and not self.is_incomplete(filename):

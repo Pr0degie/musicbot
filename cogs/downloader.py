@@ -17,7 +17,7 @@ from utils.logger import logger
 from cogs.downloader_progressive import (  # noqa: F401
     PROGRESSIVE_BLOCK_TTL, PROGRESSIVE_BYTES_PER_SECOND, PROGRESSIVE_MIN_BYTES,
     PROGRESSIVE_POLL_INTERVAL, PROGRESSIVE_SIDECAR_SUFFIX, PROGRESSIVE_WAIT_TIMEOUT,
-    STREAM_THRESHOLD_SECONDS, ProgressiveDownloadMixin,
+    STREAM_THRESHOLD_SECONDS, ProgressiveDownloadMixin, streams_only,
 )
 # Nur gelesene Konstanten werden re-exportiert. Was Tests patchen (DOWNLOAD_DIR,
 # DOWNLOADS_MAX_MB, YDL_COOKIES_FILE, YDL_BROWSER), steht ausschließlich im Zielmodul.
@@ -44,7 +44,8 @@ class _Resolution:
 
     @property
     def duration(self):
-        return self.info.get("duration", 0)
+        # "or 0": yt_dlp liefert für Livestreams duration=None.
+        return self.info.get("duration") or 0
 
     def result(self, source):
         """Rückgabe-Tupel von resolve_track; source ist Datei oder Stream-URL."""
@@ -110,7 +111,9 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
         """
         r = await self._resolve_metadata(url, title)
         if r.filename is None:
-            # Langer Track → direkt streamen, kein lokaler Download nötig
+            # Langer Track oder Livestream → direkt streamen, kein lokaler Download
+            if r.info.get("is_live"):
+                return self._stream_result(r, f"[Stream] {r.title} (Livestream) wird gestreamt – kein Download")
             return self._stream_result(r, f"[Stream] {r.title} ({r.duration//60} min) wird gestreamt – kein Download")
         r.force_download, r.min_buffer_seconds = force_download, min_buffer_seconds
         result = await self._adopt_inflight(r)
@@ -132,11 +135,11 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
 
     async def _resolve_metadata(self, url, title):
         """Phase 1: Metadaten (Cache, laufender Prefetch-Resolve oder frisch)
-        und Zieldatei. filename bleibt None für Tracks über
-        STREAM_THRESHOLD_SECONDS."""
+        und Zieldatei. filename bleibt None für Tracks, die nur gestreamt
+        werden (streams_only: über STREAM_THRESHOLD_SECONDS oder Livestream)."""
         info = await self._metadata_for(url, title)
         r = _Resolution(url, info)
-        if r.duration > STREAM_THRESHOLD_SECONDS:
+        if streams_only(info):
             return r
         try:
             r.filename = self._target_path(info)
@@ -152,7 +155,7 @@ class Downloader(PrefetchMixin, DownloadsCleanupMixin, MetadataCacheMixin, YdlMi
             logger.warning(f"[Cache] Eintrag für {r.title!r} unbrauchbar ({type(e).__name__}: {e}) – verworfen, extrahiere frisch")
             self.invalidate(url)
             r = _Resolution(url, await self._fetch_info(url))
-            if r.duration > STREAM_THRESHOLD_SECONDS:
+            if streams_only(r.info):
                 return r
             r.filename = self._target_path(r.info)
             self.last_resolved_file = r.filename

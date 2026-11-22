@@ -192,3 +192,68 @@ def test_title_and_duration_fall_back_when_missing(tmp_path):
 
     assert title == "Unbekannter Titel"
     assert duration == 0
+
+
+# ---------------------------------------------------------------------------
+# duration=None: yt_dlp liefert das für Livestreams (Schlüssel vorhanden, Wert
+# None). Früher: TypeError beim Vergleich mit STREAM_THRESHOLD_SECONDS.
+# ---------------------------------------------------------------------------
+
+LIVE_INFO = {"title": "Live-Sender", "duration": None, "is_live": True, "ext": "webm",
+             "url": "https://cdn.example/live.m3u8", "webpage_url": URL}
+
+
+def test_livestream_wird_gestreamt_statt_zu_crashen(tmp_path):
+    dl = make_dl(dict(LIVE_INFO), tmp_path / "live.webm")
+
+    _, filename, title, duration = resolve(dl)
+
+    assert filename == "https://cdn.example/live.m3u8"
+    assert title == "Live-Sender"
+    assert duration == 0
+
+
+def test_livestream_wird_auch_im_letzten_anlauf_nie_heruntergeladen(tmp_path):
+    """force_download: ein Livestream hat kein Ende, der Download liefe endlos."""
+    dl = make_dl(dict(LIVE_INFO), tmp_path / "live.webm")
+    downloads = []
+    dl.ydl.download = downloads.append
+
+    async def run():
+        return await dl.resolve_track(URL, "Live-Sender", force_download=True)
+
+    _, filename, _, _ = asyncio.run(run())
+
+    assert isinstance(filename, str)
+    assert downloads == []
+
+
+def test_livestream_wird_nicht_vorgeladen(tmp_path):
+    dl = make_dl(dict(LIVE_INFO), tmp_path / "live.webm")
+    downloads = []
+    dl.ydl.download = downloads.append
+
+    asyncio.run(dl._prefetch_one(URL, "Live-Sender"))
+
+    assert downloads == []
+
+
+def test_livestream_startet_keinen_progressiven_download(tmp_path):
+    dl = make_dl(dict(LIVE_INFO), tmp_path / "live.webm")
+    starts = []
+    dl._start_progressive = lambda *args: starts.append(args)
+
+    dl._maybe_start_progressive(URL, dict(LIVE_INFO), "Live-Sender")
+
+    assert starts == []
+
+
+def test_duration_none_ohne_live_gilt_wie_fehlende_dauer(tmp_path):
+    local = tmp_path / "song.webm"
+    local.write_bytes(b"x")
+    dl = make_dl({"title": "Ohne Dauer", "duration": None}, local)
+
+    _, filename, _, duration = resolve(dl)
+
+    assert filename == local
+    assert duration == 0
