@@ -41,6 +41,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!q` bei aktivem Autoplay mit vorgeladenem Kandidaten → Vorschau-Zeile „🔮 Als Nächstes (Autoplay): …" statt nummeriertem Eintrag
 - [ ] `!p` während Autoplay → vorgeladener Autoplay-Song wird evicted, neuer Song spielt als Nächstes
 - [ ] `!radio <Nr>` → Sender spielt; `!stop` → Radio aus, Queue bleibt erhalten
+- [ ] Senderstart und Songstart (auch `!seek`, gerade ladender Song): die ersten Sekunden klingen **nicht** beschleunigt
 - [ ] Senderwechsel bei laufendem Radio (`!radio <andere Nr>`, mehrmals hintereinander) → neuer Sender spielt, **keine** Meldung „Stream konnte nicht gestartet werden (Voice-Client noch belegt)", kein „Reconnect …"; `/debug` zeigt danach `radio` = neuer Sender und `is_playing: true`
 
 ## Persistenz & Neustart

@@ -5,6 +5,11 @@ gewählt hat (`intended_channel_id`, für den Move-Schutz). Ohne Import von
 discord.ext.voice_recv auf Modulebene: der Helfer muss auch dann funktionieren,
 wenn das (experimentelle) Empfangs-Paket gar nicht installiert ist.
 """
+import threading
+import time
+
+from discord.player import AudioPlayer
+
 import config
 from utils.logger import logger
 
@@ -22,6 +27,39 @@ def stop_playback(voice_client) -> None:
     fehlendem Paket ist das Verhalten byte-identisch zu vorher.
     """
     (getattr(voice_client, "stop_playing", None) or voice_client.stop)()
+
+
+def start_clock_at_first_packet(source):
+    """Lässt die Uhr des Players erst beim ersten Paket der Quelle loslaufen.
+
+    discord.py startet die Uhr des AudioPlayers, bevor FFmpeg etwas liefert.
+    Braucht FFmpeg bis zum ersten Paket z. B. 0,5 s (Radiosender, Netz-Streams,
+    Seek), liegt der Player von Beginn an hinter seinem Zeitplan und schickt
+    diese Zeit an Ton ohne Pause hinterher – am Anfang klingt es kurz zu
+    schnell (gemessen: 76–78 statt 50 Pakete in der ersten Sekunde).
+
+    Das erste read() läuft im Player-Thread; danach werden `_start`/`loops`
+    neu gesetzt – dieselben zwei Zeilen, mit denen discord.py seine Uhr nach
+    einem Voice-Reconnect selbst zurücksetzt. Nur einmal: danach liest der
+    Player wieder direkt aus der Quelle. Fehlen die Interna in einer anderen
+    discord.py-Version oder hat die Quelle kein read() (Test-Fakes), bleibt
+    alles wie bisher. Gibt die Quelle zurück.
+    """
+    read = getattr(source, "read", None)
+    if read is None:
+        return source
+
+    def first_read():
+        data = read()
+        del source.read   # ab jetzt wieder die Methode der Klasse
+        player = threading.current_thread()
+        if data and isinstance(player, AudioPlayer) and hasattr(player, "_start") and hasattr(player, "loops"):
+            player._start = time.perf_counter()
+            player.loops = 0
+        return data
+
+    source.read = first_read
+    return source
 
 
 class PlayerToken:

@@ -36,7 +36,7 @@ import discord
 from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.tasks import spawn
-from utils.voice import PlayerToken, stop_playback
+from utils.voice import PlayerToken, start_clock_at_first_packet, stop_playback
 from utils.i18n import t
 from utils.text import link_label, normalize_title
 from utils.ffmpeg import stream_wait_seconds
@@ -611,7 +611,9 @@ class PlaybackMixin:
             source = discord.FFmpegOpusAudio(
                 str(filename), codec="copy", before_options=before_opts, stderr=stderr_buf
             )
-        return source, stderr_buf
+        # Uhr des Players erst beim ersten Paket: sonst schiebt er FFmpegs
+        # Anlaufzeit als Ton ohne Pause nach (Anfang klingt kurz zu schnell).
+        return start_clock_at_first_packet(source), stderr_buf
 
     def _make_after_playing(self, ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title,
                             token=None):

@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from utils.files import atomic_write_text
 from utils.logger import logger
-from utils.voice import PlayerToken, stop_playback
+from utils.voice import PlayerToken, start_clock_at_first_packet, stop_playback
 from utils.i18n import t
 from utils.url_check import enforce_url_policy
 from utils.checks import check_admin
@@ -149,6 +149,9 @@ class RadioMixin:
             await ctx.send(t("error.stream_connect_error"))
             self._stop_radio()
             return False
+        # Uhr des Players erst beim ersten Paket: ein Sender braucht ~0,5 s bis
+        # zum ersten Ton, die schöbe der Player sonst ohne Pause nach.
+        source = start_clock_at_first_packet(source)
 
         token = PlayerToken()
         self._radio_session = token

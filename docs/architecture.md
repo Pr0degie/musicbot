@@ -83,7 +83,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   (Wartezeit bis `available_at` einer YouTube-Stream-URL, sonst 403); `music.py`
   spiegelt sie (plus `utils/text.progress_bar`) als Klassen-Aliase `_ffmpeg_header_opts`/`_stderr_tail`/
   `_classify_ffmpeg_error`/`_progress_bar`, damit bestehende Aufrufer und Tests unverändert bleiben.
-- **`utils/voice.py`** — `stop_playback`, `PlayerToken`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,
+- **`utils/voice.py`** — `stop_playback`, `PlayerToken`, `start_clock_at_first_packet`, `connect_voice`, `voice_client_cls` (Klassenwahl per `.env`,
   `SafeVoiceRecvClient`), `dead_voice_poller`; **`utils/diagnostics.py`** — `snapshot()` für `GET /debug`.
 - **`utils/autoplay.py`** — zustandslose Autoplay-Kandidatenauswahl (→ [autoplay-radio.md](architecture/autoplay-radio.md));
   **`utils/ytdlp_update.py`** — `check_ytdlp_update()`, einmaliger PyPI-Vergleich nach `on_ready`.

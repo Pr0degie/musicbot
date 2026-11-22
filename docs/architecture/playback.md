@@ -59,6 +59,15 @@ downloads next autoplay song while current plays.
 still in queue/`current_track`; `clear()` wipes entirely. Persisted to `metadata_cache.json` — survives bot
 restarts; persistiert wird ein reduzierter Feldsatz → [ADR 0005](../adr/0005-persistenz-debouncing.md).
 
+**Player-Uhr ab dem ersten Paket:** discord.py startet die Uhr des `AudioPlayer`, bevor FFmpeg etwas liefert. Braucht
+FFmpeg bis zum ersten Paket z. B. 0,5–1,3 s (Radiosender, Netz-Streams, Seek), liegt der Player von Beginn an hinter
+seinem Zeitplan und schickt diese Zeit an Ton ohne Pause hinterher – der Anfang klingt kurz zu schnell (gemessen am
+22.11.2026: 79–117 statt 50 Pakete in der ersten Sekunde eines Senders). `utils/voice.start_clock_at_first_packet(source)`
+setzt `_start`/`loops` des Players nach dem ersten `read()` neu (dieselben Zeilen wie discord.pys eigener Reset nach
+einem Voice-Reconnect); danach liest der Player wieder direkt. `_build_audio_source` und `_play_radio_stream` wickeln
+jede Quelle darin ein, die Sprach-WAVs der DM-Bridge (lokale Dateien, kein Anlauf) nicht. Fehlen die Interna in einer
+anderen discord.py-Version, bleibt alles wie bisher (`tests/test_player_clock.py` prüft beides am echten Player).
+
 ## Streaming vs. Download
 
 `STREAM_THRESHOLD_SECONDS = 20 * 60` (in `cogs/downloader_progressive.py`, re-exportiert von `downloader.py`).
