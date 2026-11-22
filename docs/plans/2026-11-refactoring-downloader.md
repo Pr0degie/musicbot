@@ -560,6 +560,17 @@ wird.
 Alle aus der Lektüre geschlossen, keiner reproduziert. Nach dem Refactoring beheben, je ein Fix-Commit mit
 Test. Empfohlene Reihenfolge: 2, 1, 5, 4, dann der Rest.
 
+> **Stand 22.11.2026:** Jeder Bug wurde zuerst mit einem Test reproduziert.
+> Behoben: 2 (`958725f`, `_target_path`), 1 (`21489a4`, Download als eigener Task `_download_autoplay`),
+> 5 (`9da176e`), 4 (`4ce417b`, betrifft Livestreams: yt_dlp liefert dort `duration=None`; neu
+> `streams_only(info)`, Livestreams werden nie heruntergeladen), 6 (`a509fe2`).
+> Teilweise behoben: 3 (`c4cae22`). Alle *Downloads* über `self.ydl` laufen unter `_download_lock()`.
+> Extraktionen laufen weiterhin parallel zu einem Download auf derselben Instanz; sie unter den Lock zu
+> stellen, ließe jeden Resolve auf laufende Prefetch-Downloads warten (Startlatenz) und braucht eine
+> Entscheidung.
+> Nicht geändert: 7. Die spät eintreffenden cookielosen Ergebnisse gehören zu anderen URLs und sind gültig;
+> ihre Tasks abzubrechen, erzwänge nur eine zweite, im Cookie-Modus langsamere Extraktion.
+
 1. **Autoplay-Prefetch meldet sich ab, während der Thread noch schreibt.** `prefetch_autoplay` registriert
    den aufrufenden Task und deregistriert im `finally` (`:1070–1096`). Wird der Task gecancelt
    (`cogs/music_playback.py:484–485, 916–918`, `cogs/music.py:778–779`, `cogs/music_radio.py:92–94`) oder

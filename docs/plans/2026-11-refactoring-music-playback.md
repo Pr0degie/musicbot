@@ -548,6 +548,11 @@ Hauptgrund für Fehler ist; die Bugs 1 und 2 im Anhang sind genau diese Fehlerkl
 Alle vier sind aus der Lektüre geschlossen, keiner ist reproduziert. Nach dem Refactoring beheben, je ein
 Fix-Commit mit Test. Empfohlene Reihenfolge: 2, 3, 1, 4.
 
+> **Stand 22.11.2026:** Alle vier wurden mit einem Test reproduziert und sind behoben: 2 (`239eeaf`,
+> `_resolving_url`), 3 (`cb044bd`, `_discard_source`), 1 (`d553a23`), 4 (`4452404`, auch die Vermutung zum
+> geskippten Stream traf zu). Folge von 1: Nach einem Queue-Ende bleibt der zuletzt gespielte Song als
+> Vorgänger stehen, wenn danach ein anderer Song startet; vorher wurde `last_played` dabei `None`.
+
 1. **`last_played` wird überschrieben, `:887`.** `self.last_played = prev_track` gilt ohne Bedingung. Nach
    `!seek`, `!eq` oder einer Voice-Reparatur ist `current_track` vorher `None` (`cogs/music.py:944`, `:983`,
    `cogs/music_voice_ui.py:278`), danach ist `last_played` leer und ⏮ sowie `!replay` kennen keinen Vorgänger
