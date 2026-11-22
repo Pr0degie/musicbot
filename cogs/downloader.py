@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,11 +67,12 @@ CLIENT_FALLBACK_MARKERS = (
 
 # Nur diese Felder werden nach metadata_cache.json persistiert – ermittelt per
 # grep über alle info.get()/info[...]-Zugriffe plus prepare_filename-Bedarf
-# (outtmpl "%(title)s.%(ext)s"). Volle yt_dlp-Info-Dicts haben ~90 Keys und
+# (outtmpl "%(title)s [%(id)s].%(ext)s"). Volle yt_dlp-Info-Dicts haben ~90 Keys und
 # machen die Datei um Größenordnungen fetter. In-Memory bleibt immer das
 # volle Dict; ein aus der Datei geladener reduzierter Eintrag, der beim
 # Verwenden doch scheitert, wird verworfen und wie ein Cache-Miss behandelt
 # (siehe prepare_filename-Fallback in resolve_track/prefetch_next).
+#   id           prepare_filename (Video-ID im Dateinamen: gleicher Titel ≠ gleiche Datei)
 #   title        Anzeige + prepare_filename
 #   ext          prepare_filename
 #   duration     Stream-Schwelle, Embed, Fortschrittsbalken
@@ -80,9 +82,13 @@ CLIENT_FALLBACK_MARKERS = (
 #   uploader     Embed-Titel/-Footer
 #   http_headers FFmpeg -headers im Stream-Pfad (music._ffmpeg_header_opts)
 PERSISTED_CACHE_FIELDS = (
-    "title", "ext", "duration", "url", "webpage_url",
+    "id", "title", "ext", "duration", "url", "webpage_url",
     "thumbnail", "uploader", "http_headers",
 )
+
+# Dateinamen in downloads/ enden auf " [<Video-ID>]" (siehe outtmpl). Der
+# Titel-Stem-Schutz des Cleanups vergleicht den Teil davor mit den Queue-Titeln.
+_ID_SUFFIX = re.compile(r" \[[^\]]*\]$")
 
 
 @dataclass
@@ -155,6 +161,7 @@ class Downloader(ProgressiveDownloadMixin):
         self._inflight: dict[str, tuple] = {}
         self._purge_stale_progressive()
         self._load_cache()
+        self._drop_cache_entries_without_id()
         self._init_ydl()
 
     # ------------------------------------------------------------------
@@ -217,6 +224,18 @@ class Downloader(ProgressiveDownloadMixin):
                 loaded += 1
         if loaded:
             logger.info(f"[Cache] {loaded} Einträge aus {METADATA_CACHE_FILE.name} geladen")
+
+    def _drop_cache_entries_without_id(self):
+        """Nur beim Start: Einträge aus einer metadata_cache.json, die vor der
+        Video-ID im Dateinamen geschrieben wurde, haben kein "id". Mit ihnen
+        ergäbe prepare_filename "<Titel> [NA].<ext>" – ein Pfad, in den nie
+        ein Download schreibt. Verwerfen → Cache-Miss, frische Extraktion.
+        Zur Laufzeit kommen nur volle Info-Dicts (immer mit id) in den Cache."""
+        stale = [url for url, info in self._url_cache.items() if not info.get("id")]
+        for url in stale:
+            self.invalidate(url)
+        if stale:
+            logger.info(f"[Cache] {len(stale)} Einträge ohne Video-ID verworfen (altes Dateinamen-Schema)")
 
     def _serialize_cache(self) -> str:
         """Reduzierter JSON-Snapshot des Caches (nur TTL-gültige Einträge,
@@ -418,7 +437,9 @@ class Downloader(ProgressiveDownloadMixin):
             "noplaylist": False,
             # prepare_filename() gibt später den exakt gleichen Pfad zurück den
             # yt_dlp beim Speichern verwendet – inklusive Sonderzeichen-Bereinigung.
-            "outtmpl": str(DOWNLOAD_DIR / "%(title)s.%(ext)s"),
+            # Die Video-ID gehört in den Namen: zwei verschiedene Videos mit
+            # gleichem Titel teilten sich sonst eine Cache-Datei.
+            "outtmpl": str(DOWNLOAD_DIR / "%(title)s [%(id)s].%(ext)s"),
             # Netzwerk-Timeout direkt in yt_dlp – bricht den Thread intern ab,
             # sodass asyncio.wait_for nicht auf den Thread warten muss.
             "socket_timeout": 15,
@@ -566,7 +587,7 @@ class Downloader(ProgressiveDownloadMixin):
                     protected_paths.add(self._sidecar_for(Path(tabu)).resolve())
                 except Exception:
                     pass
-        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel>.<ext>"):
+        # Zweite Schutzschiene über den Titel (Dateiname = "<Titel> [<id>].<ext>"):
         # greift auch, wenn der Cache-Eintrag eines Queue-Songs fehlt/abgelaufen ist.
         protected_stems = {t for t in titles if t}
         try:
@@ -592,7 +613,10 @@ class Downloader(ProgressiveDownloadMixin):
         for _, size, p in sorted(files, key=lambda item: item[0]):
             if total <= limit:
                 break
-            if p.resolve() in protected_paths or p.stem in protected_stems:
+            # Stem mit und ohne " [<id>]"-Suffix prüfen: neue Dateien tragen
+            # die Video-ID, ältere heißen noch nur "<Titel>.<ext>".
+            if (p.resolve() in protected_paths or p.stem in protected_stems
+                    or _ID_SUFFIX.sub("", p.stem) in protected_stems):
                 continue
             # defer=False: der Größen-Cleanup bewertet jeden Lauf frisch – eine
             # aufgeschobene Löschung könnte eine Datei treffen, die bis zum
