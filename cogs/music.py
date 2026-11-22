@@ -13,6 +13,7 @@ from pathlib import Path
 import aiohttp
 
 import psutil
+from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.voice import connect_voice, stop_playback
 from utils.i18n import t
@@ -255,9 +256,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             return
         self._score_dirty = False
         try:
-            SCORE_FILE.write_text(
+            atomic_write_text(
+                SCORE_FILE,
                 json.dumps(self._play_counts, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
         except Exception as e:
             self._score_dirty = True
@@ -273,7 +274,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             # nie ein Dict serialisiert, das gleichzeitig mutiert wird.
             payload = json.dumps(self._play_counts, ensure_ascii=False, indent=2)
             try:
-                await asyncio.to_thread(SCORE_FILE.write_text, payload, encoding="utf-8")
+                await asyncio.to_thread(atomic_write_text, SCORE_FILE, payload)
             except Exception as e:
                 self._score_dirty = True
                 logger.warning(f"[Score] Fehler beim Speichern: {e}")

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from discord.ext import commands
 
+from utils.files import atomic_write_text
 from utils.i18n import t
 
 PLAYLISTS_DIR = Path("playlists")
@@ -19,8 +20,7 @@ PLAYLISTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def _write_playlist(path: Path, tracks: list) -> None:
     """Blockierender Datei-Write – immer via asyncio.to_thread aufrufen."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(tracks, f, ensure_ascii=False, indent=2)
+    atomic_write_text(path, json.dumps(tracks, ensure_ascii=False, indent=2))
 
 
 def _is_valid_playlist(tracks) -> bool:

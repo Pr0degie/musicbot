@@ -1,4 +1,4 @@
-"""Windows-sichere Dateilöschung.
+"""Windows-sichere Dateilöschung und atomares Schreiben (atomic_write_text).
 
 Unter Linux ist unlink-while-open legal; Windows wirft PermissionError, wenn
 ein anderer Prozess (typisch: FFmpeg) die Datei noch offen hält. safe_unlink
@@ -13,10 +13,76 @@ Auf Linux ist safe_unlink ein transparenter Durchgriff (unlink scheitert dort
 nicht an offenen Handles), die Pending-Liste bleibt schlicht leer.
 """
 
+import os
+import stat
 import threading
+import time
 from pathlib import Path
 
 from utils.logger import logger
+
+# os.replace auf eine Zieldatei, die gerade jemand offen hält (Virenscanner,
+# Indexer, ein paralleler Leser), wirft unter Windows PermissionError – meist
+# nur für Millisekunden. So oft/lange wird es erneut versucht.
+_REPLACE_ATTEMPTS = 5
+_REPLACE_RETRY_SECONDS = 0.05
+
+
+def atomic_write_text(path, text: str, encoding: str = "utf-8") -> None:
+    """Schreibt text atomar nach path: erst in eine temporäre Datei im selben
+    Ordner, dann os.replace auf das Ziel.
+
+    Ein Absturz oder Fehler mitten im Schreiben lässt damit die alte Datei
+    vollständig stehen – ein direktes open(path, "w") hätte sie schon beim
+    Öffnen abgeschnitten und eine halbe (unlesbare) JSON-Datei hinterlassen.
+    Der Inhalt ist byte-identisch zu Path.write_text (gleicher Textmodus).
+
+    Blockiert (Datei-I/O) – aus dem Event-Loop nur über asyncio.to_thread
+    aufrufen, außer auf Shutdown-Pfaden. Fehler beim Schreiben propagieren wie
+    bisher zum Aufrufer; die Temp-Datei wird dann wieder entfernt.
+
+    Bleibt das Ziel dauerhaft gesperrt (Windows, siehe _REPLACE_ATTEMPTS), wird
+    wie früher direkt geschrieben: was vorher funktionierte, scheitert durch
+    den atomaren Weg nicht.
+    """
+    # realpath: ein Symlink als Ziel bleibt Symlink, ersetzt wird die Datei dahinter.
+    target = Path(os.path.realpath(path))
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        with open(tmp, "w", encoding=encoding) as f:
+            f.write(text)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass  # Dateisystem ohne fsync – der Rename bleibt trotzdem atomar
+        try:
+            # Rechte der bestehenden Datei übernehmen (relevant unter Linux/macOS).
+            os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
+        except OSError:
+            pass  # Ziel existiert noch nicht → Standardrechte
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp, target)
+                return
+            except PermissionError:
+                if attempt + 1 < _REPLACE_ATTEMPTS:
+                    time.sleep(_REPLACE_RETRY_SECONDS)
+    except BaseException:
+        _remove_quietly(tmp)
+        raise
+    # Ziel blieb gesperrt → direkter Write wie vor der Umstellung.
+    _remove_quietly(tmp)
+    logger.warning(f"[SAVE] {target.name} ließ sich nicht atomar ersetzen (in Benutzung) – schreibe direkt")
+    with open(target, "w", encoding=encoding) as f:
+        f.write(text)
+
+
+def _remove_quietly(path) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 # Resolved Pfade, deren Löschung fehlschlug. Zugriff aus Event-Loop UND
 # Worker-Threads (asyncio.to_thread) → Lock.

@@ -31,6 +31,7 @@ import time
 
 import discord
 
+from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.voice import PlayerToken, stop_playback
 from utils.i18n import t
@@ -714,8 +715,7 @@ class PlaybackMixin:
             # Restore-Point gedacht, nur als Protokoll der letzten Session.
             queue_data = list(self.queue)
             try:
-                with open("last_queue.json", "w", encoding="utf-8") as f:
-                    json.dump(queue_data, f, ensure_ascii=False, indent=2)
+                atomic_write_text("last_queue.json", json.dumps(queue_data, ensure_ascii=False, indent=2))
                 logger.info("[SAVE] Queue automatisch gespeichert nach Track-Ende.")
             except Exception as e:
                 logger.warning(f"[SAVE] Fehler beim Speichern der Queue: {e}")

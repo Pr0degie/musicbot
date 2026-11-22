@@ -14,6 +14,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 
+from utils.files import atomic_write_text
 from utils.logger import logger
 from utils.voice import PlayerToken, stop_playback
 from utils.i18n import t
@@ -32,8 +33,44 @@ RADIO_MAX_RECONNECTS = 3
 def _write_stations(stations: dict) -> None:
     """Blockierender Datei-Write – immer via asyncio.to_thread aufrufen,
     damit der Event-Loop auf schwacher Hardware nicht hängt."""
-    with open(RADIO_STATIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(stations, f, ensure_ascii=False, indent=2)
+    atomic_write_text(RADIO_STATIONS_FILE, json.dumps(stations, ensure_ascii=False, indent=2))
+
+
+def _load_stations() -> dict:
+    """Liest radio_stations.json. Fehlt die Datei → {}.
+
+    Eine kaputte Datei (kein gültiges JSON, keine Senderliste, einzelne
+    Einträge ohne name/url – typisch nach einer Handänderung) darf !radio nicht
+    dauerhaft crashen lassen: brauchbare Einträge werden übernommen, der Rest
+    ignoriert. Vorher wandert eine Kopie nach radio_stations.json.broken, denn
+    das nächste Speichern überschreibt die Datei mit dem bereinigten Stand."""
+    try:
+        with open(RADIO_STATIONS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except ValueError as e:   # JSONDecodeError, UnicodeDecodeError
+        _backup_broken_stations(f"nicht lesbar ({e})")
+        return {}
+    if not isinstance(data, dict):
+        _backup_broken_stations("keine Senderliste")
+        return {}
+    stations = {
+        key: entry for key, entry in data.items()
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str) and isinstance(entry.get("url"), str)
+    }
+    if len(stations) != len(data):
+        _backup_broken_stations(f"{len(data) - len(stations)} unbrauchbare Einträge ignoriert")
+    return stations
+
+
+def _backup_broken_stations(grund: str) -> None:
+    backup = RADIO_STATIONS_FILE.with_name(RADIO_STATIONS_FILE.name + ".broken")
+    try:
+        backup.write_bytes(RADIO_STATIONS_FILE.read_bytes())
+        logger.warning(f"[Radio] {RADIO_STATIONS_FILE.name} ist beschädigt: {grund}. Kopie gesichert als {backup.name}.")
+    except OSError:
+        logger.warning(f"[Radio] {RADIO_STATIONS_FILE.name} ist beschädigt: {grund}.")
 
 
 class RadioMixin:
@@ -187,11 +224,7 @@ class RadioMixin:
     @commands.command(name="radio")
     async def radio_play(self, ctx, *, eingabe: str = None):
         """Spielt einen Internet-Radio-Stream. !radio <Nummer, Sendername oder URL>"""
-        try:
-            with open(RADIO_STATIONS_FILE, encoding="utf-8") as f:
-                stations = json.load(f)
-        except FileNotFoundError:
-            stations = {}
+        stations = _load_stations()
 
         if not eingabe:
             if not stations:

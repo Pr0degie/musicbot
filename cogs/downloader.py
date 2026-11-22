@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yt_dlp
 from config import DOWNLOADS_MAX_MB, YDL_BROWSER, YDL_COOKIES_FILE
-from utils.files import drain_pending_deletes, safe_unlink
+from utils.files import atomic_write_text, drain_pending_deletes, safe_unlink
 from utils.logger import logger
 from utils.autoplay import choose_autoplay_candidate, entry_url, select_autoplay_candidates, yt_video_id
 # Konstanten leben beim progressiven Download; hier re-exportiert für
@@ -253,7 +253,7 @@ class Downloader(ProgressiveDownloadMixin):
     def _save_cache(self):
         """Schreibt aktuellen Metadaten-Cache synchron auf Disk (reduziert)."""
         try:
-            METADATA_CACHE_FILE.write_text(self._serialize_cache(), encoding="utf-8")
+            atomic_write_text(METADATA_CACHE_FILE, self._serialize_cache())
         except Exception as e:
             logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
 
@@ -274,7 +274,7 @@ class Downloader(ProgressiveDownloadMixin):
         self._cache_dirty = False
         try:
             payload = self._serialize_cache()
-            await asyncio.to_thread(METADATA_CACHE_FILE.write_text, payload, encoding="utf-8")
+            await asyncio.to_thread(atomic_write_text, METADATA_CACHE_FILE, payload)
         except Exception as e:
             self._cache_dirty = True
             logger.debug(f"[Cache] Speichern fehlgeschlagen: {e}")
