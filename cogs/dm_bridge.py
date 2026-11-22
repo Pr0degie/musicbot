@@ -35,6 +35,17 @@ def _peer_is_loopback(request) -> bool:
         return False
 
 
+def _host_is_loopback(host: str) -> bool:
+    """True, wenn der Server nur von dieser Maschine erreichbar gebunden ist."""
+    host = (host or "").strip()
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class DMBridge(commands.Cog):
     """HTTP-Bridge für den KI-Dungeon-Master.
 
@@ -77,6 +88,13 @@ class DMBridge(commands.Cog):
         site = web.TCPSite(self._runner, DM_BRIDGE_HOST, DM_BRIDGE_PORT)
         await site.start()
         logger.info(f"[DMBridge] HTTP-Server läuft auf {DM_BRIDGE_HOST}:{DM_BRIDGE_PORT}")
+        if not DM_BRIDGE_SECRET and not _host_is_loopback(DM_BRIDGE_HOST):
+            # Nur ein Hinweis – der Server läuft unverändert weiter.
+            logger.warning(
+                f"[DMBridge] ACHTUNG: Bridge lauscht auf {DM_BRIDGE_HOST} (nicht nur localhost) "
+                "und DM_BRIDGE_SECRET ist leer – jeder im Netz kann /speak und /command aufrufen. "
+                "DM_BRIDGE_SECRET in der .env setzen (gleicher Wert wie beim DM-Bot)."
+            )
 
     async def cog_unload(self):
         if self._runner:
