@@ -39,7 +39,7 @@ from utils.ffmpeg import stream_wait_seconds
 from views.music_controls import MusicControlView
 from cogs.music_enqueue import EnqueueMixin
 from cogs.music_prefetch import PrefetchMixin
-from cogs.music_track_end import TrackEndMixin
+from cogs.music_track_end import TrackEndMixin, TrackRun
 
 
 class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
@@ -209,13 +209,13 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             source, stderr_buf = self._build_audio_source(
                 info, filename, seek_offset, eq_filter, is_stream, is_growing
             )
-            # after_playing-Callback bauen: die vormaligen Closure-Variablen sind
-            # jetzt Factory-Parameter, die interne Reihenfolge bleibt unverändert.
             token = PlayerToken()
-            after_playing = self._make_after_playing(
-                ctx, stderr_buf, seek_offset, is_stream, is_growing, prog_task, filename, duration, url, title,
-                token,
+            run = TrackRun(
+                ctx=ctx, url=url, title=title, duration=duration, filename=filename,
+                seek_offset=seek_offset, is_stream=is_stream, is_growing=is_growing,
+                prog_task=prog_task, stderr_buf=stderr_buf, token=token,
             )
+            after_playing = self._make_after_playing(run)
 
             if not ctx.voice_client or not ctx.voice_client.is_connected():
                 logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
@@ -541,10 +541,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             # Fallback oder progressives Seek-Resume) → nicht doppelt zählen.
             pass
         else:
-            self._stream_retry_url = None   # anderer Track → Retry-Sperren aufheben
-            self._force_download_url = None
-            self._progressive_resume_url = None
-            self._progressive_resume_count = 0
+            self._clear_retry_markers()     # anderer Track → Retry-Sperren aufheben
             self._record_play(url, title)
         self.text_channel = ctx.channel
         return generation, is_loop_repeat, prev_track

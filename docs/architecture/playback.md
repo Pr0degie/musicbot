@@ -7,15 +7,18 @@
 `play_next` ist ein Orchestrator in `PlaybackMixin` (`cogs/music_playback.py`) und delegiert an
 Untermethoden → [ADR 0009](../adr/0009-music-cog-mixin-zerlegung.md): `_handle_queue_empty` (Leere-Queue-Fall
 + Autoplay-Handoff), `_build_audio_source` (FFmpeg-Options + stderr-Temp + Source, synchron),
-`_snapshot_track_state` (Track-Zustand vor `vc.play()`, synchron), `_make_after_playing` (Factory, die den
-`after_playing`-Callback baut; liegt mit `_write_last_queue` und `_run_on_loop` in `TrackEndMixin`,
-`cogs/music_track_end.py`), `_build_np_view` (Now-Playing-Karte als Components-V2-Layout, synchron), `_schedule_background_work`
+`_snapshot_track_state` (Track-Zustand vor `vc.play()`, synchron), `_make_after_playing(run)` (baut den
+`after_playing`-Callback zum Wertobjekt `TrackRun`; liegt mit `_on_track_end`, `_write_last_queue` und
+`_run_on_loop` in `TrackEndMixin`, `cogs/music_track_end.py`), `_build_np_view` (Now-Playing-Karte als Components-V2-Layout, synchron), `_schedule_background_work`
 (Wartung alle 50 Songs, Prefetch, Autoplay-Prefetch, synchron) und `_skip_broken_track` (Fehlerpfad:
 merken, melden, nächsten Track anstoßen). Alle Generationschecks bleiben im Orchestrator.
 
 1. `after` callback (aus `_make_after_playing`) runs in discord.py's player thread and only hands over: the
-   logic (`on_track_end`) runs on the event loop and uses `run_coroutine_threadsafe()` to call `play_next`. Errors
+   logic (`_on_track_end`) runs on the event loop and uses `run_coroutine_threadsafe()` to call `play_next`. Errors
    skip via `asyncio.create_task()` — not direct recursion (avoids stack overflow on many bad URLs).
+   `_on_track_end` läuft in fester Reihenfolge: `_log_early_death` → `_resume_growing_file` →
+   `_retry_dead_stream` → `_clear_markers_after_clean_end` → `_snapshot_queue` → `_requeue_for_loop` →
+   `_start_next`.
 2. `last_queue.json` written after each track — intentionally not reloaded on startup.
 3. Queue empty → `play_next` delegiert an `_handle_queue_empty`: sets `is_playing = False`, saves
    `current_track` → `last_played`, clears `current_track`, triggers autoplay if enabled. Bot stays in voice
