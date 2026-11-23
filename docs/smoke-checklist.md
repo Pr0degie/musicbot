@@ -23,6 +23,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Nach ❌ oder `!clear`: Geleert-Meldung hat 30 s einen Rückgängig-Button → Song und Queue sind zurück, Wiedergabe startet wieder; nach 30 s verschwindet der Button
 - [ ] `!q` → Song im Auswahlmenü wählen → „Entfernen" bzw. „Als Nächstes" wirkt auf den richtigen Song, Liste lädt neu; nach 60 s verschwinden die Bedienelemente
 - [ ] `!eq <preset>` mid-song → aktueller Track startet mit neuem Filter neu
+- [ ] `!score` → Top 10 absteigend; Titel mit `*`, `_`, `||`, Backticks oder `[Text](url)` stehen als Klartext in Fettschrift (keine Spoiler, keine Links); `!seek` und `!eq` mitten im Song erhöhen den Zähler des laufenden Songs nicht
 - [ ] `!next <Suche/URL>` → Track landet vorn in der Queue
 - [ ] `!now <n>` → Queue-Eintrag an Position n rückt nach vorn + aktueller Song wird geskippt
 - [ ] Fortschrittsbalken aktualisiert im **5-Sekunden-Takt** (21 Schritte, Endsprung ans Songende); kein 429-Fallback im Log

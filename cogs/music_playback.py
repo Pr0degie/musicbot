@@ -43,6 +43,10 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
     # Resume, Voice-Reparatur). None = ungebunden. Klassen-Default, damit auch
     # ohne __init__ erzeugte Instanzen (Tests via __new__) definiert sind.
     _seek_offset_url = None
+    # URL des Tracks, der nur neu angesetzt wird (!seek, !eq, Voice-Reparatur):
+    # derselbe Hördurchgang, kein weiterer Play-Count. One-Shot, gebunden an
+    # die URL und beim Entnehmen aus der Queue konsumiert (_take_restart).
+    _restart_url = None
     # Token des zuletzt gestarteten Players (Song oder Radio) – siehe
     # utils.voice.PlayerToken und _discard_paused_player.
     _player_token = None
@@ -98,6 +102,8 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # er bis nach dem Resolve stehen, erbte ihn bei einem Resolve-Fehler
         # oder im _skip_resolving-Pfad der nächste Track.
         seek_offset = self._take_seek_offset(url)
+        # Dasselbe für die Neustart-Markierung (kein zweiter Play-Count).
+        is_restart = self._take_restart(url)
 
         stderr_buf = None
         source = None   # die FFmpeg-Quelle, solange vc.play() sie noch nicht übernommen hat
@@ -167,6 +173,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 logger.warning("[play_next] Voice client nicht verbunden – Wiedergabe abgebrochen.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
+                self._restart_url = url if is_restart else None
                 self._discard_source(source, stderr_buf)   # after_playing läuft nie
                 return
 
@@ -177,12 +184,15 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
                 logger.info("[play_next] DM spricht – Track zurückgestellt statt überspielt.")
                 self.is_playing = False
                 self.queue.appendleft((url, title))
+                self._restart_url = url if is_restart else None
                 self._track_generation += 1     # hängende Post-Play-awaits entwerten
                 self._discard_source(source, stderr_buf)   # after_playing läuft nie
                 return
 
             # Kompletten Track-Zustand synchron VOR vc.play() setzen (ADR 0007).
-            generation, is_loop_repeat = self._snapshot_track_state(ctx, url, title, duration)
+            generation, is_loop_repeat = self._snapshot_track_state(
+                ctx, url, title, duration, count_play=not is_restart
+            )
             self._current_seek_offset = seek_offset
 
             # Pausierter Player (!x, dann neuer Start): discord.py würde ihn in
@@ -326,6 +336,15 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             return 0
         return offset
 
+    def _take_restart(self, url: str) -> bool:
+        """Konsumiert die Neustart-Markierung für den gerade aus der Queue
+        genommenen Track. True = derselbe Track wird nur neu angesetzt (!seek,
+        !eq, Voice-Reparatur) und zählt nicht erneut für !score. Wie der
+        Seek-Offset wird die Markierung in jedem Fall gelöscht und gilt nur für
+        die URL, für die sie gesetzt wurde."""
+        bound_url, self._restart_url = self._restart_url, None
+        return bound_url is not None and bound_url == url
+
     async def _resolve_track(self, url: str, title: str, force_download: bool = False, seek_offset: int = 0):
         """Löst URL auf, stellt sicher dass Audiodatei lokal vorliegt.
 
@@ -397,12 +416,14 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         if stderr_buf is not None:
             self._stderr_tail(stderr_buf)
 
-    def _snapshot_track_state(self, ctx, url, title, duration):
+    def _snapshot_track_state(self, ctx, url, title, duration, count_play=True):
         """Setzt den kompletten Track-Zustand synchron VOR vc.play() (ADR 0007).
 
         **Muss synchron bleiben** – kein await zwischen den Zuweisungen. Gibt
         (generation, is_loop_repeat) zurück; play_next braucht sie für die
         Generationschecks nach jedem await und für den Karten-Übergang.
+        count_play=False: gewollter Neustart desselben Tracks (!seek, !eq,
+        Voice-Reparatur) – kein weiterer Play-Count.
         """
         self._playback_done.clear()
         self._cancel_idle_timer()   # Audio läuft wieder → Idle-Timer weg
@@ -450,7 +471,8 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # oder progressives Seek-Resume) → Sperren behalten, nicht doppelt zählen.
         if url not in (self._stream_retry_url, self._progressive_resume_url):
             self._clear_retry_markers()     # anderer Track → Retry-Sperren aufheben
-            self._record_play(url, title)
+            if count_play:
+                self._record_play(url, title)
         self.text_channel = ctx.channel
         return generation, is_loop_repeat
 

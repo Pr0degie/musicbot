@@ -166,6 +166,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         self._seek_offset: int = 0
         # Track, für den der Offset gilt – ein anderer Track erbt ihn nie.
         self._seek_offset_url = None
+        # Track, der nur neu angesetzt wird (!seek, !eq, Voice-Reparatur) –
+        # zählt nicht erneut für !score (music_playback._take_restart).
+        self._restart_url = None
         # Startposition des laufenden Tracks (der konsumierte _seek_offset) –
         # die Voice-Reparatur braucht sie, um an der Hörposition fortzusetzen.
         self._current_seek_offset: int = 0
@@ -923,6 +926,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()) and self.current_track:
                 tr_url, tr_title, *_ = self.current_track
                 self.current_track = None  # verhindert Doppel-Insert durch loop-Branch in after_playing
+                self._restart_url = tr_url  # Neustart mit neuem EQ → kein zweiter Play-Count
                 self.queue.appendleft((tr_url, tr_title))
                 self._stop_for_advance(ctx.voice_client)
                 msg += t("status.eq_restart")
@@ -961,6 +965,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         mins, secs = divmod(offset, 60)
         self._seek_offset = offset
         self._seek_offset_url = url
+        self._restart_url = url    # derselbe Hördurchgang → kein zweiter Play-Count
         self.current_track = None
         self.queue.appendleft((url, title))
         self._stop_for_advance(ctx.voice_client)

@@ -40,7 +40,10 @@ yt_dlp-eigener HTTP-Client, den CDN-403s gegen FFmpeg nicht treffen; Meldung
 `error.stream_download_fallback`). Liefert der Fallback keine Datei (>20-min-Tracks werden nie
 heruntergeladen) oder stirbt auch die Datei sofort → Aufgeben mit `error.stream_giveup`. Ein gewollter Abbruch
 (Skip, `!eq`, `!seek`, `!stop`, `!clear`) löst nichts davon aus, auch wenn FFmpeg beim Beenden eine
-Fehlerzeile hinterlässt. Alle
+Fehlerzeile hinterlässt. Ein gewollter Neustart desselben Tracks (`!seek`, `!eq` mitten im Song,
+Voice-Reparatur) ist derselbe Hördurchgang und zählt nicht erneut für `!score`: der Aufrufer setzt
+`_restart_url`, `play_next` konsumiert die Markierung beim Entnehmen aus der Queue (`_take_restart`, One-Shot,
+an die URL gebunden wie der Seek-Offset) und gibt sie als `count_play=False` an `_snapshot_track_state`. Alle
 Retry-/Resume-Marker (`_stream_retry_url`, `_force_download_url`, `_progressive_resume_url`/`-count`) leben
 bis zum normalen Track-Ende bzw. Trackwechsel; der Marker-Reset läuft **nach** dem Progressive-Resume-Block
 (in `_on_track_end`: `_resume_growing_file` vor `_clear_markers_after_clean_end`; sonst griffe dessen Kappe nie). Diese Kaskade ist heute nur noch Fallback — Primärpfad für ungecachte kurze

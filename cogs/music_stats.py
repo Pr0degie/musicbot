@@ -30,7 +30,10 @@ class StatsMixin:
         medals = ["🥇", "🥈", "🥉"]
         for i, (_, entry) in enumerate(top):
             prefix = medals[i] if i < 3 else f"`{i + 1}.`"
-            lines.append(f"{prefix} **{entry['title']}** — {entry['count']}x")
+            # Titel sind Fremddaten: *, _, ||, ` oder [Text](url) würden sonst
+            # die Fettschrift sprengen bzw. Spoiler und Links erzeugen.
+            title = discord.utils.escape_markdown(entry["title"])
+            lines.append(f"{prefix} **{title}** — {entry['count']}x")
         embed.description = "\n".join(lines)
         await ctx.send(embed=embed)
 
