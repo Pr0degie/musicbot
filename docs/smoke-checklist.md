@@ -15,6 +15,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`)
 - [ ] `REQUIRE_SAME_VOICE=true`: jeder Button der Karte (Zurück, Pause, Skip, Autoplay, Loop, ❌, 🔗) sowie `!x`/`!resume`/`!loop`/`!replay` von außerhalb des Voice-Channels → nur Absage, nichts ändert sich; Owner kommt immer durch
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
+- [ ] Queue-Ende, `!clear` und ❌ (auch bei Radio und bei pausiertem Song): Karte wird **sofort** zur Textzeile `🎶 Titel`
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-Button funktioniert; Pause/Fortsetzen ist **ein** Button, der Beschriftung und Farbe wechselt (blau ↔ grün); Pause/Fortsetzen, Autoplay und Loop schreiben **nichts** in den Chat und zeigen kein „Interaktion fehlgeschlagen"
 - [ ] Zurück-Button rot; Autoplay-Button rot = an, Loop-Button grün = an, beide grau = aus; auch nach `!loop`/`!pause` per Befehl zieht die Karte binnen ~5 s nach

@@ -10,7 +10,7 @@ import types
 from unittest.mock import MagicMock
 
 import config
-from tests.conftest import FakeCtx, FakeVoiceClient, build_cog
+from tests.conftest import FakeCtx, FakeMessage, FakeVoiceClient, build_cog, retired_text
 from utils.i18n import t
 from views.music_controls import (
     NP_HEADING_ID, MusicControlView, UndoClearView, _stale_card_title,
@@ -130,6 +130,62 @@ def test_clear_command_uses_same_core():
         assert not cog.queue and cog.current_track is None
         assert stopped == [vc]
         assert ctx.texts == [t("status.cleared")]
+
+    asyncio.run(run())
+
+
+def _with_card(cog, title="Läuft"):
+    card = FakeMessage()
+    cog.now_playing_msg = card
+    cog.now_playing_view = object()
+    cog._np_title = title
+    return card
+
+
+def test_clear_button_retires_card_immediately():
+    """Nach ❌ läuft nichts mehr – die Karte wird sofort zur Textzeile, nicht
+    erst, wenn irgendwann der nächste Song startet."""
+    async def run():
+        view, cog, _vc, _stopped = _playing_setup()
+        card = _with_card(cog)
+
+        await view.clear.callback(FakeInteraction())
+
+        assert retired_text(card.edits[-1]) == "🎶 Läuft"
+        assert cog.now_playing_msg is None and cog.now_playing_view is None
+
+    asyncio.run(run())
+
+
+def test_clear_command_retires_radio_card():
+    """Ein Sender endet nach !clear ohne Queue-Ende-Pfad – die Karte baut
+    deshalb !clear selbst zurück."""
+    async def run():
+        _view, cog, vc, _stopped = _playing_setup()
+        cog.is_radio = True
+        cog.current_track = None
+        cog.queue.clear()
+        card = _with_card(cog, "Bollerwagen")
+
+        await cog.clear.callback(cog, FakeCtx(voice_client=vc))
+
+        assert retired_text(card.edits[-1]) == "🎶 Bollerwagen"
+        assert cog.now_playing_msg is None
+
+    asyncio.run(run())
+
+
+def test_clear_stops_paused_song():
+    """Ein pausierter Song wird mit beendet – sonst stünde er nach dem Leeren
+    weiter pausiert da."""
+    async def run():
+        _view, cog, vc, stopped = _playing_setup()
+        vc._playing = False
+        vc.is_paused = lambda: True
+
+        await cog.clear.callback(cog, FakeCtx(voice_client=vc))
+
+        assert stopped == [vc]
 
     asyncio.run(run())
 

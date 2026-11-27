@@ -735,6 +735,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
     async def clear(self, ctx):
         """Leert die Queue, stoppt die Wiedergabe und setzt Loop zurück."""
         snapshot = self._clear_all(ctx.voice_client)
+        await self._retire_active_card()
         if snapshot is None:
             await ctx.send(t("status.cleared"))
             return
@@ -761,7 +762,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             self.prefetch_task.cancel()
         if self._autoplay_prefetch_task and not self._autoplay_prefetch_task.done():
             self._autoplay_prefetch_task.cancel()   # darf die geleerte Queue nicht neu befüllen
-        if vc and vc.is_playing():
+        # Auch einen pausierten Song beenden – sonst bliebe er nach dem Leeren
+        # pausiert stehen und hielte seine Karte.
+        if vc and (vc.is_playing() or vc.is_paused()):
             self._stop_for_advance(vc)
         return snapshot
 

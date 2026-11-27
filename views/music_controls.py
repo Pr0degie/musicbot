@@ -352,11 +352,14 @@ class MusicControlView(LayoutView):
         """❌ oben rechts: dasselbe wie !clear."""
         snapshot = self.music_cog._clear_all(self.ctx.voice_client)
         logger.info(f"[Queue] Geleert per ❌-Button von {interaction.user}")
+        # Erst antworten (3-s-Frist der Interaktion), dann die Karte zurückbauen.
         if snapshot is None:
             await interaction.response.send_message(t("status.cleared"))
+            await self.music_cog._retire_active_card()
             return
         undo = UndoClearView(self.music_cog, self.ctx, snapshot)
         await interaction.response.send_message(t("status.cleared"), view=undo)
+        await self.music_cog._retire_active_card()
         try:
             undo.message = await interaction.original_response()
         except Exception:

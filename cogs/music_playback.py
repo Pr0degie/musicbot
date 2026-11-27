@@ -75,7 +75,7 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             self._track_generation += 1
             return
         if not self.queue:
-            # Cleanup, _ended_np, Idle-Timer, Autoplay-Handoff.
+            # Cleanup, Rückbau der Karte, Idle-Timer, Autoplay-Handoff.
             await self._handle_queue_empty(ctx)
             return
 
@@ -268,10 +268,10 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         return True
 
     async def _handle_queue_empty(self, ctx):
-        """Leere-Queue-Fall aus play_next: Cleanup, _ended_np-Übergabe, Idle-Timer,
+        """Leere-Queue-Fall aus play_next: Cleanup, Rückbau der Karte, Idle-Timer,
         Autoplay-Handoff (inkl. Prefetch-Wait).
 
-        Enthält await-Grenzen (_finalize_progress_bar, Prefetch-Wait,
+        Enthält await-Grenzen (Rückbau der Karte, Prefetch-Wait,
         play_next/autoplay); play_next awaitet die Methode direkt und kehrt
         danach zurück (ADR 0009).
         """
@@ -284,21 +284,17 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # damit autoplay() noch weiß was zuletzt lief.
         if self.current_track:
             self.last_played = self.current_track
-            # Song lief natürlich zu Ende (kein !stop/!clear) → Fortschritt ans Ende setzen,
-            # damit Balken und Dauer nicht unvollständig einfrieren.
-            if not self._stopped_by_user:
-                await self._finalize_progress_bar()
         self.current_track = None
-        # Referenzen kappen, damit _progress_loop/_finalize_progress_bar die tote
-        # Nachricht nie wieder anfassen. Die Nachricht selbst wird gemerkt, damit
-        # der nächste Track ihre Buttons entfernen kann (nur der aktuelle Song
-        # behält Buttons) – bis dahin bleiben Resume/Autoplay darauf klickbar.
-        if self.now_playing_msg is not None:
-            self._ended_np = (self.now_playing_msg, self._np_title)
+        # Referenzen kappen, damit _progress_loop die tote Nachricht nie wieder
+        # anfasst, und die Karte sofort zur Textzeile zurückbauen: Nach dem
+        # Queue-Ende (auch nach !clear/❌) läuft nichts mehr, also hat keine
+        # Nachricht mehr Buttons. Startet danach ein Song, kommt eine neue Karte.
+        ended_msg, ended_title = self.now_playing_msg, self._np_title
         self.now_playing_msg = None
         self.now_playing_view = None
         self._np_title = None
         self.track_start_time = None
+        await self._retire_np_message(ended_msg, ended_title)
         # Idle-Timer starten: Bleibt es still (Autoplay aus oder Autoplay
         # schlägt fehl), verlässt der Bot später den Channel, bevor Discord
         # die stille Verbindung mit Code 1006 wegwirft. Startet ein neuer

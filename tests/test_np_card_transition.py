@@ -90,9 +90,9 @@ def test_both_pending_cards_are_retired(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
-def test_card_after_queue_end_is_retired_by_next_song(monkeypatch, tmp_path):
-    """Kompletter Weg: Song endet → Queue leer → _ended_np; der nächste Song
-    baut die liegengebliebene Karte zurück."""
+def test_card_is_retired_at_queue_end(monkeypatch, tmp_path):
+    """Kompletter Weg: Song endet → Queue leer → Karte sofort Textzeile; der
+    nächste Song bekommt eine neue Karte und lässt die alte Zeile in Ruhe."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
 
@@ -110,13 +110,15 @@ def test_card_after_queue_end_is_retired_by_next_song(monkeypatch, tmp_path):
         vc.end_track()                       # Track endet, Queue ist leer
         for _ in range(20):
             await asyncio.sleep(0)
-        assert mc._ended_np is not None and mc._ended_np[0] is erste_karte
+        assert_is_text_line(erste_karte, "Testsong")
+        assert mc._ended_np is None and mc.now_playing_msg is None
+        edits_at_end = len(erste_karte.edits)
 
         mc.queue.append((URL, "Zweiter Song"))
         mc.is_playing = True
         await mc.play_next(ctx)
 
-        assert_is_text_line(erste_karte, "Testsong")
+        assert len(erste_karte.edits) == edits_at_end, "alte Zeile nicht erneut editieren"
         assert mc.now_playing_msg is ctx.messages[-1]
 
         _cleanup(mc)

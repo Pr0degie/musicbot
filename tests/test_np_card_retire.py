@@ -111,12 +111,14 @@ def test_disable_np_edits_ignores_foreign_message():
 
 
 # ---------------------------------------------------------------------------
-# Queue-Ende: Karte wandert mit ihrem Titel nach _ended_np
+# Queue-Ende: Karte wird sofort mit ihrem eigenen Titel zurückgebaut
 # ---------------------------------------------------------------------------
 
-def test_queue_empty_hands_card_over_with_its_own_title():
-    """Der Titel kommt aus _np_title, nicht aus last_played – sonst stünde
-    nach einem Cleanup ohne last_played kein Text zur Verfügung."""
+def test_queue_empty_retires_card_immediately_with_its_own_title():
+    """Nach dem Queue-Ende läuft nichts mehr – die Karte wird sofort zur
+    Textzeile, nicht erst beim nächsten Song. Der Titel kommt aus _np_title,
+    nicht aus last_played – sonst stünde nach einem Cleanup ohne last_played
+    kein Text zur Verfügung."""
     async def run():
         mc = build_cog()
         msg = FakeMessage()
@@ -129,7 +131,8 @@ def test_queue_empty_hands_card_over_with_its_own_title():
 
         await mc._handle_queue_empty(FakeCtx())
 
-        assert mc._ended_np == (msg, "Letzter Song")
+        assert_reduced_to_text(msg, "Letzter Song")
+        assert mc._ended_np is None
         assert mc.now_playing_msg is None and mc._np_title is None
 
     asyncio.run(run())

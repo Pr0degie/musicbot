@@ -14,7 +14,7 @@ Stirbt ein Track sehr schnell (kaputte Quelle, sofortiger FFmpeg-Exit), läuft `
 
 ## Konsequenzen
 
-- Der Cleanup kappt `now_playing_msg`/`-embed`/`track_start_time`; die letzte Nachricht wandert nach `_ended_np`, damit der nächste Track ihre Buttons entfernen kann.
+- Der Cleanup kappt `now_playing_msg`/`-embed`/`track_start_time`; die letzte Nachricht wanderte ursprünglich nach `_ended_np`, damit der nächste Track ihre Buttons entfernen kann. Seit 27.11.2026 baut der Cleanup sie sofort zurück (die Referenzen sind vor diesem await gekappt); `_ended_np` nutzt nur noch die 429-Abschaltung.
 - Neue Post-Play-Zuweisungen in `play_next` brauchen immer einen Generationscheck nach dem vorangehenden await.
 
 **Stand 2026-10-25:** `_track_generation` wird zusätzlich beim Voice-Reparatur-Return von `play_next` erhöht (`_voice_healing`, Neuaufbau in `cogs/music_voice_ui.py`).
