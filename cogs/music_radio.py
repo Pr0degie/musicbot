@@ -218,12 +218,14 @@ class RadioMixin:
         self._playback_done.set()
         if error:
             logger.warning(f"[Radio] Stream-Fehler: {error}")
-        else:
-            logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
         if not self.is_radio or self._radio_session is not token:
             # Radio beendet oder dieser Sender abgelöst (Senderwechsel): der
-            # Stopp war gewollt, kein Reconnect.
+            # Stopp war gewollt, kein Reconnect – und keine Log-Zeile, die
+            # einen ankündigt.
+            logger.debug(f"[Radio] Gewollter Stopp, kein Reconnect: {name}")
             return
+        if not error:
+            logger.info("[Radio] Stream unerwartet beendet (kein Fehler) – Reconnect wird versucht.")
         if self._radio_should_reconnect(ran_seconds):
             logger.info(f"[Radio] Reconnect {self._radio_reconnect_count}/{RADIO_MAX_RECONNECTS} für {name}")
             asyncio.run_coroutine_threadsafe(self._reconnect_radio(ctx, token), self.bot.loop)
