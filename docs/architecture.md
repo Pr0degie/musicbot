@@ -55,6 +55,8 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   - **`cogs/music_stats.py`** — `StatsMixin`: `!score` (play counts), `!stats` (process metrics)
   - **`cogs/music_queue_io.py`** — `QueuePersistenceMixin`: `!saveq`/`!loadq`/`!loadq last`/`!lists`, `PLAYLISTS_DIR`;
     außerdem `_write_last_queue` (der `last_queue.json`-Write nach jedem Track, läuft im Player-Thread)
+  - **`cogs/music_favorites.py`** — `FavoritesMixin`: gemeinsame Favoritenliste des Servers (`!fav`, `!favs [play | remove <n>]`,
+    ⭐ auf der Karte), `data/favorites.json` im saveq-Format; geladen in `__init__`, Writes per `to_thread` unter einem `asyncio.Lock`
 - **`cogs/downloader.py`** — `Downloader` (`self.dl`), zusammengesetzt aus den fünf Mixins darunter. Selbst enthält
   die Datei nur noch `resolve_track()` mit seinen vier Phasen: `_resolve_metadata` → `_adopt_inflight` →
   `_clear_corpse` → `_acquire_file`. Re-exportiert nur gelesene Konstanten (`CACHE_TTL`, `METADATA_CACHE_FILE`,
@@ -131,7 +133,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   jedes Strg+C abfangen und `Terminate batch job (Y/N)?` fragen.
 - **`views/music_controls.py`** — `MusicControlView`: die Now-Playing-Karte als Components-V2-Layout
   ([ADR 0012](adr/0012-now-playing-karte-components-v2.md)) mit ❌ oben rechts (= `!clear`) und der Zeile
-  Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop, 🔗 neben den Details (Song-Link zum Kopieren); Buttons spiegeln den Zustand
+  Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop, 🔗 neben den Details (Song-Link zum Kopieren), ⭐ direkt darunter (Favorit, grün = drin); Buttons spiegeln den Zustand
   (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `np_heading(title, info)` baut die Titelzeile
   (Künstler/Titel gedreht, Uploader, Link ohne Emojis). `UndoClearView`: Rückgängig-Button unter der
   Geleert-Meldung (30 s). Only current song

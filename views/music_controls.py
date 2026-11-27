@@ -69,8 +69,10 @@ class MusicControlView(LayoutView):
       TextDisplay [Details, Als Nächstes, Uploader]
         – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
         – mit Song-Link als Section, Accessory: grauer 🔗-Button (Link zum Kopieren)
+      Section  [Uploader-Zeile]                   → Accessory: ⭐ (Favorit), direkt unter dem 🔗
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
       ActionRow [🔗]                              (nur wenn das Thumbnail den Accessory-Platz belegt)
+      ActionRow [⭐]                              (ebenso, dann unter der 🔗-Zeile)
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
     oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
@@ -86,6 +88,9 @@ class MusicControlView(LayoutView):
     🔗 legt dem Klickenden den Song-Link ephemer als Codeblock hin: in die
     Zwischenablage schreiben kann ein Bot nicht, der Codeblock hat am Desktop
     aber ein Kopier-Symbol.
+
+    ⭐ nimmt den Song in die gemeinsame Favoritenliste auf oder entfernt ihn
+    (FavoritesMixin); grün = Favorit, stumm wie Autoplay/Loop.
 
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
@@ -126,6 +131,10 @@ class MusicControlView(LayoutView):
         # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
         self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
         self.link = make("link", self._on_link, emoji="🔗", style=S.secondary) if self._link else None
+        # ⭐ nur für Songs mit abspielbarer URL (nicht für Radio-Karten).
+        song_url = song[0] if song else None
+        can_fav = isinstance(song_url, str) and song_url.startswith(("http://", "https://"))
+        self.fav = make("fav", self._on_fav, emoji="⭐", style=S.secondary) if can_fav else None
 
         self._heading = TextDisplay(heading, id=NP_HEADING_ID)
         self._body = TextDisplay(body) if body else None
@@ -140,17 +149,27 @@ class MusicControlView(LayoutView):
         image = compact_card_image(thumbnail, song[0] if song else None)
         if image:
             container.add_item(MediaGallery(discord.MediaGalleryItem(image)))
-        link_placed = False
+        link_placed = fav_placed = False
+        # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
+        # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
+        thumb_accessory = bool(
+            not image and isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://"))
+        )
+        # ⭐ direkt unter dem 🔗: eine eigene Section, deren Text die
+        # Uploader-Zeile ist (sie wandert dafür aus den Details heraus).
+        self._footer_below = bool(details and not thumb_accessory and self.link and self.fav)
         if details:
             self._details = TextDisplay(self._details_text())
-            # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
-            # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
-            if not image and isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://")):
+            if thumb_accessory:
                 container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
             elif self.link:
                 # 🔗 rechts neben den Details – wie das ❌ am Titel, die Karte wird nicht höher.
                 container.add_item(Section(self._details, accessory=self.link))
                 link_placed = True
+                if self._footer_below:
+                    below = f"-# {footer}" if footer else f"-# {t('embed.fav_hint')}"
+                    container.add_item(Section(TextDisplay(below), accessory=self.fav))
+                    fav_placed = True
             else:
                 container.add_item(self._details)
         container.add_item(ActionRow(
@@ -159,6 +178,8 @@ class MusicControlView(LayoutView):
         if self.link and not link_placed:
             # Eine Section hat nur ein Accessory, und die Button-Zeile ist mit fünf voll.
             container.add_item(ActionRow(self.link))
+        if self.fav and not fav_placed:
+            container.add_item(ActionRow(self.fav))   # unter der 🔗-Zeile
         self.add_item(container)
         self.sync_state()
 
@@ -182,7 +203,7 @@ class MusicControlView(LayoutView):
             if len(title) > 80:
                 title = title[:79] + "…"
             lines.append(f"**{t('embed.up_next')}** {title}")
-        if self._footer:
+        if self._footer and not self._footer_below:
             lines.append(f"-# {self._footer}")
         return "\n".join(lines)
 
@@ -205,6 +226,11 @@ class MusicControlView(LayoutView):
         for button, label, style in wanted:
             if button.label != label or button.style != style:
                 button.label, button.style = label, style
+                changed = True
+        if self.fav is not None:
+            style = S.success if cog._is_favorite(self.song[0]) is True else S.secondary
+            if self.fav.style != style:
+                self.fav.style = style
                 changed = True
         if up_next is not _KEEP:
             self._up_next = up_next
@@ -347,6 +373,12 @@ class MusicControlView(LayoutView):
         # Backticks kodiert: ein Link kann den Codeblock so nicht vorzeitig beenden.
         link = self._link.replace("`", "%60")
         await interaction.response.send_message(f"```\n{link}\n```", ephemeral=True)
+
+    async def _on_fav(self, interaction: discord.Interaction):
+        """⭐: Song in die gemeinsame Favoritenliste aufnehmen oder entfernen."""
+        url, title = self.song
+        self.music_cog._toggle_favorite(url, title)
+        await self._push_state(interaction)   # stumm: der Stern wird grün bzw. grau
 
     async def _on_clear(self, interaction: discord.Interaction):
         """❌ oben rechts: dasselbe wie !clear."""

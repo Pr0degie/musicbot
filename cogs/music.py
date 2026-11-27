@@ -29,6 +29,7 @@ from cogs.presets import EQ_PRESETS
 from cogs.music_radio import RadioMixin
 from cogs.music_stats import StatsMixin
 from cogs.music_queue_io import QueuePersistenceMixin
+from cogs.music_favorites import FavoritesMixin, load_favorites
 from cogs.music_voice_ui import VoiceLifecycleMixin, PlaybackUiMixin
 from cogs.music_voice_guard import VoiceGuardMixin
 from cogs.music_playback import PlaybackMixin
@@ -37,13 +38,13 @@ from cogs.music_enqueue import _YTDLP_FAILED, search_query, start_early
 SCORE_FILE = DATA_DIR / "play_counts.json"
 
 
-class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
+class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, FavoritesMixin,
                     VoiceLifecycleMixin, VoiceGuardMixin, PlaybackUiMixin, PlaybackMixin,
                     commands.Cog):
     """Cog für alle Musikbefehle: Wiedergabe, Queue, EQ, Autoplay.
 
-    Radio-, Statistik- und Queue-Persistenz-Befehle sind in Mixins ausgelagert
-    (cogs/music_radio.py, music_stats.py, music_queue_io.py) – sie teilen sich
+    Radio-, Statistik-, Queue-Persistenz- und Favoriten-Befehle sind in Mixins ausgelagert
+    (cogs/music_radio.py, music_stats.py, music_queue_io.py, music_favorites.py) – sie teilen sich
     denselben Instanz-State und werden über die MRO als Cog-Commands registriert.
     """
 
@@ -219,6 +220,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
                 self._play_counts: dict = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             self._play_counts: dict = {}
+        self._favorites = load_favorites()   # gemeinsame Liste des Servers (⭐, !fav)
 
         # Downloader hält alle yt_dlp-Instanzen und den Metadaten-Cache.
         self.dl = Downloader(self.audio_format)

@@ -50,7 +50,7 @@ def test_link_button_is_accessory_of_details_on_youtube_card():
         thumbnail="https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp", link=YT,
     )
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 12, 9, 1], "Titel-Section, Galerie, Details-Section, Buttons"
+    assert [p["type"] for p in parts] == [9, 12, 9, 9, 1], "Titel, Galerie, Details+🔗, ⭐-Section, Buttons"
     assert parts[2]["components"] == [{"type": 10, "content": "d"}]
     accessory = parts[2]["accessory"]
     assert accessory["type"] == 2 and accessory["style"] == 2, "grauer Button wie das ❌"
@@ -59,7 +59,8 @@ def test_link_button_is_accessory_of_details_on_youtube_card():
     # Bestehendes bleibt: ❌ am Titel, Bild, die fünf Steuer-Buttons in einer Zeile.
     assert parts[0]["accessory"]["custom_id"].endswith(":clear")
     assert parts[1]["items"][0]["media"]["url"] == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
-    assert _actions(parts[3]) == ROW
+    assert parts[3]["accessory"]["custom_id"].endswith(":fav"), "⭐ direkt unter dem 🔗"
+    assert _actions(parts[4]) == ROW
 
 
 def test_link_button_without_any_image_still_sits_next_to_details():
@@ -79,10 +80,11 @@ def test_small_thumbnail_keeps_its_place_link_button_gets_own_row():
         thumbnail="https://i1.sndcdn.com/artworks-x.jpg", link="https://soundcloud.com/a/b",
     )
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 9, 1, 1]
+    assert [p["type"] for p in parts] == [9, 9, 1, 1, 1]
     assert parts[1]["accessory"]["type"] == 11, "Vorschaubild bleibt"
     assert _actions(parts[2]) == ROW
     assert _actions(parts[3]) == ["link"]
+    assert _actions(parts[4]) == ["fav"], "⭐ in eigener Zeile unter dem 🔗"
 
 
 def test_card_without_details_puts_link_button_in_own_row():
@@ -198,7 +200,7 @@ def test_song_card_copies_the_same_link_as_its_title():
                     "https://youtu.be/YqJ-XdoZV00?si=abc")
     assert view._link == page
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 12, 9, 1]
+    assert [p["type"] for p in parts] == [9, 12, 9, 9, 1]
     assert f"(<{page}>)" in parts[0]["components"][0]["content"], "Titel bleibt ein Link"
     assert parts[2]["accessory"]["emoji"]["name"] == "🔗"
 

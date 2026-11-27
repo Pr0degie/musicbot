@@ -8,7 +8,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ## Features
 
 - Play YouTube links, playlists and search terms
-- Control buttons directly in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ 🔗 (song link to copy)
+- Control buttons directly in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ 🔗 (song link to copy) ⭐ (shared favorites); ⏮️ goes back several songs
 - Autoplay: finds the next song automatically when queue runs out
 - Equalizer presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audio format: `webm` (default, lossless) or `mp3`
@@ -70,6 +70,8 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 | Command | Description |
 |---|---|
 | `!score` | Top 10 most played songs |
+| `!fav` | Add/remove the current song to/from the shared favorites (also ⭐ on the card) |
+| `!favs` | Show favorites · `!favs play` queues all · `!favs remove <n>` |
 | `!baba` | Play Baba playlist |
 | `!text` | Fetch song lyrics |
 | `!stats` | Bot stats (RAM, CPU, cache) |
@@ -98,6 +100,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 │   ├── music_radio.py         # RadioMixin: internet radio (!radio)
 │   ├── music_stats.py         # StatsMixin: !score, !stats
 │   ├── music_queue_io.py      # QueuePersistenceMixin: !saveq, !loadq, !lists
+│   ├── music_favorites.py     # FavoritesMixin: !fav, !favs, ⭐ (data/favorites.json)
 │   ├── downloader.py          # Downloader: resolve_track phases (file, progressive download or stream)
 │   ├── downloader_ydl.py      # yt_dlp instances (fast YouTube client), cookie mode, extraction
 │   ├── downloader_cache.py    # Metadata cache (data/metadata_cache.json)

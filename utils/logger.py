@@ -185,6 +185,7 @@ _ESSENTIAL_TAGS = {
     "INIT", "Cookies", "yt-dlp", "restart", "Maintenance", "Shutdown",
     "Config",                                # fehlende .env-Keys beim Start
     "Sprachbefehl", "Voice-Listen",          # gesprochene Befehle
+    "Favoriten",                             # ⭐/!fav – Nutzeraktion
 }
 
 # Interna der Download-Pipeline: nur in debug interessant. WARNING+ dieser

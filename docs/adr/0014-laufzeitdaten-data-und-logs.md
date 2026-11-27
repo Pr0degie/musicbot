@@ -9,7 +9,7 @@ Alles, was der Bot zur Laufzeit schreibt, lag direkt im Arbeitsverzeichnis: `bot
 
 ## Entscheidung
 
-- `utils/paths.py` definiert `DATA_DIR` (`data/`) und `LOG_DIR` (`logs/`). Queue-Snapshot, Metadaten-Cache, Play-Counts, Playlists und Downloads liegen unter `data/`, `bot.log` und `bot.log.N` unter `logs/`.
+- `utils/paths.py` definiert `DATA_DIR` (`data/`) und `LOG_DIR` (`logs/`). Queue-Snapshot, Metadaten-Cache, Play-Counts, Favoriten (seit 27.11.2026), Playlists und Downloads liegen unter `data/`, `bot.log` und `bot.log.N` unter `logs/`.
 - Beide Pfade bleiben **relativ zum Arbeitsverzeichnis**, nicht zu `__file__`: sonst teilten sich alle Multi-Bot-Instanzen einen `downloads/`-Ordner und hebelten die In-Flight-Registry aus ([ADR 0002](0002-inflight-registry.md)).
 - `migrate_legacy_layout()` zieht beim Start um, was noch im alten Layout liegt. `main.py` ruft es vor allen anderen Imports auf, weil `utils.logger` beim Import das Log rotiert und die Cogs beim Import `data/downloads` und `data/playlists` anlegen. Überschrieben wird nie etwas: was am Ziel schon existiert oder gesperrt ist, bleibt liegen, erscheint als `[INIT]`-Warnung und wird beim nächsten Start erneut versucht. Ordner mit vorhandenem Ziel werden dateiweise gemischt.
 - `radio_stations.json` bleibt im Root: die Datei ist versioniert (Senderliste zum Ausliefern) und wird von `!radio <URL>` zugleich ergänzt.
