@@ -17,9 +17,12 @@
 > `music_track_end.py` 275, `music_prefetch.py` 98. Abweichungen vom Plan: `_run_on_loop` und
 > `_LOOP_HANDOFF_TIMEOUT` heißen in `utils/tasks.py` `run_on_loop` und `LOOP_HANDOFF_TIMEOUT`; für Etappe 6
 > kam ein Test dazu (`tests/test_radio_station_switch.py`, Stream-Ende aus einem fremden Thread); die
-> `!loadq`-Stelle aus 5a bleibt inline, weil sie vorher den ersten Titel primt. Offen: die manuelle
-> Smoke-Checkliste (besonders der Radio-Abschnitt wegen Etappe 6), Etappe 7 (Einzelfreigabe) und die Bugs
-> aus dem Anhang.
+> `!loadq`-Stelle aus 5a bleibt inline, weil sie vorher den ersten Titel primt. Die Bugs aus dem Anhang
+> sind behoben (siehe dort).
+>
+> **Stand 27.11.2026:** Live gelaufen 22.–24.11. (drei Läufe, über 100 Songs, Radio mit Senderwechseln,
+> Autoplay, keine Fehler im Log). Etappe 7 bleibt auf Entscheidung des Nutzers liegen; der Plan ist damit
+> abgeschlossen.
 
 ## Ziel
 

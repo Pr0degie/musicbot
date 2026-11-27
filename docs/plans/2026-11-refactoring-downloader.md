@@ -15,8 +15,11 @@
 > **Stand 22.11.2026:** Etappen 1–5 sind umgesetzt (`6e649c5`, `b5f094b`, `0a86d70`, `1c4f3d4`, `4ad1358`),
 > volle Suite und `ruff` grün. Ergebnis: `downloader.py` 315 Zeilen, Mixins `downloader_cache.py` 241,
 > `downloader_ydl.py` 287, `downloader_cleanup.py` 152, `downloader_prefetch.py` 200,
-> `downloader_progressive.py` 346. Offen: die manuelle Smoke-Checkliste (Abschnitte Download und Prefetch),
-> Etappe 6 (Einzelfreigabe) und die Bugs aus dem Anhang.
+> `downloader_progressive.py` 346. Die Bugs aus dem Anhang sind behoben (siehe dort).
+>
+> **Stand 27.11.2026:** Live gelaufen 22.–24.11. (drei Läufe, über 100 Songs, progressiver Download,
+> Prefetch-Adoption, keine Fehler im Log). Etappe 6 und der Rest von Bug 3 (Extraktionen unter den Lock)
+> bleiben auf Entscheidung des Nutzers liegen; der Plan ist damit abgeschlossen.
 
 ## Ziel
 
