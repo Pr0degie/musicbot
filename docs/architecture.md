@@ -102,7 +102,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   (48k-Stereo → 16k-Mono), `utils/speech_buffer.py` (`SpeakerBuffers`), `utils/stt.py` (faster-whisper) →
   [sprachsteuerung.md](architecture/sprachsteuerung.md).
 - **`utils/paths.py`** — `DATA_DIR` (`data/`: `downloads/`, `playlists/`, `last_queue.json`, `metadata_cache.json`,
-  `play_counts.json`) und `LOG_DIR` (`logs/`), beide relativ zum Arbeitsverzeichnis (Multi-Bot-Instanzen trennen sich
+  `play_counts.json`, `favorites.json`) und `LOG_DIR` (`logs/`), beide relativ zum Arbeitsverzeichnis (Multi-Bot-Instanzen trennen sich
   über das cwd); `migrate_legacy_layout()` zieht beim Start einmalig um, was noch im alten Layout direkt im
   Arbeitsverzeichnis liegt (`main.py`, vor allen anderen Imports), ohne Vorhandenes zu überschreiben.
   `radio_stations.json` bleibt im Root (versionierte Senderliste) → [ADR 0014](adr/0014-laufzeitdaten-data-und-logs.md).
