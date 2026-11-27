@@ -229,6 +229,44 @@ def test_back_while_playing_queues_previous_then_current():
     asyncio.run(run())
 
 
+def test_back_goes_several_steps_back():
+    """Zwei Klicks gehen zwei Songs zurück, statt zwischen zwei Songs zu pendeln."""
+    async def run():
+        view, cog, vc, stopped, _ctx = _setup(playing=True)
+        cog.is_playing = True
+        cog.last_played = ("u_a", "A", 100)
+        cog.last_played = ("u_b", "B", 100)
+        cog.current_track = ("u_c", "C", 200)
+
+        await view.back.callback(FakeInteraction())
+        assert list(cog.queue) == [("u_b", "B"), ("u_c", "C")]
+        assert cog.last_played == ("u_a", "A", 100)
+
+        # B läuft (after_playing hätte ihn gestartet), zweiter Klick → A
+        cog.current_track = ("u_b", "B", 100)
+        cog.queue.popleft()
+        interaction = FakeInteraction()
+        await view.back.callback(interaction)
+
+        assert list(cog.queue) == [("u_a", "A"), ("u_b", "B"), ("u_c", "C")]
+        assert interaction.sent == [(t("status.back_eph", title="A"), {"ephemeral": True})]
+        assert cog.last_played is None
+        assert stopped == [vc, vc]
+
+    asyncio.run(run())
+
+
+def test_history_skips_duplicates_and_is_capped():
+    view, cog, *_ = _setup()
+    cog.last_played = ("u1", "Eins", 100)
+    cog.last_played = ("u1", "Eins", 100)   # derselbe Song nicht doppelt oben
+    cog.last_played = None
+    assert cog.last_played is None
+    for i in range(cog._PLAY_HISTORY_MAX + 5):
+        cog.last_played = (f"u{i}", f"S{i}", 100)
+    assert len(cog._play_history) == cog._PLAY_HISTORY_MAX
+
+
 def test_back_from_pause_does_not_start_twice():
     """Aus der Pause heraus: nur stoppen – den Start übernimmt after_playing."""
     async def run():

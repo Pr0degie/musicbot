@@ -73,6 +73,36 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
     _parse_time = staticmethod(parse_time)
     _progress_bar = staticmethod(progress_bar)
 
+    # Verlauf der gespielten Songs (ältester links) für den ⏮-Button, der
+    # damit mehrere Schritte zurückgehen kann. Lazy angelegt, weil Tests den
+    # Cog ohne __init__ bauen.
+    _PLAY_HISTORY_MAX = 25
+    _play_history = None
+
+    def _history(self) -> deque:
+        if self._play_history is None:
+            self._play_history = deque(maxlen=self._PLAY_HISTORY_MAX)
+        return self._play_history
+
+    @property
+    def last_played(self):
+        """Der Song vor dem laufenden (url, title, duration) – oberster Eintrag
+        des Verlaufs, None ohne Verlauf. Für !replay, Autoplay und ⏮."""
+        history = self._history()
+        return history[-1] if history else None
+
+    @last_played.setter
+    def last_played(self, track):
+        """Ein Track legt sich oben auf den Verlauf (nicht doppelt, wenn er schon
+        oben liegt). None nimmt den obersten Eintrag weg: ⏮ hat ihn verbraucht
+        oder er startet gerade selbst – darunter kommt der Song davor zum Vorschein."""
+        history = self._history()
+        if track is None:
+            if history:
+                history.pop()
+        elif not history or history[-1][0] != track[0]:
+            history.append(track)
+
     def __init__(self, bot):
         self.bot = bot
 
@@ -82,7 +112,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
 
         self.is_playing = False
         self.current_track = None   # Aktuell spielender Song (url, title, duration) – für !now
-        self.last_played = None     # Wird von !replay genutzt
+        self._play_history = deque(maxlen=self._PLAY_HISTORY_MAX)   # last_played, ⏮, !replay
         self.prefetch_task = None         # Läuft im Hintergrund während ein Song spielt
         self._autoplay_prefetch_task = None  # Sucht+lädt nächsten Autoplay-Song vor
         self._autoplay_queued_url = None     # URL die zuletzt von Autoplay in die Queue gelegt wurde
@@ -790,7 +820,10 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
         also wieder zu ihm) und die Wiedergabe wird gestoppt – after_playing
         startet dann den vorherigen. Läuft nichts, reiht die Methode nur ein;
         den Start übernimmt der Aufrufer. Gibt den Titel zurück, None wenn es
-        keinen vorherigen Song gibt."""
+        keinen vorherigen Song gibt.
+
+        Der Eintrag wird aus dem Verlauf genommen; ein weiterer Klick geht
+        also noch einen Song zurück, statt zwischen zwei Songs zu pendeln."""
         if not self.last_played:
             return None
         lp_url, lp_title, *_ = self.last_played
@@ -800,7 +833,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin,
             self.current_track = None   # verhindert Doppel-Insert durch den Loop-Zweig in after_playing
             self.queue.appendleft((url, title))
         self.queue.appendleft((lp_url, lp_title))
-        self.last_played = None         # sonst pendelte ein zweiter Klick endlos zwischen zwei Songs
+        self.last_played = None         # verbraucht: der nächste Klick geht einen Song weiter zurück
         self._restart_prefetch()
         if active:
             self._stop_for_advance(vc)

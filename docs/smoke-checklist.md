@@ -20,6 +20,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Skip-Button funktioniert; Pause/Fortsetzen ist **ein** Button, der Beschriftung und Farbe wechselt (blau ↔ grün); Pause/Fortsetzen, Autoplay und Loop schreiben **nichts** in den Chat und zeigen kein „Interaktion fehlgeschlagen"
 - [ ] Zurück-Button rot; Autoplay-Button rot = an, Loop-Button grün = an, beide grau = aus; auch nach `!loop`/`!pause` per Befehl zieht die Karte binnen ~5 s nach
 - [ ] ⏮ Zurück → vorheriger Song spielt, der eben laufende steht als Nächstes in der Queue; aus der Pause heraus startet genau **ein** Song
+- [ ] ⏮ mehrmals hintereinander → geht jedes Mal einen Song weiter zurück (A, B, C gespielt: ⏮ → B, ⏮ → A)
 - [ ] Karte zeigt „Als Nächstes" mit dem ersten Queue-Titel; ändert sich nach `!p`/`!remove` binnen ~5 s
 - [ ] Nach ❌ oder `!clear`: Geleert-Meldung hat 30 s einen Rückgängig-Button → Song und Queue sind zurück, Wiedergabe startet wieder; nach 30 s verschwindet der Button
 - [ ] `!q` → Song im Auswahlmenü wählen → „Entfernen" bzw. „Als Nächstes" wirkt auf den richtigen Song, Liste lädt neu; nach 60 s verschwinden die Bedienelemente

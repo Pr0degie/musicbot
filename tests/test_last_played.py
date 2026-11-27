@@ -100,7 +100,7 @@ def test_replay_nach_queue_ende_macht_den_song_nicht_zum_eigenen_vorgaenger(monk
         await _wait_for_plays(vc, 3)
 
         assert mc.current_track[0] == URL_A
-        assert mc.last_played is None
+        assert mc.last_played == (URL_W, "W", 200), "A geht vom Verlauf, W war davor"
         cleanup_cog(mc)
 
     asyncio.run(run())

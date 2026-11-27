@@ -451,7 +451,8 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         # ANDEREN Song. Startet derselbe erneut (Loop, Stream-Retry, Resume) oder
         # ist current_track vor dem Neustart None (!seek, !eq, Voice-Reparatur),
         # bleibt der bisherige Vorgänger stehen. Der laufende Song ist nie sein
-        # eigener Vorgänger (!replay nach Queue-Ende).
+        # eigener Vorgänger (!replay nach Queue-Ende): Er geht vom Verlauf, der
+        # Song davor wird Vorgänger (last_played ist der Verlauf, siehe music.py).
         if prev_track is not None and prev_track[0] != url:
             self.last_played = prev_track
         elif self.last_played is not None and self.last_played[0] == url:
