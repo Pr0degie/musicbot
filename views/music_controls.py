@@ -21,7 +21,6 @@ _CUSTOM_ID_PREFIX = "musicctl"
 NP_HEADING_ID = 1
 _KEEP = object()   # Sentinel: „Als Nächstes" unverändert lassen
 _FAV_OFF = "☆"     # leerer Stern: Song ist (noch) kein Favorit
-_BLANK = "\u2800"  # Braille-Leerzeichen: unsichtbar, für Discord aber kein leerer Text
 
 _YT_THUMB = re.compile(r"^https?://i\d?\.ytimg\.com/vi(?:_webp)?/([A-Za-z0-9_-]{11})/")
 _YT_URL = re.compile(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})")
@@ -70,11 +69,8 @@ class MusicControlView(LayoutView):
       MediaGallery [Video-Thumbnail 320×180]      (nur YouTube, siehe compact_card_image)
       TextDisplay [Details, Als Nächstes]
         – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
-        – mit Song-Link als Section, Accessory: grauer 🔗-Button (Link zum Kopieren)
-      Section  [unsichtbarer Text]                → Accessory: ⭐ (Favorit), direkt unter dem 🔗
+      ActionRow [🔗, ⭐]                           (Link zum Kopieren, Favorit; fehlt auf der Radio-Karte)
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
-      ActionRow [🔗]                              (nur wenn das Thumbnail den Accessory-Platz belegt)
-      ActionRow [⭐]                              (ebenso, dann unter der 🔗-Zeile)
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
     oben rechts in die Karte setzen. Konsequenz: Nachrichten mit V2-Flag
@@ -153,7 +149,6 @@ class MusicControlView(LayoutView):
         image = compact_card_image(thumbnail, song[0] if song else None)
         if image:
             container.add_item(MediaGallery(discord.MediaGalleryItem(image)))
-        link_placed = fav_placed = False
         # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
         # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
         thumb_accessory = bool(
@@ -163,27 +158,16 @@ class MusicControlView(LayoutView):
             self._details = TextDisplay(self._details_text())
             if thumb_accessory:
                 container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
-            elif self.link:
-                # 🔗 rechts neben den Details – wie das ❌ am Titel, die Karte wird nicht höher.
-                container.add_item(Section(self._details, accessory=self.link))
-                link_placed = True
-                if self.fav:
-                    # ⭐ direkt unter dem 🔗: eine eigene Section. Sie braucht einen
-                    # Text, sichtbar soll dort aber nichts stehen (User 28.11.2026) –
-                    # leer lehnt Discord die ganze Nachricht ab (400), daher das
-                    # unsichtbare Braille-Leerzeichen.
-                    container.add_item(Section(TextDisplay(_BLANK), accessory=self.fav))
-                    fav_placed = True
             else:
                 container.add_item(self._details)
+        # 🔗 und ⭐ nebeneinander über der Steuerreihe (User 28.11.2026) – die
+        # Steuerreihe ist mit fünf Buttons voll, mehr erlaubt Discord nicht.
+        extras = [b for b in (self.link, self.fav) if b is not None]
+        if extras:
+            container.add_item(ActionRow(*extras))
         container.add_item(ActionRow(
             self.back, self.pause, self.skip, self.autoplay_toggle, self.loop_toggle,
         ))
-        if self.link and not link_placed:
-            # Eine Section hat nur ein Accessory, und die Button-Zeile ist mit fünf voll.
-            container.add_item(ActionRow(self.link))
-        if self.fav and not fav_placed:
-            container.add_item(ActionRow(self.fav))   # unter der 🔗-Zeile
         self.add_item(container)
         self.sync_state()
 

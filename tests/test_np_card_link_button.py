@@ -2,8 +2,8 @@
 
 Ein Bot kann nicht in die Zwischenablage schreiben – der Button antwortet
 deshalb ephemer mit dem Link als Codeblock (am Desktop mit Kopier-Symbol).
-Er sitzt als Accessory rechts neben den Details; die Button-Zeile darunter
-ist mit fünf Buttons voll und bleibt, wie sie ist.
+Er steht zusammen mit dem ⭐ in einer eigenen Reihe über den Steuer-Buttons;
+die Steuerreihe ist mit fünf Buttons voll und bleibt, wie sie ist.
 """
 
 import asyncio
@@ -44,54 +44,52 @@ def _all_actions(node):
 # Layout
 # ---------------------------------------------------------------------------
 
-def test_link_button_is_accessory_of_details_on_youtube_card():
+def test_link_and_star_share_a_row_above_the_controls_on_youtube_card():
     view = MusicControlView(
         MagicMock(), MagicMock(), song=(YT, "T"), heading="### 🎵 T", body="▬● 0:00 / 3:30", details="d",
         thumbnail="https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp", link=YT,
     )
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 12, 9, 9, 1], "Titel, Galerie, Details+🔗, ⭐-Section, Buttons"
-    assert parts[2]["components"] == [{"type": 10, "content": "d"}]
-    accessory = parts[2]["accessory"]
-    assert accessory["type"] == 2 and accessory["style"] == 2, "grauer Button wie das ❌"
-    assert accessory["emoji"]["name"] == "🔗" and "label" not in accessory, "nur ein Emoji"
-    assert accessory["custom_id"].endswith(":link")
+    assert [p["type"] for p in parts] == [9, 12, 10, 1, 1], "Titel, Galerie, Details, 🔗+⭐, Buttons"
+    assert parts[2]["content"] == "d"
+    assert _actions(parts[3]) == ["link", "fav"], "🔗 und ⭐ nebeneinander"
+    link = parts[3]["components"][0]
+    assert link["style"] == 2, "grauer Button wie das ❌"
+    assert link["emoji"]["name"] == "🔗" and "label" not in link, "nur ein Emoji"
     # Bestehendes bleibt: ❌ am Titel, Bild, die fünf Steuer-Buttons in einer Zeile.
     assert parts[0]["accessory"]["custom_id"].endswith(":clear")
     assert parts[1]["items"][0]["media"]["url"] == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
-    assert parts[3]["accessory"]["custom_id"].endswith(":fav"), "⭐ direkt unter dem 🔗"
     assert _actions(parts[4]) == ROW
 
 
-def test_link_button_without_any_image_still_sits_next_to_details():
+def test_link_row_without_any_image():
     view = MusicControlView(MagicMock(), MagicMock(), heading="### 🎵 T", details="d",
                             link="https://example.org/lied")
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 9, 1]
-    assert parts[1]["accessory"]["custom_id"].endswith(":link")
-    assert _actions(parts[2]) == ROW
+    assert [p["type"] for p in parts] == [9, 10, 1, 1]
+    assert _actions(parts[2]) == ["link"], "ohne Song kein ⭐"
+    assert _actions(parts[3]) == ROW
 
 
-def test_small_thumbnail_keeps_its_place_link_button_gets_own_row():
-    """Nicht-YouTube: das kleine Vorschaubild belegt den Accessory-Platz der
-    Details – der 🔗-Button weicht in eine eigene Zeile unter den Buttons."""
+def test_small_thumbnail_keeps_its_place_next_to_details():
+    """Nicht-YouTube: das kleine Vorschaubild bleibt rechts neben den Details,
+    🔗 und ⭐ stehen wie sonst in ihrer Reihe über den Steuer-Buttons."""
     view = MusicControlView(
         MagicMock(), MagicMock(), song=("https://soundcloud.com/a/b", "T"), heading="### 🎵 T", details="d",
         thumbnail="https://i1.sndcdn.com/artworks-x.jpg", link="https://soundcloud.com/a/b",
     )
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 9, 1, 1, 1]
+    assert [p["type"] for p in parts] == [9, 9, 1, 1]
     assert parts[1]["accessory"]["type"] == 11, "Vorschaubild bleibt"
-    assert _actions(parts[2]) == ROW
-    assert _actions(parts[3]) == ["link"]
-    assert _actions(parts[4]) == ["fav"], "⭐ in eigener Zeile unter dem 🔗"
+    assert _actions(parts[2]) == ["link", "fav"]
+    assert _actions(parts[3]) == ROW
 
 
-def test_card_without_details_puts_link_button_in_own_row():
+def test_card_without_details_still_has_link_row():
     view = MusicControlView(MagicMock(), MagicMock(), heading="### 🎵 T", link=YT)
     parts = view.to_components()[0]["components"]
     assert [p["type"] for p in parts] == [9, 1, 1]
-    assert _actions(parts[1]) == ROW and _actions(parts[2]) == ["link"]
+    assert _actions(parts[1]) == ["link"] and _actions(parts[2]) == ROW
 
 
 @pytest.mark.parametrize("link", [None, "", "ytsearch:irgendwas", "C:/lied.mp3", 42])
@@ -106,18 +104,18 @@ def test_no_link_no_button(link):
     assert strip(with_link.to_components()) == strip(without.to_components()) == [9, 10, 1]
 
 
-def test_details_keep_updating_inside_the_section():
-    """„Als Nächstes" wandert weiter mit, auch wenn die Details jetzt in einer Section stecken."""
+def test_details_keep_updating():
+    """„Als Nächstes" wandert mit, die Link-Reihe bleibt darunter."""
     cog = build_cog()
     view = MusicControlView(cog, FakeCtx(FakeVoiceClient()), heading="### 🎵 T", details="**Dauer** 3:30",
                             link=YT)
     assert view.sync_state(up_next="Nächster | [Song] *x*") is True
-    section = view.to_components()[0]["components"][1]
-    assert section["components"][0]["content"].split("\n") == [
+    parts = view.to_components()[0]["components"]
+    assert parts[1]["content"].split("\n") == [
         "**Dauer** 3:30",
         f"**{t('embed.up_next')}** Nächster \\| [Song] \\*x\\*",
     ]
-    assert section["accessory"]["custom_id"].endswith(":link")
+    assert _actions(parts[2]) == ["link"]
     assert view.sync_state() is False
 
 
@@ -199,9 +197,9 @@ def test_song_card_copies_the_same_link_as_its_title():
                     "https://youtu.be/YqJ-XdoZV00?si=abc")
     assert view._link == page
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 12, 9, 9, 1]
+    assert [p["type"] for p in parts] == [9, 12, 10, 1, 1]
     assert f"(<{page}>)" in parts[0]["components"][0]["content"], "Titel bleibt ein Link"
-    assert parts[2]["accessory"]["emoji"]["name"] == "🔗"
+    assert _actions(parts[3]) == ["link", "fav"]
 
 
 def test_song_card_falls_back_to_queue_url_without_webpage_url():

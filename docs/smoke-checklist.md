@@ -11,7 +11,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] `!p <Playlist-URL>` → mehrere Einträge landen in der Queue
 - [ ] Songwechsel → die Karte des vorherigen Songs wird zur Zeile `🎶 Titel` (keine Karte, keine Buttons mehr); **genau eine** Karte im Channel, die des laufenden Songs
 - [ ] Karte (Components V2): Titel als Link – auch bei Titeln mit Emojis, `|`, `[ ]` oder `*` (kein roher `[…](<url>)`-Text; Emojis fehlen im Titel), Fortschrittsbalken läuft mit, bei YouTube das Thumbnail als Bild zwischen Balken und Details (kompakt, nicht kartenfüllend), sonst klein rechts, grauer Button mit rotem ❌ **oben rechts**
-- [ ] 🔗 sitzt klein rechts neben den Details, die Karte ist nicht höher als vorher → Klick: nur für mich sichtbare Antwort mit dem Song-Link im Codeblock, am Desktop legt das Kopier-Symbol des Codeblocks ihn in die Zwischenablage; Karte und Wiedergabe bleiben unverändert. Nicht-YouTube mit kleinem Vorschaubild: 🔗 in eigener Zeile unter den Buttons; Radio-Karte ohne 🔗
+- [ ] 🔗 sitzt zusammen mit dem ⭐ in einer Reihe direkt über den Steuer-Buttons → Klick: nur für mich sichtbare Antwort mit dem Song-Link im Codeblock, am Desktop legt das Kopier-Symbol des Codeblocks ihn in die Zwischenablage; Karte und Wiedergabe bleiben unverändert. Nicht-YouTube mit kleinem Vorschaubild: Bild bleibt rechts neben den Details, 🔗/⭐-Reihe wie sonst; Radio-Karte ohne 🔗
 - [ ] ❌ klicken → Queue leer, Wiedergabe stoppt, „geleert"-Meldung im Channel (wie `!clear`)
 - [ ] `REQUIRE_SAME_VOICE=true`: jeder Button der Karte (Zurück, Pause, Skip, Autoplay, Loop, ❌, 🔗) sowie `!x`/`!resume`/`!loop`/`!replay` von außerhalb des Voice-Channels → nur Absage, nichts ändert sich; Owner kommt immer durch
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
@@ -24,7 +24,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Zurück-Button rot; Autoplay-Button rot = an, Loop-Button grün = an, beide grau = aus; auch nach `!loop`/`!pause` per Befehl zieht die Karte binnen ~5 s nach
 - [ ] ⏮ Zurück → vorheriger Song spielt, der eben laufende steht als Nächstes in der Queue; aus der Pause heraus startet genau **ein** Song
 - [ ] ⏮ mehrmals hintereinander → geht jedes Mal einen Song weiter zurück (A, B, C gespielt: ⏮ → B, ⏮ → A)
-- [ ] ⭐ sitzt direkt unter dem 🔗 (links davon nichts, keine Uploader-Zeile auf der Karte); nicht gespeichert = leerer ☆, Klick → gelber ⭐, nochmal → ☆; Button bleibt grau, ohne Chat-Meldung; `!favs` zeigt die Liste, `!favs play` reiht ein, `!favs remove 1`, `!fav` per Befehl; nach Neustart ist die Liste noch da
+- [ ] ⭐ steht rechts neben dem 🔗 (keine Uploader-Zeile auf der Karte); nicht gespeichert = leerer ☆, Klick → gelber ⭐, nochmal → ☆; Button bleibt grau, ohne Chat-Meldung; `!favs` zeigt die Liste, `!favs play` reiht ein, `!favs remove 1`, `!fav` per Befehl; nach Neustart ist die Liste noch da
 - [ ] Karte zeigt „Als Nächstes" mit dem ersten Queue-Titel; ändert sich nach `!p`/`!remove` binnen ~5 s
 - [ ] Nach ❌ oder `!clear`: Geleert-Meldung hat 30 s einen Rückgängig-Button → Song und Queue sind zurück, Wiedergabe startet wieder; nach 30 s verschwindet der Button
 - [ ] `!q` → Song im Auswahlmenü wählen → „Entfernen" bzw. „Als Nächstes" wirkt auf den richtigen Song, Liste lädt neu; nach 60 s verschwinden die Bedienelemente

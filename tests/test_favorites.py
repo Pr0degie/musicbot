@@ -1,8 +1,7 @@
 """Favoriten: eine gemeinsame Liste des Servers (⭐ auf der Karte, !fav, !favs).
 
-Der ⭐ sitzt direkt unter dem 🔗 (Nutzerwunsch): eine eigene Section mit
-unsichtbarem Text (die Uploader-Zeile ist seit 28.11.2026 weg). Ohne Platz neben den Details (kleines
-Vorschaubild) bekommt er eine eigene Zeile unter der 🔗-Zeile.
+Der ⭐ steht neben dem 🔗 in einer eigenen Reihe über den Steuer-Buttons
+(Nutzerwunsch 28.11.2026).
 """
 
 import asyncio
@@ -40,30 +39,27 @@ def _no_disk(monkeypatch):
 # Layout
 # ---------------------------------------------------------------------------
 
-def test_star_sits_right_below_link_without_visible_text():
+def test_star_sits_next_to_link_above_the_controls():
     async def run():
         cog = build_cog()
         parts = _card(cog).to_components()[0]["components"]
-        assert [p["type"] for p in parts] == [9, 12, 9, 9, 1]
-        assert parts[2]["accessory"]["emoji"]["name"] == "🔗", "🔗 bleibt, wo er war"
-        assert parts[2]["components"] == [{"type": 10, "content": "**Dauer** 3:30"}], \
-            "keine Uploader-Zeile in den Details"
-        # Links vom Stern steht nichts Sichtbares – aber nie ein leerer Text (400).
-        assert parts[3]["components"] == [{"type": 10, "content": "⠀"}]
-        star = parts[3]["accessory"]
-        assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star, \
-            "kein Favorit → leerer Stern"
+        assert [p["type"] for p in parts] == [9, 12, 10, 1, 1]
+        assert parts[2]["content"] == "**Dauer** 3:30", "keine Uploader-Zeile"
+        link, star = parts[3]["components"]
+        assert link["emoji"]["name"] == "🔗"
+        assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star,             "kein Favorit → leerer Stern"
+        assert parts[4]["components"][0]["custom_id"].endswith(":back"), "Steuerreihe darunter"
     asyncio.run(run())
 
 
-def test_star_below_link_row_when_small_thumbnail_takes_the_spot():
+def test_star_next_to_link_also_with_small_thumbnail():
     async def run():
         sc = "https://soundcloud.com/a/b"
         view = _card(build_cog(), song=(sc, "T"), thumbnail="https://i1.sndcdn.com/x.jpg", link=sc)
         parts = view.to_components()[0]["components"]
-        assert [p["type"] for p in parts] == [9, 9, 1, 1, 1]
+        assert [p["type"] for p in parts] == [9, 9, 1, 1]
         ids = [[b["custom_id"].rsplit(":", 1)[1] for b in p["components"]] for p in parts[2:]]
-        assert ids[1:] == [["link"], ["fav"]]
+        assert ids[0] == ["link", "fav"]
         assert parts[1]["components"][0]["content"] == "**Dauer** 3:30", "keine Uploader-Zeile"
     asyncio.run(run())
 
