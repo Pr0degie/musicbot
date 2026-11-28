@@ -52,14 +52,18 @@ Stream-Pfad reicht `info["http_headers"]` via `-headers` an FFmpeg durch.
 
 **Now-Playing-Karte** ([ADR 0012](../adr/0012-now-playing-karte-components-v2.md)): Die Karte ist ein Components-V2-Layout (`MusicControlView`, `views/music_controls.py`): Titel + Fortschrittsbalken mit grauem ❌-Button oben rechts (= `!clear`, gemeinsamer Kern `_clear_all`), darunter bei YouTube das Video-Thumbnail als kompaktes Galeriebild (320×180, `compact_card_image`), dann Details + „Als Nächstes" (ohne YouTube-Bild mit kleinem Thumbnail rechts; sonst rechts ein grauer 🔗-Button, der den Song-Link ephemer als Codeblock zum Kopieren schickt — in die Zwischenablage schreiben kann ein Bot nicht; direkt darunter der ⭐ für die gemeinsame Favoritenliste, grün = Favorit, `FavoritesMixin`) und die Button-Zeile (Zurück, Pause/Fortsetzen als ein Umschalt-Button, Skip, Autoplay, Loop). Zurück ist fest rot, die übrigen Buttons spiegeln den Zustand (Pause blau ↔ Fortsetzen grün, Autoplay rot = an, Loop grün = an); Pause/Fortsetzen, Autoplay und Loop quittieren deshalb stumm, ohne ephemere Meldung: `view.sync_state()` gleicht sie samt „Als Nächstes" an den Cog an und meldet, ob sich etwas geändert hat — der `_progress_loop` schickt die Karte dann mit, ein Klick zieht sie über `_push_state` sofort nach (nur wenn die Nachricht noch die aktive Karte ist, sonst würde eine zurückgebaute Karte wiederbelebt). `!clear`/❌ liefern über `_clear_all` einen Snapshot; die Geleert-Meldung trägt 30 s einen Rückgängig-Button (`UndoClearView` → `_restore_cleared`). „Zurück" reiht über `_queue_previous` den vorherigen Song vor den laufenden und stoppt; den Start übernimmt `after_playing`. `last_played` ist eine Property über einen Verlauf (`_play_history`, max. 25): Zuweisen legt einen Track oben drauf (nicht doppelt), `None` nimmt den obersten weg — so geht jeder weitere Klick einen Song weiter zurück, statt zwischen zwei Songs zu pendeln. Ein Embed kann keinen Button tragen, deshalb V2 — mit der Folge, dass die Nachricht nie `content`/`embed` bekommt und das V2-Flag nicht mehr entfernbar ist: Live-Edits gehen über `view.set_body()` + `msg.edit(view=view)`, der Rückbau über `retired_card(title)`. Karte samt Buttons gibt es **nur für den aktuellen Song**. Jede Nachricht, die ein
 Track hinterlässt, geht durch `_retire_np_message(msg, title)` (`PlaybackUiMixin`) und wird zur Textzeile `🎶
-Titel` — beim Trackwechsel, bei der Radio-Übernahme, beim Queue-Ende und nach `!clear`/❌ **sofort** (seit 27.11.2026;
-`_handle_queue_empty` bzw. `_retire_active_card`, weil danach nichts mehr läuft — ein Sender endet nach `!clear`
-ohne Queue-Ende-Pfad, ein pausierter Song wird von `_clear_all` mit beendet), und bei der 429-Abschaltung
+Titel` — beim Trackwechsel, bei der Radio-Übernahme, nach `!clear`/❌ **sofort** (`_retire_active_card`; ein Sender
+endet nach `!clear` ohne Queue-Ende-Pfad, ein pausierter Song wird von `_clear_all` mit beendet), beim natürlichen
+Queue-Ende erst mit dem nächsten Song (die Karte bleibt samt Buttons stehen, `_handle_queue_empty` setzt den Balken
+per `_finalize_progress_bar` auf 100 % und übergibt sie an `_ended_np`), und bei der 429-Abschaltung
 (`_disable_np_edits` übergibt die Nachricht an `_ended_np`, statt sie zu vergessen; der nächste Track baut sie
 zurück). Zwei Fallstricke, die dabei je eine Karte für immer stehen ließen: `now_playing_msg` und `_ended_np`
 können **gleichzeitig** belegt sein (beide zurückbauen, nicht `elif`), und der Inhalt darf nie leer werden — eine Nachricht ohne Text, Embed,
 Komponenten und Anhang lehnt Discord mit 400 ab (bei V2 also nie `view=None`), der Rückbau schlägt still fehl. Der Titel dafür steht in `_np_title` (mit
 der Karte gesetzt), nicht in `last_played`/`prev_track`, die zum Rückbauzeitpunkt schon geleert sein können.
+Ausnahme Skip: `!s`/⏭ merken die laufende Karte in `_skipped_np_msg`, und `_retire_np_message` **löscht** genau diese
+Nachricht, statt sie zur Textzeile zu machen (Löschen gescheitert → Textzeile). Ein Loop-„Song“ behält seine Karte
+und hebt die Markierung auf (`_reset_card_for_loop_repeat`).
 
 Background tasks: `prefetch_task` downloads the next two queued songs sequentially (`_prefetch_next(0)` then
 `_prefetch_next(1)` — sequential because yt_dlp is not thread-safe); `_autoplay_prefetch_task` searches +

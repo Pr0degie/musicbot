@@ -137,7 +137,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `np_heading(title, info)` baut die Titelzeile
   (Künstler/Titel gedreht, Uploader, Link ohne Emojis). `UndoClearView`: Rückgängig-Button unter der
   Geleert-Meldung (30 s). Only current song
-  keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel` via `retired_card()`).
+  keeps its card — previous ones go through `_retire_np_message` (→ Textzeile `🎶 Titel` via `retired_card()`; a card skipped via `!s`/⏭ is deleted instead, the last card stays until the next song after the queue runs out).
   Fortsetzen: (1) paused →
   resume, (2) queue has songs → `play_next`, (3) queue empty → Song dieser Karte vorne einreihen, (4) autoplay
   on → `autoplay()`. Pause/Fortsetzen, Autoplay und Loop quittieren stumm (`_push_state`: Karten-Edit als

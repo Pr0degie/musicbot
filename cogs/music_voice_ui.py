@@ -379,9 +379,20 @@ class PlaybackUiMixin:
         durch. Der Inhalt darf dabei nie leer werden: eine Nachricht ohne Text,
         Embed und Anhang lehnt Discord mit 400 ab – der Rückbau schlüge still
         fehl und die alte Karte bliebe samt Buttons stehen.
+
+        Ausnahme: Die Karte eines übersprungenen Songs (_skipped_np_msg, gesetzt
+        von !s/⏭) wird gelöscht statt zurückgebaut.
         """
         if msg is None:
             return
+        if msg is self._skipped_np_msg:
+            # Übersprungener Song (!s, ⏭): Karte ganz löschen statt Textzeile.
+            self._skipped_np_msg = None
+            try:
+                await msg.delete()
+                return
+            except Exception:
+                pass   # Löschen gescheitert (Rechte?) → wenigstens zur Textzeile
         try:
             # V2-Karte: content/embed sind tabu, das Flag bleibt – Rückbau
             # über ein Layout mit nur einer Textzeile.
@@ -390,15 +401,36 @@ class PlaybackUiMixin:
             pass   # Nachricht schon weg oder keine Berechtigung – egal
 
     async def _retire_active_card(self):
-        """Baut die aktive Karte sofort zurück (!clear, ❌). Für Songs erledigt
-        das sonst das Queue-Ende; ein Radiosender endet nach !clear aber ohne
-        Queue-Ende-Pfad. Die Referenzen werden vor dem await gekappt – kommt
-        das Queue-Ende danach noch, findet es keine Karte mehr."""
+        """Baut die aktive Karte sofort zurück (!clear, ❌) – anders als beim
+        natürlichen Queue-Ende, nach dem sie stehen bleibt. Gilt auch für einen
+        Radiosender. Die Referenzen werden vor dem await gekappt – kommt das
+        Queue-Ende danach noch, findet es keine Karte mehr."""
         msg, title = self.now_playing_msg, self._np_title
         self.now_playing_msg = None
         self.now_playing_view = None
         self._np_title = None
         await self._retire_np_message(msg, title)
+
+    async def _finalize_progress_bar(self):
+        """Setzt Balken + Dauer der aktuellen Nachricht ans Ende (100 %).
+
+        Wird beim natürlichen Songende aufgerufen, damit die stehenbleibende
+        Karte nicht bei z. B. '3:43 / 3:45' einfriert, sondern auf '🔘 ganz
+        rechts, 3:45 / 3:45' springt.
+        """
+        msg, view = self.now_playing_msg, self.now_playing_view
+        if not (msg and view and self.current_track):
+            return
+        duration = self.current_track[2]
+        bar = self._progress_bar(duration, duration)   # elapsed == total → 🔘 ganz rechts
+        if not bar or bar == self._np_last_desc:
+            return
+        view.set_body(bar)
+        try:
+            await msg.edit(view=view)
+            self._np_last_desc = bar
+        except Exception:
+            pass
 
     @tasks.loop(seconds=5)   # 5-s-Takt gegen 429-Rate-Limits; 21 Balken-Schritte bleiben
     async def _progress_loop(self):

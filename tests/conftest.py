@@ -205,6 +205,7 @@ def build_cog(dl=None):
     mc._skip_resolving = False
     mc._track_generation = 0
     mc._ended_np = None
+    mc._skipped_np_msg = None
     mc._stream_retry_url = None
     mc._force_download_url = None
     mc._progressive_resume_url = None

@@ -146,6 +146,9 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, FavoritesMixi
         # den _progress_loop werden im Cleanup gekappt, aber die Buttons der Nachricht
         # sollen erst beim nächsten Track entfernt werden (Resume/Autoplay bleiben nutzbar).
         self._ended_np = None
+        # Karte des zuletzt übersprungenen Songs (!s, ⏭): beim Wechsel löscht
+        # _retire_np_message sie, statt sie zur Textzeile zurückzubauen.
+        self._skipped_np_msg = None
         # URL, für die gerade ein Stream-Retry läuft (Sofort-Tod + Input-Fehler →
         # genau EIN Neuversuch mit frischer URL). Verhindert Retry-Schleifen und
         # doppelte Play-Counts; wird bei normalem Track-Ende wieder gelöscht.
@@ -587,6 +590,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, FavoritesMixi
                 await self.play_next(ctx)
             return
         if ctx.voice_client and ctx.voice_client.is_playing():
+            self._skipped_np_msg = self.now_playing_msg   # Karte verschwindet beim Wechsel
             self._stop_for_advance(ctx.voice_client)
             await ctx.send(t("status.skipped"), delete_after=20)
         else:

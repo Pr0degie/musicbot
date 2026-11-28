@@ -90,9 +90,9 @@ def test_both_pending_cards_are_retired(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
-def test_card_is_retired_at_queue_end(monkeypatch, tmp_path):
-    """Kompletter Weg: Song endet → Queue leer → Karte sofort Textzeile; der
-    nächste Song bekommt eine neue Karte und lässt die alte Zeile in Ruhe."""
+def test_card_stays_at_queue_end_and_is_retired_by_next_song(monkeypatch, tmp_path):
+    """Kompletter Weg: Song endet → Queue leer → Karte bleibt stehen
+    (_ended_np); der nächste Song baut sie zur Textzeile zurück."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
 
@@ -106,19 +106,90 @@ def test_card_is_retired_at_queue_end(monkeypatch, tmp_path):
         mc.queue.append((URL, "Testsong"))
         await mc.play_next(ctx)
         erste_karte = mc.now_playing_msg
+        karten_view = mc.now_playing_view
 
         vc.end_track()                       # Track endet, Queue ist leer
         for _ in range(20):
             await asyncio.sleep(0)
-        assert_is_text_line(erste_karte, "Testsong")
-        assert mc._ended_np is None and mc.now_playing_msg is None
-        edits_at_end = len(erste_karte.edits)
+        letzte = edits_of(erste_karte)    # höchstens der Balken auf 100 %, kein Rückbau
+        assert letzte is None or letzte["view"] is karten_view, "Karte bleibt stehen"
+        assert not erste_karte.deleted
+        assert mc._ended_np is not None and mc._ended_np[0] is erste_karte
+        assert mc.now_playing_msg is None
 
         mc.queue.append((URL, "Zweiter Song"))
         mc.is_playing = True
         await mc.play_next(ctx)
 
-        assert len(erste_karte.edits) == edits_at_end, "alte Zeile nicht erneut editieren"
+        assert_is_text_line(erste_karte, "Testsong")
+        assert mc._ended_np is None
+        assert mc.now_playing_msg is ctx.messages[-1]
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_skipped_card_is_deleted_on_next_song(monkeypatch, tmp_path):
+    """!s/⏭ markiert die aktuelle Karte; der nächste Song löscht sie, statt
+    eine Textzeile zu hinterlassen."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+
+    async def run():
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        ctx = FakeCtx(FakeVoiceClient())
+        mc = make_cog(dl)
+
+        alte_karte = await ctx.send(embed=object())
+        mc.now_playing_msg = alte_karte
+        mc.now_playing_view = object()
+        mc._np_title = "Song 1"
+        mc.current_track = ("https://x/1", "Song 1", 100)
+        mc._skipped_np_msg = alte_karte          # wie von !s/⏭ gesetzt
+
+        mc.queue.append((URL, "Testsong"))
+        await mc.play_next(ctx)
+
+        assert alte_karte.deleted
+        assert not alte_karte.edits
+        assert mc._skipped_np_msg is None
+        assert mc.now_playing_msg is ctx.messages[-1]
+
+        _cleanup(mc)
+
+    asyncio.run(run())
+
+
+def test_skipping_last_song_keeps_card_until_next_song(monkeypatch, tmp_path):
+    """Skip des letzten Songs → Queue leer → Karte bleibt stehen; erst der
+    nächste Song löscht die übersprungene Karte."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(discord, "FFmpegOpusAudio", make_fake_source())
+
+    async def run():
+        dl = FakeDownloader((STREAM_INFO, "https://cdn.example/stream", "Testsong", 200))
+        vc = FakeVoiceClient()
+        ctx = FakeCtx(vc)
+        mc = make_cog(dl)
+        mc.autoplay_enabled = False
+
+        mc.queue.append((URL, "Testsong"))
+        await mc.play_next(ctx)
+        karte = mc.now_playing_msg
+
+        mc._skipped_np_msg = karte               # !s auf den letzten Song
+        vc.end_track()
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert not karte.deleted, "Queue leer → Karte bleibt"
+        assert mc._ended_np[0] is karte
+
+        mc.queue.append((URL, "Zweiter Song"))
+        mc.is_playing = True
+        await mc.play_next(ctx)
+
+        assert karte.deleted
         assert mc.now_playing_msg is ctx.messages[-1]
 
         _cleanup(mc)

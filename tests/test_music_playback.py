@@ -178,6 +178,7 @@ def make_cog(dl):
     mc._skip_resolving = False
     mc._track_generation = 0
     mc._ended_np = None
+    mc._skipped_np_msg = None
     mc._stream_retry_url = None
     mc._force_download_url = None
     mc._progressive_resume_url = None
@@ -631,11 +632,13 @@ def test_skip_on_growing_file_does_not_resume(monkeypatch, tmp_path):
 
         await mc.play_next(ctx)
         mc.track_start_time = time.monotonic() - 30   # Track lief 30 s
+        skipped_card = mc.now_playing_msg
 
         # User skippt: Kommando stoppt via _stop_for_advance, dann feuert
         # der after_playing-Callback (im echten Betrieb durch vc.stop()).
         await MC.skip.callback(mc, ctx)
         assert mc._suppress_resume is True
+        assert mc._skipped_np_msg is skipped_card
         vc.end_track()
         for _ in range(200):
             await asyncio.sleep(0.01)
@@ -649,6 +652,8 @@ def test_skip_on_growing_file_does_not_resume(monkeypatch, tmp_path):
         assert mc._progressive_resume_url is None
         assert mc._suppress_resume is False, "One-Shot-Flag muss konsumiert sein"
         assert dl.blocked == []
+        assert skipped_card.deleted, "Karte des übersprungenen Songs wird gelöscht"
+        assert not skipped_card.edits, "keine Textzeile für den übersprungenen Song"
 
         prog_task.cancel()
         _cleanup(mc)

@@ -111,14 +111,14 @@ def test_disable_np_edits_ignores_foreign_message():
 
 
 # ---------------------------------------------------------------------------
-# Queue-Ende: Karte wird sofort mit ihrem eigenen Titel zurückgebaut
+# Queue-Ende: Karte bleibt stehen und wandert mit ihrem Titel nach _ended_np
 # ---------------------------------------------------------------------------
 
-def test_queue_empty_retires_card_immediately_with_its_own_title():
-    """Nach dem Queue-Ende läuft nichts mehr – die Karte wird sofort zur
-    Textzeile, nicht erst beim nächsten Song. Der Titel kommt aus _np_title,
-    nicht aus last_played – sonst stünde nach einem Cleanup ohne last_played
-    kein Text zur Verfügung."""
+def test_queue_empty_keeps_card_and_hands_it_over_with_its_own_title():
+    """Nach dem Queue-Ende bleibt die Karte samt Buttons stehen (Nutzerwunsch
+    28.11.2026); erst der nächste Song baut sie zurück. Der Titel kommt aus
+    _np_title, nicht aus last_played – sonst stünde nach einem Cleanup ohne
+    last_played kein Text zur Verfügung."""
     async def run():
         mc = build_cog()
         msg = FakeMessage()
@@ -131,8 +131,60 @@ def test_queue_empty_retires_card_immediately_with_its_own_title():
 
         await mc._handle_queue_empty(FakeCtx())
 
-        assert_reduced_to_text(msg, "Letzter Song")
-        assert mc._ended_np is None
+        assert not msg.edits and not msg.deleted, "Karte bleibt nach dem Queue-Ende stehen"
+        assert mc._ended_np == (msg, "Letzter Song")
         assert mc.now_playing_msg is None and mc._np_title is None
+
+    asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# Übersprungener Song: Karte wird gelöscht statt zurückgebaut
+# ---------------------------------------------------------------------------
+
+def test_skipped_card_is_deleted_not_retired():
+    async def run():
+        mc = build_cog()
+        msg = FakeMessage()
+        mc._skipped_np_msg = msg
+
+        await mc._retire_np_message(msg, "Übersprungen")
+
+        assert msg.deleted
+        assert not msg.edits
+        assert mc._skipped_np_msg is None
+
+    asyncio.run(run())
+
+
+def test_other_cards_are_not_deleted_while_a_skip_is_pending():
+    async def run():
+        mc = build_cog()
+        skipped, other = FakeMessage(), FakeMessage()
+        mc._skipped_np_msg = skipped
+
+        await mc._retire_np_message(other, "Anderer Song")
+
+        assert not other.deleted
+        assert_reduced_to_text(other, "Anderer Song")
+        assert mc._skipped_np_msg is skipped
+
+    asyncio.run(run())
+
+
+def test_skipped_card_falls_back_to_text_line_if_delete_fails():
+    """Ohne Löschrecht darf die Karte nicht samt Buttons stehen bleiben."""
+    class Undeletable(FakeMessage):
+        async def delete(self):
+            raise RuntimeError("403 Missing Permissions")
+
+    async def run():
+        mc = build_cog()
+        msg = Undeletable()
+        mc._skipped_np_msg = msg
+
+        await mc._retire_np_message(msg, "Übersprungen")
+
+        assert_reduced_to_text(msg, "Übersprungen")
 
     asyncio.run(run())

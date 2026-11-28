@@ -26,7 +26,8 @@ Setup → `README.md`/`install.bat`, Cookies → `SETUP.md` (je `*_DE.md`). Test
 - Track-Ende (`_on_track_end`): Marker-Reset **nach** dem Progressive-Resume-Schritt → [playback.md](docs/architecture/playback.md).
 - Track-Zustand komplett vor `vc.play()`, nach jedem Post-Play-await `_track_generation` prüfen → [ADR 0007](docs/adr/0007-track-zustand-vor-play-generationszaehler.md).
 - Wachsende Dateien transkodieren, nie `codec=copy` → [ADR 0001](docs/adr/0001-progressiver-download-statt-cdn-stream.md).
-- Now-Playing-Karte nur beim aktuellen Song; Altes via `_retire_np_message` zur Textzeile, nie leer editieren. Karte ist
+- Now-Playing-Karte nur beim aktuellen Song; Altes via `_retire_np_message` zur Textzeile (übersprungene Karte
+  `_skipped_np_msg` wird dort gelöscht), nie leer editieren. Karte ist
   Components V2: nie `content=`/`embed=`/`view=None`, Rückbau nur über `retired_card()`; Karte nur editieren, solange sie
   die aktive ist (`_push_state`) → [ADR 0012](docs/adr/0012-now-playing-karte-components-v2.md), [playback.md](docs/architecture/playback.md).
 - `StaleControlsFallback`: Abgrenzung nur über den Template-Regex (BOOT_ID-Lookahead) → [ADR 0006](docs/adr/0006-stale-buttons-dynamicitem.md).
