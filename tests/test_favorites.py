@@ -50,7 +50,7 @@ def test_star_sits_right_below_link_with_uploader_line():
             "Uploader-Zeile wandert aus den Details heraus"
         assert parts[3]["components"] == [{"type": 10, "content": "-# Uploader"}]
         star = parts[3]["accessory"]
-        assert star["emoji"]["name"] == "⭐" and star["style"] == 2 and "label" not in star
+        assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star,             "kein Favorit → leerer Stern"
     asyncio.run(run())
 
 
@@ -85,24 +85,36 @@ def test_radio_card_has_no_star():
 # Klick und Zustand
 # ---------------------------------------------------------------------------
 
+def assert_empty_star(button):
+    """Kein Favorit: leerer Umriss-Stern ☆ als Beschriftung, grau, kein Emoji."""
+    assert button.label == "☆" and button.emoji is None
+    assert button.style == discord.ButtonStyle.secondary
+
+
+def assert_filled_star(button):
+    """Favorit: gelber ⭐-Emoji ohne Beschriftung, grün."""
+    assert button.label is None and str(button.emoji) == "⭐"
+    assert button.style == discord.ButtonStyle.success, "grün = Favorit"
+
+
 def test_star_click_toggles_shared_list_and_turns_green(monkeypatch):
     _no_disk(monkeypatch)
 
     async def run():
         cog = build_cog()
         view = _card(cog)
-        assert view.fav.style == discord.ButtonStyle.secondary
+        assert_empty_star(view.fav)
 
         await view.fav.callback(FakeInteraction())
         await asyncio.sleep(0)
         assert cog._fav_list() == [(YT, "Song")]
-        assert view.fav.style == discord.ButtonStyle.success, "grün = Favorit"
+        assert_filled_star(view.fav)
         assert cog.saved == [[YT, "Song"]]
 
         await view.fav.callback(FakeInteraction())
         await asyncio.sleep(0)
         assert cog._fav_list() == []
-        assert view.fav.style == discord.ButtonStyle.secondary
+        assert_empty_star(view.fav)
     asyncio.run(run())
 
 
@@ -110,7 +122,7 @@ def test_card_of_existing_favorite_starts_green():
     async def run():
         cog = build_cog()
         cog._favorites = [(YT, "Song")]
-        assert _card(cog).fav.style == discord.ButtonStyle.success
+        assert_filled_star(_card(cog).fav)
     asyncio.run(run())
 
 

@@ -20,6 +20,7 @@ _CUSTOM_ID_PREFIX = "musicctl"
 # in alten Karten den Titel für den Rückbau.
 NP_HEADING_ID = 1
 _KEEP = object()   # Sentinel: „Als Nächstes" unverändert lassen
+_FAV_OFF = "☆"     # leerer Stern: Song ist (noch) kein Favorit
 
 _YT_THUMB = re.compile(r"^https?://i\d?\.ytimg\.com/vi(?:_webp)?/([A-Za-z0-9_-]{11})/")
 _YT_URL = re.compile(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})")
@@ -90,7 +91,8 @@ class MusicControlView(LayoutView):
     aber ein Kopier-Symbol.
 
     ⭐ nimmt den Song in die gemeinsame Favoritenliste auf oder entfernt ihn
-    (FavoritesMixin); grün = Favorit, stumm wie Autoplay/Loop.
+    (FavoritesMixin); leerer Stern ☆ auf Grau = kein Favorit, gelber ⭐ auf Grün
+    = Favorit, stumm wie Autoplay/Loop.
 
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
@@ -131,10 +133,11 @@ class MusicControlView(LayoutView):
         # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
         self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
         self.link = make("link", self._on_link, emoji="🔗", style=S.secondary) if self._link else None
-        # ⭐ nur für Songs mit abspielbarer URL (nicht für Radio-Karten).
+        # ⭐ nur für Songs mit abspielbarer URL (nicht für Radio-Karten). Startet
+        # als leerer Stern ☆; Stern und Farbe setzt sync_state().
         song_url = song[0] if song else None
         can_fav = isinstance(song_url, str) and song_url.startswith(("http://", "https://"))
-        self.fav = make("fav", self._on_fav, emoji="⭐", style=S.secondary) if can_fav else None
+        self.fav = make("fav", self._on_fav, label=_FAV_OFF, style=S.secondary) if can_fav else None
 
         self._heading = TextDisplay(heading, id=NP_HEADING_ID)
         self._body = TextDisplay(body) if body else None
@@ -228,9 +231,14 @@ class MusicControlView(LayoutView):
                 button.label, button.style = label, style
                 changed = True
         if self.fav is not None:
-            style = S.success if cog._is_favorite(self.song[0]) is True else S.secondary
-            if self.fav.style != style:
-                self.fav.style = style
+            # Gespeichert: gelber ⭐ auf Grün. Sonst: leerer Umriss-Stern ☆ auf
+            # Grau – ☆ ist kein Emoji, deshalb als Beschriftung statt emoji=.
+            if cog._is_favorite(self.song[0]) is True:
+                label, emoji, style = None, "⭐", S.success
+            else:
+                label, emoji, style = _FAV_OFF, None, S.secondary
+            if self.fav.label != label or self.fav.style != style:
+                self.fav.label, self.fav.emoji, self.fav.style = label, emoji, style
                 changed = True
         if up_next is not _KEEP:
             self._up_next = up_next
