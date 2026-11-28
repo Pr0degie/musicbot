@@ -8,7 +8,7 @@ Built with [discord.py](https://discordpy.readthedocs.io/en/stable/) and [yt_dlp
 ## Features
 
 - Play YouTube links, playlists and search terms
-- Control buttons directly in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ 🔗 (song link to copy) ⭐ (shared favorites); ⏮️ goes back several songs
+- Control buttons directly in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ ⭐ (shared favorites); ⏮️ goes back several songs
 - Autoplay: finds the next song automatically when queue runs out
 - Equalizer presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audio format: `webm` (default, lossless) or `mp3`

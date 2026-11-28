@@ -511,7 +511,6 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
         """Now-Playing-Karte (Components V2) eines frisch gestarteten Tracks
         (synchron, ohne Nebenwirkung)."""
         duration_str = f"{duration // 60}:{duration % 60:02d}" if duration else t("misc.unknown")
-        page = info.get("webpage_url")
         details = (
             f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
             f" · **{t('embed.format')}** {self.audio_format}"
@@ -523,7 +522,6 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             details=details,
             up_next=self._up_next_title(),
             thumbnail=info.get("thumbnail"),
-            link=page or url,   # 🔗-Button: derselbe Link wie am Kartentitel
         )
 
     def _schedule_background_work(self, ctx):

@@ -67,9 +67,10 @@ class MusicControlView(LayoutView):
     Aufbau (ein Container in Akzentfarbe):
       Section  [Titel, Fortschrittsbalken]        → Accessory: grauer Button mit rotem ❌ (= !clear)
       MediaGallery [Video-Thumbnail 320×180]      (nur YouTube, siehe compact_card_image)
-      TextDisplay [Details, Als Nächstes]
-        – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
-      ActionRow [🔗, ⭐]                           (Link zum Kopieren, Favorit; fehlt auf der Radio-Karte)
+      Section  [Details, Als Nächstes]            → Accessory: ⭐ (Favorit, rechts neben der Dauer-Zeile)
+        – ohne YouTube-Bild belegt das kleine Thumbnail den Accessory-Platz,
+          der ⭐ steht dann allein in einer Reihe über den Steuer-Buttons
+        – Radio-Karte: ohne ⭐, die Details als reiner Text
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
 
     Discord erlaubt in Embeds keine Buttons – nur das V2-Layout kann den ❌
@@ -83,10 +84,6 @@ class MusicControlView(LayoutView):
     dann mit. Weil der Zustand an den Buttons ablesbar ist, quittieren
     Pause/Fortsetzen/Autoplay/Loop stumm (keine ephemere Bestätigung).
 
-    🔗 legt dem Klickenden den Song-Link ephemer als Codeblock hin: in die
-    Zwischenablage schreiben kann ein Bot nicht, der Codeblock hat am Desktop
-    aber ein Kopier-Symbol.
-
     ⭐ nimmt den Song in die gemeinsame Favoritenliste auf oder entfernt ihn
     (FavoritesMixin); leerer Stern ☆ = kein Favorit, gelber ⭐ = Favorit (Button
     immer grau), stumm wie Autoplay/Loop.
@@ -96,13 +93,11 @@ class MusicControlView(LayoutView):
     """
 
     def __init__(self, music_cog, ctx, song=None, *, heading="🎵", body=None,
-                 details=None, up_next=None, thumbnail=None, accent=0x1db954, link=None):
+                 details=None, up_next=None, thumbnail=None, accent=0x1db954):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
         self.song = song  # (url, title) des Songs zu dem diese View gehört
-        # Link für den 🔗-Button; ohne brauchbare URL gibt es den Button nicht.
-        self._link = link if isinstance(link, str) and link.startswith(("http://", "https://")) else None
         # custom_ids: eindeutig pro Nachricht (nonce) und pro Bot-Lauf (BOOT_ID).
         nonce = uuid.uuid4().hex[:8]
 
@@ -129,7 +124,6 @@ class MusicControlView(LayoutView):
         self.loop_toggle = make("loop", self._on_loop, label=t("button.loop"), style=S.secondary)
         # Grau mit rotem ❌: eine rot gefüllte Fläche neben dem Titel wirkt zu wuchtig.
         self.clear = make("clear", self._on_clear, emoji="❌", style=S.secondary)
-        self.link = make("link", self._on_link, emoji="🔗", style=S.secondary) if self._link else None
         # ⭐ nur für Songs mit abspielbarer URL (nicht für Radio-Karten). Startet
         # als leerer Stern ☆; Stern und Farbe setzt sync_state().
         song_url = song[0] if song else None
@@ -149,6 +143,7 @@ class MusicControlView(LayoutView):
         image = compact_card_image(thumbnail, song[0] if song else None)
         if image:
             container.add_item(MediaGallery(discord.MediaGalleryItem(image)))
+        fav_placed = False
         # Nur http(s): ein Embed ignoriert eine unbrauchbare Thumbnail-URL still,
         # das V2-Layout lehnt die ganze Nachricht ab (400) – dann lieber ohne Bild.
         thumb_accessory = bool(
@@ -158,13 +153,17 @@ class MusicControlView(LayoutView):
             self._details = TextDisplay(self._details_text())
             if thumb_accessory:
                 container.add_item(Section(self._details, accessory=Thumbnail(thumbnail)))
+            elif self.fav:
+                # ⭐ rechts neben der Dauer-Zeile (User 28.11.2026) – wie das ❌ am
+                # Titel, die Karte wird dadurch nicht höher.
+                container.add_item(Section(self._details, accessory=self.fav))
+                fav_placed = True
             else:
                 container.add_item(self._details)
-        # 🔗 und ⭐ nebeneinander über der Steuerreihe (User 28.11.2026) – die
-        # Steuerreihe ist mit fünf Buttons voll, mehr erlaubt Discord nicht.
-        extras = [b for b in (self.link, self.fav) if b is not None]
-        if extras:
-            container.add_item(ActionRow(*extras))
+        if self.fav and not fav_placed:
+            # Accessory-Platz belegt (kleines Vorschaubild) oder keine Details:
+            # eigene Reihe, die Steuerreihe ist mit fünf Buttons voll.
+            container.add_item(ActionRow(self.fav))
         container.add_item(ActionRow(
             self.back, self.pause, self.skip, self.autoplay_toggle, self.loop_toggle,
         ))
@@ -360,12 +359,6 @@ class MusicControlView(LayoutView):
         """Schaltet den Loop-Modus für den aktuellen Song um: aus ↔ Song."""
         self.music_cog.loop_mode = "song" if self.music_cog.loop_mode != "song" else None
         await self._push_state(interaction)   # stumm: der Button wird grün bzw. grau
-
-    async def _on_link(self, interaction: discord.Interaction):
-        """🔗: Song-Link nur für den Klickenden, als Codeblock zum Kopieren."""
-        # Backticks kodiert: ein Link kann den Codeblock so nicht vorzeitig beenden.
-        link = self._link.replace("`", "%60")
-        await interaction.response.send_message(f"```\n{link}\n```", ephemeral=True)
 
     async def _on_fav(self, interaction: discord.Interaction):
         """⭐: Song in die gemeinsame Favoritenliste aufnehmen oder entfernen."""

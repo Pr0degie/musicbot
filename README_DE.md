@@ -8,7 +8,7 @@ Geschrieben mit [discord.py](https://discordpy.readthedocs.io/en/stable/) und [y
 ## Features
 
 - YouTube-Links, Playlists und Suchbegriffe abspielen
-- Steuerbuttons direkt in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ 🔗 (Song-Link zum Kopieren) ⭐ (gemeinsame Favoriten); ⏮️ geht mehrere Songs zurück
+- Steuerbuttons direkt in Discord: ⏮️ ⏸️/▶️ ⏭️ 🔁 🔂 ❌ ⭐ (gemeinsame Favoriten); ⏮️ geht mehrere Songs zurück
 - Autoplay: sucht automatisch den nächsten Song wenn die Queue leer läuft
 - Equalizer-Presets: `bassboost`, `flat`, `vocalboost`, `superbass`, `punchy`, `nightcore`, `karaoke`, `8d`
 - Audioformat: `webm` (Standard, verlustfrei) oder `mp3`

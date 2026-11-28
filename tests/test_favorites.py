@@ -1,7 +1,8 @@
 """Favoriten: eine gemeinsame Liste des Servers (⭐ auf der Karte, !fav, !favs).
 
-Der ⭐ steht neben dem 🔗 in einer eigenen Reihe über den Steuer-Buttons
-(Nutzerwunsch 28.11.2026).
+Der ⭐ sitzt rechts neben der Dauer-Zeile (Nutzerwunsch 28.11.2026, den 🔗-Button
+gibt es seitdem nicht mehr). Belegt das kleine Vorschaubild den Platz, steht er
+in einer eigenen Reihe über den Steuer-Buttons.
 """
 
 import asyncio
@@ -23,7 +24,7 @@ YT_THUMB = "https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp"
 
 def _card(cog, **kwargs):
     defaults = dict(song=(YT, "Song"), heading="### 🎵 Song", details="**Dauer** 3:30",
-                    thumbnail=YT_THUMB, link=YT)
+                    thumbnail=YT_THUMB)
     defaults.update(kwargs)
     return MusicControlView(cog, FakeCtx(FakeVoiceClient()), **defaults)
 
@@ -39,35 +40,69 @@ def _no_disk(monkeypatch):
 # Layout
 # ---------------------------------------------------------------------------
 
-def test_star_sits_next_to_link_above_the_controls():
+def _ids(row):
+    return [b["custom_id"].rsplit(":", 1)[1] for b in row["components"]]
+
+
+def test_star_sits_right_of_the_duration_line():
     async def run():
-        cog = build_cog()
-        parts = _card(cog).to_components()[0]["components"]
-        assert [p["type"] for p in parts] == [9, 12, 10, 1, 1]
-        assert parts[2]["content"] == "**Dauer** 3:30", "keine Uploader-Zeile"
-        link, star = parts[3]["components"]
-        assert link["emoji"]["name"] == "🔗"
+        parts = _card(build_cog()).to_components()[0]["components"]
+        assert [p["type"] for p in parts] == [9, 12, 9, 1], "Titel, Galerie, Details+⭐, Steuerreihe"
+        assert parts[2]["components"] == [{"type": 10, "content": "**Dauer** 3:30"}], "keine Uploader-Zeile"
+        star = parts[2]["accessory"]
+        assert star["custom_id"].endswith(":fav")
         assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star,             "kein Favorit → leerer Stern"
-        assert parts[4]["components"][0]["custom_id"].endswith(":back"), "Steuerreihe darunter"
+        assert _ids(parts[3]) == ["back", "pause", "skip", "autoplay", "loop"]
+        assert "link" not in str(parts), "kein 🔗-Button mehr"
     asyncio.run(run())
 
 
-def test_star_next_to_link_also_with_small_thumbnail():
+def test_up_next_line_keeps_updating_next_to_the_star():
+    cog = build_cog()
+    view = _card(cog)
+    assert view.sync_state(up_next="Nächster") is True
+    details = view.to_components()[0]["components"][2]
+    assert details["components"][0]["content"].splitlines() == [
+        "**Dauer** 3:30", f"**{t('embed.up_next')}** Nächster",
+    ]
+    assert details["accessory"]["custom_id"].endswith(":fav")
+
+
+def test_star_gets_own_row_when_small_thumbnail_takes_the_spot():
     async def run():
         sc = "https://soundcloud.com/a/b"
-        view = _card(build_cog(), song=(sc, "T"), thumbnail="https://i1.sndcdn.com/x.jpg", link=sc)
+        view = _card(build_cog(), song=(sc, "T"), thumbnail="https://i1.sndcdn.com/x.jpg")
         parts = view.to_components()[0]["components"]
         assert [p["type"] for p in parts] == [9, 9, 1, 1]
-        ids = [[b["custom_id"].rsplit(":", 1)[1] for b in p["components"]] for p in parts[2:]]
-        assert ids[0] == ["link", "fav"]
-        assert parts[1]["components"][0]["content"] == "**Dauer** 3:30", "keine Uploader-Zeile"
+        assert parts[1]["accessory"]["type"] == 11, "Vorschaubild bleibt neben den Details"
+        assert _ids(parts[2]) == ["fav"] and _ids(parts[3])[0] == "back"
     asyncio.run(run())
+
+
+def test_real_card_from_build_np_view():
+    """Echte Karte: Titel bleibt ein Link, ⭐ neben den Details, kein 🔗."""
+    page = "https://www.youtube.com/watch?v=YqJ-XdoZV00"
+
+    async def run():
+        mc = build_cog(types.SimpleNamespace())
+        mc._up_next_title = lambda: None
+        info = {"webpage_url": page, "uploader": "Magic Boleros",
+                "thumbnail": "https://i.ytimg.com/vi/YqJ-XdoZV00/hqdefault.jpg"}
+        return mc._build_np_view(FakeCtx(FakeVoiceClient()), info, "https://youtu.be/YqJ-XdoZV00",
+                                 "Magic Boleros - Bésame Mucho 🔥 | [Official Video]", 699)
+
+    parts = asyncio.run(run()).to_components()[0]["components"]
+    assert [p["type"] for p in parts] == [9, 12, 9, 1]
+    assert f"(<{page}>)" in parts[0]["components"][0]["content"], "Titel bleibt ein Link"
+    assert parts[2]["accessory"]["custom_id"].endswith(":fav")
 
 
 def test_radio_card_has_no_star():
     async def run():
         view = MusicControlView(build_cog(), FakeCtx(), heading="### 📻 Sender", details="d")
         assert view.fav is None
+        parts = view.to_components()[0]["components"]
+        assert [p["type"] for p in parts] == [9, 10, 1], "Details als reiner Text, keine Extra-Reihe"
     asyncio.run(run())
 
 

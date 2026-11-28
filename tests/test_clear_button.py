@@ -250,9 +250,9 @@ def test_youtube_thumbnail_becomes_compact_gallery_image_below_progress_bar():
         thumbnail="https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp",
     )
     parts = view.to_components()[0]["components"]
-    assert [p["type"] for p in parts] == [9, 12, 10, 1, 1], "Titel-Section, Galerie, Details, Buttons, ⭐"
+    assert [p["type"] for p in parts] == [9, 12, 9, 1], "Titel-Section, Galerie, Details+⭐, Buttons"
     assert parts[1]["items"][0]["media"]["url"] == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
-    assert parts[2] == {"type": 10, "content": "d"}
+    assert parts[2]["components"] == [{"type": 10, "content": "d"}]
 
 
 def test_non_youtube_thumbnail_stays_small_accessory():
