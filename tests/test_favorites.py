@@ -92,9 +92,9 @@ def assert_empty_star(button):
 
 
 def assert_filled_star(button):
-    """Favorit: gelber ⭐-Emoji ohne Beschriftung, grün."""
+    """Favorit: gelber ⭐-Emoji ohne Beschriftung, Button bleibt grau."""
     assert button.label is None and str(button.emoji) == "⭐"
-    assert button.style == discord.ButtonStyle.success, "grün = Favorit"
+    assert button.style == discord.ButtonStyle.secondary, "kein Grün – der Stern zeigt den Zustand"
 
 
 def test_star_click_toggles_shared_list_and_turns_green(monkeypatch):

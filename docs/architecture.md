@@ -133,7 +133,7 @@ Antworttexte kommen über `utils/i18n.t()` aus `locales/de.json`/`locales/en.jso
   jedes Strg+C abfangen und `Terminate batch job (Y/N)?` fragen.
 - **`views/music_controls.py`** — `MusicControlView`: die Now-Playing-Karte als Components-V2-Layout
   ([ADR 0012](adr/0012-now-playing-karte-components-v2.md)) mit ❌ oben rechts (= `!clear`) und der Zeile
-  Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop, 🔗 neben den Details (Song-Link zum Kopieren), ⭐ direkt darunter (Favorit: ☆ grau = nicht drin, ⭐ grün = drin); Buttons spiegeln den Zustand
+  Zurück / Pause-Fortsetzen (ein Umschalt-Button) / Skip / Autoplay / Loop, 🔗 neben den Details (Song-Link zum Kopieren), ⭐ direkt darunter (Favorit: ☆ = nicht drin, ⭐ = drin, Button immer grau); Buttons spiegeln den Zustand
   (`sync_state()`), jeder prüft `REQUIRE_SAME_VOICE`. `np_heading(title, info)` baut die Titelzeile
   (Künstler/Titel gedreht, Uploader, Link ohne Emojis). `UndoClearView`: Rückgängig-Button unter der
   Geleert-Meldung (30 s). Only current song

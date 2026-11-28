@@ -91,8 +91,8 @@ class MusicControlView(LayoutView):
     aber ein Kopier-Symbol.
 
     ⭐ nimmt den Song in die gemeinsame Favoritenliste auf oder entfernt ihn
-    (FavoritesMixin); leerer Stern ☆ auf Grau = kein Favorit, gelber ⭐ auf Grün
-    = Favorit, stumm wie Autoplay/Loop.
+    (FavoritesMixin); leerer Stern ☆ = kein Favorit, gelber ⭐ = Favorit (Button
+    immer grau), stumm wie Autoplay/Loop.
 
     timeout=None bedeutet, dass die Buttons nie ablaufen. Klicks auf
     Nachrichten aus einem früheren Lauf beantwortet StaleControlsFallback.
@@ -231,14 +231,15 @@ class MusicControlView(LayoutView):
                 button.label, button.style = label, style
                 changed = True
         if self.fav is not None:
-            # Gespeichert: gelber ⭐ auf Grün. Sonst: leerer Umriss-Stern ☆ auf
-            # Grau – ☆ ist kein Emoji, deshalb als Beschriftung statt emoji=.
+            # Gespeichert: gelber ⭐, sonst leerer Umriss-Stern ☆ – beides auf
+            # Grau, der Stern allein zeigt den Zustand. ☆ ist kein Emoji,
+            # deshalb als Beschriftung statt emoji=.
             if cog._is_favorite(self.song[0]) is True:
-                label, emoji, style = None, "⭐", S.success
+                label, emoji = None, "⭐"
             else:
-                label, emoji, style = _FAV_OFF, None, S.secondary
-            if self.fav.label != label or self.fav.style != style:
-                self.fav.label, self.fav.emoji, self.fav.style = label, emoji, style
+                label, emoji = _FAV_OFF, None
+            if self.fav.label != label:
+                self.fav.label, self.fav.emoji = label, emoji
                 changed = True
         if up_next is not _KEEP:
             self._up_next = up_next
@@ -387,7 +388,7 @@ class MusicControlView(LayoutView):
         """⭐: Song in die gemeinsame Favoritenliste aufnehmen oder entfernen."""
         url, title = self.song
         self.music_cog._toggle_favorite(url, title)
-        await self._push_state(interaction)   # stumm: der Stern wird grün bzw. grau
+        await self._push_state(interaction)   # stumm: ☆ wird ⭐ bzw. umgekehrt
 
     async def _on_clear(self, interaction: discord.Interaction):
         """❌ oben rechts: dasselbe wie !clear."""
