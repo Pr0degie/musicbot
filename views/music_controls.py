@@ -338,7 +338,7 @@ class MusicControlView(LayoutView):
         if self.ctx.voice_client and self.ctx.voice_client.is_playing():
             self.music_cog._skipped_np_msg = self.music_cog.now_playing_msg   # Karte verschwindet beim Wechsel
             self.music_cog._stop_for_advance(self.ctx.voice_client)
-            await interaction.response.send_message(t("status.skipped_eph"), ephemeral=True)
+            await interaction.response.defer()   # stumm: die neue Karte ist Rückmeldung genug
         else:
             await interaction.response.send_message(t("error.no_active_song"), ephemeral=True)
 

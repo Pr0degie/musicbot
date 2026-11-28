@@ -17,7 +17,7 @@ Nach jedem substanziellen Prompt/Refactoring manuell durchgehen — die Tests de
 - [ ] Auch nach Queue-Ende + neuem `!p` und nach `!radio` (Übernahme von Musik) bleibt keine alte Karte mit Buttons stehen
 - [ ] `!clear` und ❌ (auch bei Radio und bei pausiertem Song): Karte wird **sofort** zur Textzeile `🎶 Titel`
 - [ ] Queue-Ende (Autoplay aus): Karte bleibt samt Buttons stehen, Balken auf 100 %; nächster `!p` → alte Karte wird Textzeile
-- [ ] `!s` bzw. ⏭ mit weiterem Song in der Queue: Karte des übersprungenen Songs verschwindet ganz (keine Textzeile)
+- [ ] `!s` bzw. ⏭ mit weiterem Song in der Queue: Karte des übersprungenen Songs verschwindet ganz (keine Textzeile), keine „Übersprungen“-Meldung
 - [ ] ⏭ auf den letzten Song (Autoplay aus): Karte bleibt stehen, verschwindet erst beim nächsten Song
 - [ ] `!q` → paginierte Queue (Prev/Next-Buttons); Footer-Dauersumme, fehlende Dauern als `≥ Summe (n ohne Angabe)`
 - [ ] Skip-Button funktioniert; Pause/Fortsetzen ist **ein** Button, der Beschriftung und Farbe wechselt (blau ↔ grün); Pause/Fortsetzen, Autoplay und Loop schreiben **nichts** in den Chat und zeigen kein „Interaktion fehlgeschlagen"

@@ -591,8 +591,7 @@ class MusicCommands(RadioMixin, StatsMixin, QueuePersistenceMixin, FavoritesMixi
             return
         if ctx.voice_client and ctx.voice_client.is_playing():
             self._skipped_np_msg = self.now_playing_msg   # Karte verschwindet beim Wechsel
-            self._stop_for_advance(ctx.voice_client)
-            await ctx.send(t("status.skipped"), delete_after=20)
+            self._stop_for_advance(ctx.voice_client)   # stumm: die neue Karte ist Rückmeldung genug
         else:
             await ctx.send(t("error.no_song_playing"))
 
