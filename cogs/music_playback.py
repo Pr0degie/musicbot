@@ -516,13 +516,11 @@ class PlaybackMixin(TrackEndMixin, PrefetchMixin, EnqueueMixin):
             f"**{t('embed.duration')}** {duration_str} · **{t('embed.eq')}** {self.equalizer}"
             f" · **{t('embed.format')}** {self.audio_format}"
         )
-        uploader = info.get("uploader")
         return MusicControlView(
             self, ctx, song=(url, title),
             heading=np_heading(title, info),
             body=self._progress_bar(0, duration),   # Fortschrittsbalken sofort bei 0:00 anzeigen
             details=details,
-            footer=discord.utils.escape_markdown(uploader) if uploader else None,
             up_next=self._up_next_title(),
             thumbnail=info.get("thumbnail"),
             link=page or url,   # 🔗-Button: derselbe Link wie am Kartentitel

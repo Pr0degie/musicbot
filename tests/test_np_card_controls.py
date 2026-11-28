@@ -68,7 +68,7 @@ def _setup(playing=True):
     stopped = []
     cog._stop_for_advance = stopped.append
     ctx = FakeCtx(voice_client=vc)
-    view = MusicControlView(cog, ctx, heading="### 🎵 Läuft", details="**Dauer** 3:30", footer="Uploader")
+    view = MusicControlView(cog, ctx, heading="### 🎵 Läuft", details="**Dauer** 3:30")
     return view, cog, vc, stopped, ctx
 
 
@@ -194,16 +194,16 @@ def test_member_in_bot_channel_may_use_buttons(monkeypatch):
 
 def test_up_next_line_follows_queue():
     view, cog, *_ = _setup()
-    assert _details(view) == "**Dauer** 3:30\n-# Uploader"
+    assert _details(view) == "**Dauer** 3:30"
 
     cog.queue.append(("u1", "Nächster_Song"))
     assert view.sync_state(up_next=cog._up_next_title()) is True
-    assert _details(view) == f"**Dauer** 3:30\n**{t('embed.up_next')}** Nächster\\_Song\n-# Uploader"
+    assert _details(view) == f"**Dauer** 3:30\n**{t('embed.up_next')}** Nächster\\_Song"
 
     assert view.sync_state(up_next=cog._up_next_title()) is False
     cog.queue.clear()
     assert view.sync_state(up_next=cog._up_next_title()) is True
-    assert _details(view) == "**Dauer** 3:30\n-# Uploader"
+    assert _details(view) == "**Dauer** 3:30"
 
 
 # ---------------------------------------------------------------------------

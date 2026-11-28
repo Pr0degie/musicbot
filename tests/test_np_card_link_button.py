@@ -110,13 +110,12 @@ def test_details_keep_updating_inside_the_section():
     """„Als Nächstes" wandert weiter mit, auch wenn die Details jetzt in einer Section stecken."""
     cog = build_cog()
     view = MusicControlView(cog, FakeCtx(FakeVoiceClient()), heading="### 🎵 T", details="**Dauer** 3:30",
-                            footer="Uploader", link=YT)
+                            link=YT)
     assert view.sync_state(up_next="Nächster | [Song] *x*") is True
     section = view.to_components()[0]["components"][1]
     assert section["components"][0]["content"].split("\n") == [
         "**Dauer** 3:30",
         f"**{t('embed.up_next')}** Nächster \\| [Song] \\*x\\*",
-        "-# Uploader",
     ]
     assert section["accessory"]["custom_id"].endswith(":link")
     assert view.sync_state() is False

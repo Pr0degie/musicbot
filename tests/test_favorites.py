@@ -1,7 +1,7 @@
 """Favoriten: eine gemeinsame Liste des Servers (⭐ auf der Karte, !fav, !favs).
 
-Der ⭐ sitzt direkt unter dem 🔗 (Nutzerwunsch): eine eigene Section, deren
-Text die Uploader-Zeile ist. Ohne Platz neben den Details (kleines
+Der ⭐ sitzt direkt unter dem 🔗 (Nutzerwunsch): eine eigene Section mit
+unsichtbarem Text (die Uploader-Zeile ist seit 28.11.2026 weg). Ohne Platz neben den Details (kleines
 Vorschaubild) bekommt er eine eigene Zeile unter der 🔗-Zeile.
 """
 
@@ -24,7 +24,7 @@ YT_THUMB = "https://i.ytimg.com/vi_webp/abcdefghijk/maxresdefault.webp"
 
 def _card(cog, **kwargs):
     defaults = dict(song=(YT, "Song"), heading="### 🎵 Song", details="**Dauer** 3:30",
-                    footer="Uploader", thumbnail=YT_THUMB, link=YT)
+                    thumbnail=YT_THUMB, link=YT)
     defaults.update(kwargs)
     return MusicControlView(cog, FakeCtx(FakeVoiceClient()), **defaults)
 
@@ -40,24 +40,19 @@ def _no_disk(monkeypatch):
 # Layout
 # ---------------------------------------------------------------------------
 
-def test_star_sits_right_below_link_with_uploader_line():
+def test_star_sits_right_below_link_without_visible_text():
     async def run():
         cog = build_cog()
         parts = _card(cog).to_components()[0]["components"]
         assert [p["type"] for p in parts] == [9, 12, 9, 9, 1]
         assert parts[2]["accessory"]["emoji"]["name"] == "🔗", "🔗 bleibt, wo er war"
         assert parts[2]["components"] == [{"type": 10, "content": "**Dauer** 3:30"}], \
-            "Uploader-Zeile wandert aus den Details heraus"
-        assert parts[3]["components"] == [{"type": 10, "content": "-# Uploader"}]
+            "keine Uploader-Zeile in den Details"
+        # Links vom Stern steht nichts Sichtbares – aber nie ein leerer Text (400).
+        assert parts[3]["components"] == [{"type": 10, "content": "⠀"}]
         star = parts[3]["accessory"]
-        assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star,             "kein Favorit → leerer Stern"
-    asyncio.run(run())
-
-
-def test_star_section_without_uploader_shows_hint():
-    async def run():
-        parts = _card(build_cog(), footer=None).to_components()[0]["components"]
-        assert parts[3]["components"] == [{"type": 10, "content": f"-# {t('embed.fav_hint')}"}]
+        assert star["label"] == "☆" and star["style"] == 2 and "emoji" not in star, \
+            "kein Favorit → leerer Stern"
     asyncio.run(run())
 
 
@@ -69,8 +64,7 @@ def test_star_below_link_row_when_small_thumbnail_takes_the_spot():
         assert [p["type"] for p in parts] == [9, 9, 1, 1, 1]
         ids = [[b["custom_id"].rsplit(":", 1)[1] for b in p["components"]] for p in parts[2:]]
         assert ids[1:] == [["link"], ["fav"]]
-        # Uploader bleibt dann in den Details
-        assert parts[1]["components"][0]["content"].endswith("-# Uploader")
+        assert parts[1]["components"][0]["content"] == "**Dauer** 3:30", "keine Uploader-Zeile"
     asyncio.run(run())
 
 

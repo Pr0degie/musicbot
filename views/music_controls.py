@@ -21,6 +21,7 @@ _CUSTOM_ID_PREFIX = "musicctl"
 NP_HEADING_ID = 1
 _KEEP = object()   # Sentinel: „Als Nächstes" unverändert lassen
 _FAV_OFF = "☆"     # leerer Stern: Song ist (noch) kein Favorit
+_BLANK = "\u2800"  # Braille-Leerzeichen: unsichtbar, für Discord aber kein leerer Text
 
 _YT_THUMB = re.compile(r"^https?://i\d?\.ytimg\.com/vi(?:_webp)?/([A-Za-z0-9_-]{11})/")
 _YT_URL = re.compile(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})")
@@ -67,10 +68,10 @@ class MusicControlView(LayoutView):
     Aufbau (ein Container in Akzentfarbe):
       Section  [Titel, Fortschrittsbalken]        → Accessory: grauer Button mit rotem ❌ (= !clear)
       MediaGallery [Video-Thumbnail 320×180]      (nur YouTube, siehe compact_card_image)
-      TextDisplay [Details, Als Nächstes, Uploader]
+      TextDisplay [Details, Als Nächstes]
         – ohne YouTube-Bild als Section mit kleinem Thumbnail-Accessory wie bisher
         – mit Song-Link als Section, Accessory: grauer 🔗-Button (Link zum Kopieren)
-      Section  [Uploader-Zeile]                   → Accessory: ⭐ (Favorit), direkt unter dem 🔗
+      Section  [unsichtbarer Text]                → Accessory: ⭐ (Favorit), direkt unter dem 🔗
       ActionRow [Zurück, Pause/Fortsetzen, Skip, Autoplay, Loop]
       ActionRow [🔗]                              (nur wenn das Thumbnail den Accessory-Platz belegt)
       ActionRow [⭐]                              (ebenso, dann unter der 🔗-Zeile)
@@ -99,7 +100,7 @@ class MusicControlView(LayoutView):
     """
 
     def __init__(self, music_cog, ctx, song=None, *, heading="🎵", body=None,
-                 details=None, footer=None, up_next=None, thumbnail=None, accent=0x1db954, link=None):
+                 details=None, up_next=None, thumbnail=None, accent=0x1db954, link=None):
         super().__init__(timeout=None)
         self.music_cog = music_cog
         self.ctx = ctx
@@ -145,7 +146,7 @@ class MusicControlView(LayoutView):
         if self._body:
             self._top.add_item(self._body)
         container = Container(self._top, accent_colour=accent)
-        self._details_base, self._footer, self._up_next = details, footer, up_next
+        self._details_base, self._up_next = details, up_next
         self._details = None
         # Das Thumbnail-Accessory hat bei Discord eine feste, kleine Größe; größer
         # geht nur als Galeriebild zwischen Balken und Details.
@@ -158,9 +159,6 @@ class MusicControlView(LayoutView):
         thumb_accessory = bool(
             not image and isinstance(thumbnail, str) and thumbnail.startswith(("http://", "https://"))
         )
-        # ⭐ direkt unter dem 🔗: eine eigene Section, deren Text die
-        # Uploader-Zeile ist (sie wandert dafür aus den Details heraus).
-        self._footer_below = bool(details and not thumb_accessory and self.link and self.fav)
         if details:
             self._details = TextDisplay(self._details_text())
             if thumb_accessory:
@@ -169,9 +167,12 @@ class MusicControlView(LayoutView):
                 # 🔗 rechts neben den Details – wie das ❌ am Titel, die Karte wird nicht höher.
                 container.add_item(Section(self._details, accessory=self.link))
                 link_placed = True
-                if self._footer_below:
-                    below = f"-# {footer}" if footer else f"-# {t('embed.fav_hint')}"
-                    container.add_item(Section(TextDisplay(below), accessory=self.fav))
+                if self.fav:
+                    # ⭐ direkt unter dem 🔗: eine eigene Section. Sie braucht einen
+                    # Text, sichtbar soll dort aber nichts stehen (User 28.11.2026) –
+                    # leer lehnt Discord die ganze Nachricht ab (400), daher das
+                    # unsichtbare Braille-Leerzeichen.
+                    container.add_item(Section(TextDisplay(_BLANK), accessory=self.fav))
                     fav_placed = True
             else:
                 container.add_item(self._details)
@@ -199,15 +200,13 @@ class MusicControlView(LayoutView):
             self._body.content = text
 
     def _details_text(self):
-        """Details-Zeile + „Als Nächstes" + klein gesetzter Uploader."""
+        """Details-Zeile + „Als Nächstes"."""
         lines = [self._details_base]
         if self._up_next:
             title = discord.utils.escape_markdown(self._up_next)
             if len(title) > 80:
                 title = title[:79] + "…"
             lines.append(f"**{t('embed.up_next')}** {title}")
-        if self._footer and not self._footer_below:
-            lines.append(f"-# {self._footer}")
         return "\n".join(lines)
 
     def sync_state(self, up_next=_KEEP) -> bool:

@@ -201,6 +201,5 @@
   "error.fav_invalid_number": "❌ Ungültige Nummer – es gibt {count} Favoriten (`!favs` zeigt sie).",
   "error.fav_usage": "❌ Verwendung: `!favs`, `!favs play` oder `!favs remove <n>`.",
   "embed.favorites": "⭐ Favoriten ({count})",
-  "embed.favorites_footer": "!favs play – alle einreihen · !favs remove <n> – entfernen",
-  "embed.fav_hint": "Favoriten: !favs"
+  "embed.favorites_footer": "!favs play – alle einreihen · !favs remove <n> – entfernen"
 }
